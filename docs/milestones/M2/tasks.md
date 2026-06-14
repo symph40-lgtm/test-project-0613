@@ -2,7 +2,7 @@
 
 ---
 
-## [ ] Task T001 — positions DB 마이그레이션
+## [x] Task T001 — positions DB 마이그레이션
 
 **Description:** `positions` 테이블을 생성하고 RLS 정책을 적용한다.
 
