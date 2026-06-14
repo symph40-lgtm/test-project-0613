@@ -61,7 +61,7 @@
 
 ---
 
-## [ ] Task T003 — /positions 실제 DB 조회 + 종목 편집
+## [x] Task T003 — /positions 실제 DB 조회 + 종목 편집
 
 **Description:** `/positions` 페이지를 실제 DB 데이터로 연결한다. 목업 데이터 제거, Server Component + Client Component 분리, 종목 추가·삭제·손익률 보완 편집 구현.
 
