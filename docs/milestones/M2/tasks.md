@@ -105,7 +105,7 @@
 
 ---
 
-## [ ] Task T004 — risk_lines DB 마이그레이션 + 위험선 추천·저장
+## [x] Task T004 — risk_lines DB 마이그레이션 + 위험선 추천·저장
 
 **Description:** `risk_lines` 테이블을 생성하고, 추천 위험선 계산 로직을 구현하며, `/positions/risk-line` 을 실제 DB에 연결한다.
 
