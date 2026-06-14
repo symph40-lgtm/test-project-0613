@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AgentationDev from "./agentation-dev";
 
 export const metadata: Metadata = {
   title: "스탁가드 — 리스크 관제",
@@ -14,7 +15,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full">
-      <body className="min-h-full bg-canvas text-ink antialiased">{children}</body>
+      <body className="min-h-full bg-canvas text-ink antialiased">
+        {children}
+        <AgentationDev />
+      </body>
     </html>
   );
 }
