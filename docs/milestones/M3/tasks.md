@@ -2,7 +2,7 @@
 
 ---
 
-## [ ] Task T001 — 패키지 설치 + 환경 변수 + DB 마이그레이션
+## [x] Task T001 — 패키지 설치 + 환경 변수 + DB 마이그레이션
 
 **Description:** M3에 필요한 npm 패키지를 설치하고, 환경 변수를 `.env.local`에 추가하고, `briefing_snapshots` 테이블을 생성한다.
 
