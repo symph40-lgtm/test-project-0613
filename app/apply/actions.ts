@@ -97,3 +97,25 @@ export async function getApplicationStatus(
   if (error || !data) return null;
   return data as ApplicationStatus;
 }
+
+export type LookupState = { error: string } | null;
+
+export async function lookupByEmail(
+  _prevState: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  const email = (formData.get("email") as string)?.trim();
+  if (!email) return { error: "이메일을 입력해주세요." };
+
+  const app = await getApplicationStatus(email);
+  if (!app) return { error: "해당 이메일로 접수된 신청이 없습니다." };
+
+  const cookieStore = await cookies();
+  cookieStore.set("applicant_email", email, {
+    httpOnly: true,
+    maxAge: 60 * 60 * 24 * 7,
+    path: "/",
+    sameSite: "lax",
+  });
+  redirect("/apply/status");
+}

@@ -1,22 +1,16 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CircleDot, CheckCircle2, XCircle } from "lucide-react";
 import { PageShell, Disclaimer } from "../../_components/Shell";
 import { ButtonLink } from "../../_components/Button";
-import { Card, Field, MetaRow, StateNote } from "../../_components/primitives";
+import { Card, MetaRow } from "../../_components/primitives";
 import { getApplicationStatus } from "../actions";
 import type { ApplicationStatus } from "../actions";
+import EmailLookupForm from "./EmailLookupForm";
 
-export default async function StatusPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ email?: string }>;
-}) {
-  const params = await searchParams;
+export default async function StatusPage() {
   const cookieStore = await cookies();
-  const cookieEmail = cookieStore.get("applicant_email")?.value;
-  const email = cookieEmail || params.email;
+  const email = cookieStore.get("applicant_email")?.value;
 
   if (!email) {
     return (
@@ -117,42 +111,4 @@ function ApplicationStatusCard({ application }: { application: ApplicationStatus
   );
 }
 
-function EmailLookupForm({ notFound }: { notFound?: boolean }) {
-  return (
-    <div className="space-y-5">
-      {notFound ? (
-        <StateNote tone="error" title="신청 내역을 찾을 수 없습니다.">
-          입력한 이메일로 신청 내역이 없습니다. 이메일을 확인하거나 새로 신청해주세요.
-        </StateNote>
-      ) : (
-        <p className="text-[17px] leading-[1.47] text-ink-80">
-          신청 시 입력한 이메일로 현재 상태를 조회합니다.
-        </p>
-      )}
 
-      <form method="get" action="/apply/status" className="space-y-4">
-        <Field
-          label="이메일"
-          name="email"
-          type="email"
-          placeholder="hong@example.com"
-          required
-        />
-        <div className="flex gap-3">
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center rounded-full bg-guard px-[22px] py-[11px] text-[17px] text-white transition-transform active:scale-95"
-          >
-            상태 조회
-          </button>
-          <Link
-            href="/apply"
-            className="inline-flex items-center justify-center px-[22px] py-[11px] text-[17px] text-guard"
-          >
-            신청하기
-          </Link>
-        </div>
-      </form>
-    </div>
-  );
-}
