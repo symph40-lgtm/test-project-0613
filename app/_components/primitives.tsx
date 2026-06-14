@@ -128,9 +128,10 @@ export function MetaRow({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/* 입력 필드 (목업 — 비제어, 시각 표현용) */
+/* 입력 필드 */
 export function Field({
   label,
+  name,
   placeholder,
   defaultValue,
   required,
@@ -138,6 +139,7 @@ export function Field({
   hint,
 }: {
   label: string;
+  name?: string;
   placeholder?: string;
   defaultValue?: string;
   required?: boolean;
@@ -152,6 +154,7 @@ export function Field({
       </span>
       <input
         type={type}
+        name={name}
         placeholder={placeholder}
         defaultValue={defaultValue}
         className="h-11 w-full rounded-[8px] border border-hairline bg-canvas px-3.5 text-[16px] outline-none placeholder:text-ink-48 focus:border-guard"
