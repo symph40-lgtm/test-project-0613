@@ -26,7 +26,7 @@
 
 ---
 
-## [ ] Task T002 — 섹터 추천·위험도 계산 로직 + /onboarding DB 연결
+## [x] Task T002 — 섹터 추천·위험도 계산 로직 + /onboarding DB 연결
 
 **Description:** 섹터 lookup 함수와 위험도 계산 pure function을 작성하고, `/onboarding` 에서 종목을 positions 테이블에 저장하는 서버 액션을 구현한다.
 

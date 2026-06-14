@@ -1,0 +1,127 @@
+// 섹터 lookup — 주요 한국·미국 종목 매핑
+const SECTOR_MAP: Record<string, string> = {
+  // 반도체
+  삼성전자: "반도체",
+  SK하이닉스: "반도체",
+  DB하이텍: "반도체",
+  하나마이크론: "반도체",
+  이오테크닉스: "반도체",
+  원익IPS: "반도체",
+  리노공업: "반도체",
+  SOXL: "반도체",
+  SOXS: "반도체",
+  SOXX: "반도체",
+  SMH: "반도체",
+  PSI: "반도체",
+  NVDA: "반도체",
+  AMD: "반도체",
+  INTC: "반도체",
+  MU: "반도체",
+  AVGO: "반도체",
+  QCOM: "반도체",
+  TSMC: "반도체",
+  "TSM": "반도체",
+  // 2차전지
+  "LG에너지솔루션": "2차전지",
+  삼성SDI: "2차전지",
+  SK이노베이션: "2차전지",
+  "POSCO홀딩스": "2차전지",
+  에코프로비엠: "2차전지",
+  에코프로: "2차전지",
+  엘앤에프: "2차전지",
+  포스코퓨처엠: "2차전지",
+  // 방산
+  "한화에어로스페이스": "방산",
+  "한화에어로": "방산",
+  LIG넥스원: "방산",
+  현대로템: "방산",
+  풍산: "방산",
+  빅텍: "방산",
+  // 금융
+  삼성생명: "금융",
+  삼성화재: "금융",
+  KB금융: "금융",
+  신한지주: "금융",
+  하나금융지주: "금융",
+  우리금융지주: "금융",
+  메리츠금융지주: "금융",
+  // IT/플랫폼
+  카카오: "IT",
+  네이버: "IT",
+  넥슨: "IT",
+  크래프톤: "IT",
+  AAPL: "IT",
+  MSFT: "IT",
+  GOOGL: "IT",
+  GOOG: "IT",
+  META: "IT",
+  AMZN: "IT",
+  // 전기차
+  TSLA: "전기차",
+  // 바이오
+  셀트리온: "바이오",
+  "삼성바이오로직스": "바이오",
+  유한양행: "바이오",
+  // ETF — 미국
+  SPY: "ETF-미국",
+  IVV: "ETF-미국",
+  VOO: "ETF-미국",
+  IWM: "ETF-미국",
+  DIA: "ETF-미국",
+  QQQ: "ETF-기술",
+  QQQL: "ETF-기술",
+  TQQQ: "ETF-기술",
+  ARKK: "ETF-기술",
+  XLK: "ETF-기술",
+  // ETF — 한국
+  KODEX200: "ETF-한국",
+  TIGER200: "ETF-한국",
+};
+
+export function getSectorHint(ticker: string): string | null {
+  return SECTOR_MAP[ticker.trim()] ?? null;
+}
+
+type RiskInput = {
+  weight: number;
+  is_leverage: boolean;
+  pnl?: number | null;
+};
+
+export function calculateRiskLevel(
+  p: RiskInput,
+): "취약" | "주의" | "안정" {
+  const pnl = p.pnl ?? 0;
+  if (p.is_leverage) {
+    if (p.weight >= 20 && pnl <= -10) return "취약";
+    if (p.weight >= 15 || pnl <= -5) return "주의";
+    return "안정";
+  } else {
+    if (p.weight >= 30 && pnl <= -10) return "취약";
+    if (pnl <= -5) return "주의";
+    return "안정";
+  }
+}
+
+type PositionForRecommend = {
+  weight: number;
+  is_leverage: boolean;
+  sector?: string | null;
+  risk_level?: "취약" | "주의" | "안정" | null;
+};
+
+// 현재 positions 기반으로 활성화를 추천할 trigger_key 목록 반환
+export function recommendRiskLines(
+  positions: PositionForRecommend[],
+): string[] {
+  const recommended = new Set<string>();
+
+  for (const p of positions) {
+    if (p.weight > 10) recommended.add("low");
+    if (p.is_leverage) recommended.add("drop5");
+    if (p.is_leverage && p.sector === "반도체") recommended.add("futures");
+    if (p.weight > 20 && p.risk_level === "취약") recommended.add("rebound");
+  }
+
+  return [...recommended];
+}
