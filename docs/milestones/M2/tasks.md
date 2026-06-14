@@ -191,7 +191,7 @@
 
 ---
 
-## [ ] Task T006 — alert_channels DB + 이메일 OTP 인증 흐름
+## [x] Task T006 — alert_channels DB + 이메일 OTP 인증 흐름
 
 **Description:** `alert_channels` 테이블을 생성하고, `/positions/risk-line` 의 알림 채널 섹션에 실제 OTP 인증 흐름을 구현한다. 이메일 채널 완전 구현, SMS 채널은 DB + UI만 준비 (발송 deferred).
 
