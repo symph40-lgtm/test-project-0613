@@ -23,6 +23,13 @@ dist/
 build/
 coverage/
 
+# Next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+
 # Python cache
 __pycache__/
 *.py[cod]
