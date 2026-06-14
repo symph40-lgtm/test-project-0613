@@ -1,26 +1,65 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
 @import "tailwindcss";
+
+/*
+  스탁가드 디자인 토큰 — docs/DESIGN.md 기준.
+  단일 액센트(Guard Blue), 라이트/다크 결정 타일, Pretendard.
+  Tailwind v4 @theme: --color-* 는 bg-/text-/border- 유틸을 생성한다.
+*/
+@theme {
+  --font-sans: "Pretendard", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Brand & accent — 유일한 액션 색 */
+  --color-guard: #0066cc;
+  --color-guard-focus: #0071e3;
+  --color-guard-on-dark: #2997ff;
+
+  /* Text */
+  --color-ink: #1d1d1f;
+  --color-ink-80: #333333;
+  --color-ink-48: #7a7a7a;
+  --color-body-muted: #cccccc;
+
+  /* Surfaces */
+  --color-canvas: #ffffff;
+  --color-parchment: #f5f5f7;
+  --color-pearl: #fafafc;
+  --color-tile-1: #272729;
+  --color-tile-2: #2a2a2c;
+  --color-tile-3: #252527;
+
+  /* Hairlines */
+  --color-divider: #f0f0f0;
+  --color-hairline: #e0e0e0;
+
+  /* Radius scale */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+
+  /* 단일 아티팩트 섀도 — 차트/포지션 오브젝트에만 */
+  --shadow-artifact: 3px 5px 30px 0 rgba(0, 0, 0, 0.22);
+}
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1d1d1f;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.374px;
+}
+
+/* 결정 타일 헤드라인의 통제된 트래킹 */
+.headline-tight {
+  letter-spacing: -0.28px;
 }
