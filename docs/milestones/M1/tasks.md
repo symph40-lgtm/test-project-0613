@@ -5,7 +5,7 @@
 
 ---
 
-## [ ] Task T001 - Supabase 클라이언트 초기화
+## [x] Task T001 - Supabase 클라이언트 초기화
 
 **Description:** Next.js App Router + SSR에서 Supabase를 안전하게 사용하기 위한 server/client/admin 초기화 파일을 작성하고 환경 변수 가이드를 제공한다.
 
