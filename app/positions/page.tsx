@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { ButtonLink } from "../_components/Button";
@@ -9,7 +8,6 @@ import { RiskBadge, StateNote } from "../_components/primitives";
 import { positions as seed } from "../_data/mock";
 
 export default function PositionsPage() {
-  const router = useRouter();
   const [rows] = useState(seed);
   const empty = rows.length === 0;
 
