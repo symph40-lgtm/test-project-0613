@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/intraday",
+      "schedule": "0 1 * * 1-5"
+    },
+    {
+      "path": "/api/cron/intraday",
+      "schedule": "0 4 * * 1-5"
+    },
+    {
+      "path": "/api/cron/intraday",
+      "schedule": "30 5 * * 1-5"
+    }
+  ]
+}
