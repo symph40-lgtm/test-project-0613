@@ -230,7 +230,7 @@
 
 ---
 
-## [ ] Task T007 — /positions/intraday DB 연결
+## [x] Task T007 — /positions/intraday DB 연결
 
 **Description:** `/positions/intraday` 에서 입력한 체결을 DB에 저장하고, positions 테이블의 weight를 갱신한다.
 
