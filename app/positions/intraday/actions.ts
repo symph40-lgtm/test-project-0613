@@ -113,6 +113,14 @@ export async function applyFills(fills: Fill[]): Promise<{ error?: string }> {
     }
   }
 
+  // 오늘 briefing_snapshots 캐시 삭제 → /briefing 재방문 시 갱신된 포지션으로 재판단
+  const today = new Date().toISOString().slice(0, 10);
+  await supabase
+    .from("briefing_snapshots")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("date", today);
+
   redirect("/briefing");
 }
 

@@ -137,7 +137,7 @@ export default function IntradayClient({
           disabled={empty || isPending}
           onClick={handleSubmit}
         >
-          {isPending ? "처리 중…" : "최신 상태로 다시 판단"}
+          {isPending ? "재판단 중…" : "체결 반영 + 재판단"}
         </Button>
       </div>
 

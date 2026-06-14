@@ -57,7 +57,7 @@
 
 ---
 
-## [ ] Task T003 — 알림 메시지 생성 + 이메일 발송 API
+## [x] Task T003 — 알림 메시지 생성 + 이메일 발송 API
 
 **Description:** AlertTrigger를 FR-013 형식의 메시지로 변환하고, 이메일로 발송 후 alerts 테이블에 저장하는 API 라우트를 구현한다.
 
