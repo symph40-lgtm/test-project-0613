@@ -32,7 +32,7 @@
 
 ---
 
-## [ ] Task T002 - DB 스키마 마이그레이션 (applications + user_roles)
+## [x] Task T002 - DB 스키마 마이그레이션 (applications + user_roles)
 
 **Description:** 이용 신청 정보를 저장하는 `applications` 테이블과 관리자/사용자 역할을 구분하는 `user_roles` 테이블을 Supabase에 마이그레이션한다. RLS 정책까지 포함한다.
 
@@ -59,7 +59,7 @@
 
 ---
 
-## [ ] Task T003 - 최초 관리자 시드
+## [x] Task T003 - 최초 관리자 시드
 
 **Description:** 서비스 운영 관리자 계정을 부여하는 방법을 확정하고, 재현 가능한 시드 스크립트를 작성한다.
 
