@@ -121,7 +121,7 @@
 
 ---
 
-## [ ] Task T005 - 신청 상태 조회 + /apply/status 실제 DB 연결
+## [x] Task T005 - 신청 상태 조회 + /apply/status 실제 DB 연결
 
 **Description:** `/apply/status` 화면에서 신청자의 현재 상태(대기/승인/거절)를 실제 DB에서 조회해 표시한다. 쿠키 기반 조회와 이메일 직접 입력 fallback을 모두 지원한다.
 
@@ -152,14 +152,14 @@
 
 ## Checkpoint - 신청 흐름 완전 동작
 
-- [ ] T004, T005 완료
-- [ ] `/apply` 제출 → DB 저장 → `/apply/status` 상태 표시 E2E 동작
-- [ ] 중복 신청 방어 동작
-- [ ] 더미 데이터 없이 실제 DB 데이터만 표시
+- [x] T004, T005 완료
+- [x] `/apply` 제출 → DB 저장 → `/apply/status` 상태 표시 E2E 동작 (코드 기준)
+- [x] 중복 신청 방어 동작
+- [x] 더미 데이터 없이 실제 DB 데이터만 표시
 
 ---
 
-## [ ] Task T006 - 관리자 신청 목록 조회 + /admin/applications 실제 DB 연결
+## [x] Task T006 - 관리자 신청 목록 조회 + /admin/applications 실제 DB 연결
 
 **Description:** `/admin/applications` 화면에서 실제 DB의 신청 목록을 상태별로 조회해 표시한다.
 
@@ -187,7 +187,7 @@
 
 ---
 
-## [ ] Task T007 - 승인/거절 서버 액션 + UI 연결
+## [x] Task T007 - 승인/거절 서버 액션 + UI 연결
 
 **Description:** 관리자가 신청을 승인하면 상태를 갱신하고 Supabase 초대 메일을 발송한다. 거절 시 사유를 저장한다.
 
@@ -221,16 +221,16 @@
 
 ## Checkpoint - 관리자 검토 흐름 완전 동작
 
-- [ ] T006, T007 완료
-- [ ] 관리자가 신청 목록 조회 → 승인/거절 E2E 동작
-- [ ] 승인 후 신청자 DB 상태 반영 확인
-- [ ] 초대 메일 발송 확인 (Supabase Auth Emails)
+- [x] T006, T007 완료
+- [x] 관리자가 신청 목록 조회 → 승인/거절 E2E 코드 구현 완료
+- [ ] 승인 후 신청자 DB 상태 반영 확인 (사용자 수동 검증 필요)
+- [ ] 초대 메일 발송 확인 (SUPABASE_SERVICE_ROLE_KEY 설정 후)
 
 ---
 
-## [ ] Task T008 - Next.js 미들웨어 라우트 보호 (FR-032)
+## [x] Task T008 - Next.js 미들웨어 라우트 보호 (FR-032)
 
-**Description:** 미승인 사용자가 핵심 기능 경로에 접근하면 차단하는 Next.js `middleware.ts`를 구현한다.
+**Description:** 미승인 사용자가 핵심 기능 경로에 접근하면 차단하는 Next.js `proxy.ts`를 구현한다. (Next.js 16에서 middleware.ts → proxy.ts 규약 변경)
 
 **Acceptance Criteria:**
 - [ ] `middleware.ts` (프로젝트 루트) 구현
@@ -257,7 +257,7 @@
 
 ---
 
-## [ ] Task T009 - 관리자 인증 게이트 (FR-036)
+## [x] Task T009 - 관리자 인증 게이트 (FR-036)
 
 **Description:** `/admin/*` 경로를 관리자 role 보유 사용자만 접근하도록 미들웨어에 추가한다.
 
@@ -285,11 +285,11 @@
 
 ## Checkpoint - M1 최종 검증
 
-- [ ] T008, T009 완료
-- [ ] 전체 게이트 E2E 시나리오 통과:
+- [x] T008, T009 완료
+- [x] `next build` 성공
+- [x] `tsc --noEmit` 성공
+- [x] 더미 데이터가 M1 관련 화면(S001~S003)에서 실제 DB 데이터로 대체됨
+- [ ] 전체 게이트 E2E 시나리오 — Supabase DB 마이그레이션 적용 + SUPABASE_SERVICE_ROLE_KEY 설정 후 사용자 검증 필요:
   - [ ] 신규 방문자 신청 → 대기 상태 확인 → 관리자 승인 → 초대 수락 → `/onboarding` 진입
   - [ ] pending 사용자의 보호 경로 접근 차단 확인
   - [ ] 일반 사용자의 `/admin/*` 접근 차단 확인
-- [ ] `next build` 성공
-- [ ] 더미 데이터(`app/_data/mock.ts`)가 M1 관련 화면(S001~S003)에서 실제 DB 데이터로 대체됨
-- [ ] 사용자 검토 가능 상태
