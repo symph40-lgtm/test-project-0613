@@ -85,7 +85,7 @@
 
 ---
 
-## [ ] Task T003 — 오판 분석 LLM 생성 + `/journal/misjudgment` 실데이터 연결
+## [x] Task T003 — 오판 분석 LLM 생성 + `/journal/misjudgment` 실데이터 연결
 
 **Description:** "따르지 않음 + 손실" 기록 중 가장 최근 건을 선택해 LLM으로 오판 원인·바뀐 변수·다음 반영안을 생성하고 실데이터로 표시한다. "이번 사례 제외"는 excluded_log_ids에 추가한다.
 
