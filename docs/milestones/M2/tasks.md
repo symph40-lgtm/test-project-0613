@@ -150,7 +150,7 @@
 
 ---
 
-## [ ] Task T005 — principles DB 마이그레이션 + /principles DB 연결
+## [x] Task T005 — principles DB 마이그레이션 + /principles DB 연결
 
 **Description:** `principles` 테이블을 생성하고 `/principles` 를 실제 DB에 연결한다.
 
