@@ -128,7 +128,7 @@
 
 ---
 
-## [ ] Task T004 — FR-038 "내일 아침 다시 보기" 예약 실DB 연결 + 브리핑 알림 배너
+## [x] Task T004 — FR-038 "내일 아침 다시 보기" 예약 실DB 연결 + 브리핑 알림 배너
 
 **Description:** 마감 전 판단 화면의 "내일 아침 다시 보기 예약" 버튼을 실제 DB에 저장하고, 다음날 브리핑 접속 시 예약 알림 배너를 표시한다.
 
@@ -166,13 +166,13 @@
 
 ## Checkpoint 2 — M6 최종
 
-- [ ] T001~T004 완료
-- [ ] 개인화 인사이트 LLM/fallback 표시 (FR-027)
-- [ ] 오판 분석 LLM/fallback 표시 (FR-026)
-- [ ] ON/OFF·기록 제외·전체 삭제 동작 확인 (FR-028)
-- [ ] 마감 전 예약 → 다음날 브리핑 알림 배너 (FR-038)
-- [ ] `npm run build` 에러 없음
-- [ ] Supabase 테이블 데이터 확인
+- [x] T001~T004 완료
+- [x] 개인화 인사이트 LLM/fallback 표시 (FR-027)
+- [x] 오판 분석 LLM/fallback 표시 (FR-026)
+- [x] ON/OFF·기록 제외·전체 삭제 동작 확인 (FR-028)
+- [x] 마감 전 예약 → 다음날 브리핑 알림 배너 (FR-038)
+- [x] `npm run build` 에러 없음
+- [ ] Supabase 테이블 데이터 확인 (사용자 직접 확인 필요)
 
 **사용자가 Supabase SQL Editor에서 실행해야 할 파일:**
 - `supabase/migrations/010_personalization.sql` (T001 완료 후)

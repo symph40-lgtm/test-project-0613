@@ -1,14 +1,22 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { History } from "lucide-react";
+import { History, X } from "lucide-react";
 import { GlobalNav, SubNav, Disclaimer } from "../_components/Shell";
 import { ButtonLink, Button } from "../_components/Button";
 import { Tile, ActionList, StateNote } from "../_components/primitives";
 import type { BriefingSnapshot } from "@/lib/market/types";
 
-export default function BriefingClient({ snapshot }: { snapshot: BriefingSnapshot | null }) {
+export default function BriefingClient({
+  snapshot,
+  hasBookmark,
+}: {
+  snapshot: BriefingSnapshot | null;
+  hasBookmark: boolean;
+}) {
   const router = useRouter();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const ai = snapshot?.ai_output;
   const isFallback = snapshot?.is_fallback ?? false;
   const noData = !snapshot || !ai;
@@ -26,6 +34,20 @@ export default function BriefingClient({ snapshot }: { snapshot: BriefingSnapsho
       />
 
       <main className="flex-1">
+        {hasBookmark && !bannerDismissed && (
+          <div className="flex items-center justify-between gap-3 bg-guard/10 px-5 py-3 text-[14px] text-ink-80">
+            <span>
+              어제 마감 전 판단에서 오늘 브리핑을 예약했습니다. 오늘 안내를 확인해보세요.
+            </span>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="shrink-0 text-ink-48 hover:text-ink-80"
+              aria-label="닫기"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         {noData ? (
           <div className="mx-auto w-full max-w-[820px] px-4 py-10 sm:px-6">
             <div className="space-y-4">

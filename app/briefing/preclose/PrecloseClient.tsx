@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock } from "lucide-react";
 import { PageShell, Disclaimer } from "../../_components/Shell";
 import { Button } from "../../_components/Button";
 import { Card, SectionLabel, MetaRow } from "../../_components/primitives";
+import { bookmarkNextBriefing } from "./actions";
 import type { BriefingSnapshot, AiPrecloseOutput } from "@/lib/market/types";
 
 export default function PrecloseClient({
@@ -17,6 +18,7 @@ export default function PrecloseClient({
 }) {
   const router = useRouter();
   const [booked, setBooked] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const ai = snapshot?.ai_output;
   const riskScore = snapshot?.risk_score ?? 0;
 
@@ -114,10 +116,16 @@ export default function PrecloseClient({
         <Button
           variant="primary"
           size="lg"
-          onClick={() => setBooked(true)}
+          disabled={booked || isPending}
+          onClick={() => {
+            startTransition(async () => {
+              await bookmarkNextBriefing();
+              setBooked(true);
+            });
+          }}
         >
           <CalendarClock size={18} />
-          {booked ? "내일 아침 다시 보기 예약됨" : "내일 아침 다시 보기 예약"}
+          {booked ? "내일 아침 다시 보기 예약됨" : isPending ? "예약 중…" : "내일 아침 다시 보기 예약"}
         </Button>
         {booked && (
           <p className="mt-3 text-[14px] text-ink-80">
