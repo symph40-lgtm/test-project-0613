@@ -28,7 +28,7 @@
 
 ---
 
-## [ ] Task T002 — 알림 트리거 평가 로직
+## [x] Task T002 — 알림 트리거 평가 로직
 
 **Description:** 시장 데이터 + 사용자 risk_lines를 비교해 발동 조건을 평가하고 알림 강도를 분류하는 pure function을 구현한다.
 
