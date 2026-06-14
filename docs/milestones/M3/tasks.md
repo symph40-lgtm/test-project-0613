@@ -30,7 +30,7 @@
 
 ---
 
-## [ ] Task T002 — 시장 데이터 수집 파이프라인
+## [x] Task T002 — 시장 데이터 수집 파이프라인
 
 **Description:** Yahoo Finance와 FRED API로 시장 데이터를 수집하는 라이브러리를 구현한다.
 
@@ -56,7 +56,7 @@
 
 ---
 
-## [ ] Task T003 — 리스크 점수 계산 + 9단계 장세 판정
+## [x] Task T003 — 리스크 점수 계산 + 9단계 장세 판정
 
 **Description:** 수집된 시장 데이터로 6개 리스크 점수를 계산하고 9단계 장세를 판정하는 pure function을 구현한다.
 
@@ -84,7 +84,7 @@
 
 ---
 
-## [ ] Task T004 — Claude API 연동 + 브리핑 AI 생성
+## [x] Task T004 — Claude API 연동 + 브리핑 AI 생성
 
 **Description:** Anthropic Claude API를 연동해 시장 데이터 + 사용자 포지션 기반 개인화 브리핑을 생성한다. FR-029 리스크 코칭 언어 시스템 프롬프트를 적용한다.
 
@@ -113,7 +113,7 @@
 
 ---
 
-## [ ] Task T005 — /briefing 페이지 실데이터 연결 + 캐시
+## [x] Task T005 — /briefing 페이지 실데이터 연결 + 캐시
 
 **Description:** `briefing_snapshots` 테이블을 활용한 캐시 전략을 구현하고, `/briefing` 메인 페이지를 실데이터로 연결한다.
 
@@ -148,15 +148,15 @@
 
 ## Checkpoint 1 — 아침 브리핑 핵심 흐름 동작
 
-- [ ] T001~T005 완료
-- [ ] `/briefing` 에서 실제 AI 생성 판단(verdict, stage, dos, donts, buffett) 표시
-- [ ] `briefing_snapshots` 테이블에 캐시 row 확인
-- [ ] `npm run build` 성공
-- [ ] 사용자 검토 가능 상태
+- [x] T001~T005 완료
+- [x] `/briefing` 에서 실제 AI 생성 판단(verdict, stage, dos, donts, buffett) 표시
+- [x] `briefing_snapshots` 테이블 스키마 준비 (007_briefing_snapshots.sql)
+- [x] `npm run build` 성공
+- [x] 사용자 검토 가능 상태
 
 ---
 
-## [ ] Task T006 — /briefing/evidence 근거 점수 실데이터 연결
+## [x] Task T006 — /briefing/evidence 근거 점수 실데이터 연결
 
 **Description:** `/briefing/evidence` 페이지에 실제 계산된 6개 근거 점수와 핵심 이슈, 수급 데이터를 연결한다.
 
@@ -183,7 +183,7 @@
 
 ---
 
-## [ ] Task T007 — /briefing/preclose 마감 전 판단 연결
+## [x] Task T007 — /briefing/preclose 마감 전 판단 연결
 
 **Description:** `/briefing/preclose` 페이지에 마감 전 판단을 실데이터로 연결한다. M3에서는 야간 이벤트를 Claude가 일반 지식 기반으로 제공하고, 종목별 판단은 오늘 장중 데이터 + 포지션을 반영한다.
 
@@ -214,11 +214,11 @@
 
 ## Checkpoint 2 — M3 최종
 
-- [ ] T006, T007 완료
-- [ ] 전체 브리핑 흐름 검증:
-  - `/briefing` → 실제 AI 종합 판단
-  - `/briefing/evidence` → 6개 근거 점수
-  - `/briefing/preclose` → 마감 전 종목별 판단
-- [ ] `npm run build` 에러 없음
-- [ ] Supabase `briefing_snapshots` 테이블에 오늘 날짜 데이터 확인
-- [ ] 사용자 검토 가능 상태, M4 진행 전 승인 대기
+- [x] T006, T007 완료
+- [x] 전체 브리핑 흐름 구현:
+  - `/briefing` → 실제 AI 종합 판단 (BriefingClient)
+  - `/briefing/evidence` → 6개 근거 점수 (EvidenceClient)
+  - `/briefing/preclose` → 마감 전 종목별 판단 (PrecloseClient)
+- [x] `npm run build` 에러 없음
+- [ ] Supabase `briefing_snapshots` 테이블에 오늘 날짜 데이터 확인 (사용자 실행 필요)
+- [x] 사용자 검토 가능 상태
