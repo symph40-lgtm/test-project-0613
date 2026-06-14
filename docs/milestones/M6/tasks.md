@@ -2,7 +2,7 @@
 
 ---
 
-## [ ] Task T001 — DB 마이그레이션: personalization_settings + briefing_bookmarks
+## [x] Task T001 — DB 마이그레이션: personalization_settings + briefing_bookmarks
 
 **Description:** 개인화 설정(ON/OFF·기록 제외 목록)과 "내일 아침 다시 보기" 예약을 저장하는 두 테이블을 생성한다.
 
