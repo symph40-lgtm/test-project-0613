@@ -2,7 +2,7 @@
 
 ---
 
-## [ ] Task T001 — DB 마이그레이션: action_logs 테이블
+## [x] Task T001 — DB 마이그레이션: action_logs 테이블
 
 **Description:** 날짜·종목별 행동 기록을 저장하는 `action_logs` 테이블을 생성한다. 안내 내용·실제 행동·따름 여부·이유·4개 시점 결과를 한 row에 저장하며, `briefing_snapshots`와 optional FK로 연결한다.
 
