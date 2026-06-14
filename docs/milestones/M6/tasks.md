@@ -36,7 +36,7 @@
 
 ---
 
-## [ ] Task T002 — 개인화 인사이트 LLM 생성 + `/journal/insights` 실데이터 연결
+## [x] Task T002 — 개인화 인사이트 LLM 생성 + `/journal/insights` 실데이터 연결
 
 **Description:** action_logs 기반으로 AI가 개인화 인사이트를 생성하고, personalization_settings ON/OFF 및 기록 제어(전체 삭제·초기화)를 실데이터로 연결한다.
 
