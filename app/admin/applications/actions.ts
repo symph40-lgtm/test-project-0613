@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendEmail } from "@/lib/email";
 
 export type Application = {
   id: string;
@@ -76,6 +77,13 @@ export async function approveApplication(
     return { success: false, error: "상태 갱신 중 오류가 발생했습니다." };
   }
 
+  // FR-035: 승인 결과 이메일 통지
+  sendEmail({
+    to: app.email,
+    subject: "[스탁가드] 이용 신청이 승인되었습니다",
+    text: `안녕하세요.\n\n스탁가드 이용 신청이 승인되었습니다.\n곧 발송되는 초대 이메일을 통해 서비스에 접속하실 수 있습니다.\n\n감사합니다.\n스탁가드 팀`,
+  }).catch((e) => console.warn("[FR-035] 승인 이메일 발송 오류:", e));
+
   // Supabase 초대 이메일 발송
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(app.email);
 
@@ -98,6 +106,12 @@ export async function rejectApplication(
 ): Promise<{ success: boolean; error?: string }> {
   const admin = createAdminClient();
 
+  const { data: app } = await admin
+    .from("applications")
+    .select("email")
+    .eq("id", id)
+    .single();
+
   const { error } = await admin
     .from("applications")
     .update({ status: "rejected", rejection_reason: reason || null })
@@ -105,6 +119,17 @@ export async function rejectApplication(
 
   if (error) {
     return { success: false, error: "상태 갱신 중 오류가 발생했습니다." };
+  }
+
+  // FR-035: 거절 결과 이메일 통지
+  if (app?.email) {
+    const reasonText = reason ? `\n\n거절 사유: ${reason}` : "";
+    sendEmail({
+      to: app.email,
+      subject: "[스탁가드] 이용 신청 결과 안내",
+      text: `안녕하세요.\n\n아쉽게도 이번에는 스탁가드 이용 신청 승인이 어렵습니다.${reasonText}\n\n추후 다시 신청해 주시기 바랍니다.\n감사합니다.\n스탁가드 팀`,
+    }).catch((e) => console.warn("[FR-035] 거절 이메일 발송 오류:", e));
+
   }
 
   revalidatePath("/admin/applications");
