@@ -104,7 +104,7 @@
 
 ---
 
-## [ ] Task T004 — 장중 체결 → 브리핑 캐시 무효화 + 재판단
+## [x] Task T004 — 장중 체결 → 브리핑 캐시 무효화 + 재판단
 
 **Description:** 장중 체결(applyFills) 완료 후 오늘의 briefing_snapshots 캐시를 삭제해, `/briefing` 재방문 시 갱신된 포지션 기준으로 자동 재계산되게 한다. (SC-004 충족)
 
