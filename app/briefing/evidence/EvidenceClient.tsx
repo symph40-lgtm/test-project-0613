@@ -67,9 +67,20 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
               {ai.coreIssues.join(" · ")}
             </p>
             <TwoAxisMap pressureLevel={pressureLevel} situationLevel={situationLevel} />
-            <p className="mt-3 text-[15px] font-semibold">
-              판단: 압력 {Math.round(pressureLevel * 100)}% · 상황 {situationLevel >= 0.5 ? "악화" : "완화"} 경향
-            </p>
+            {(() => {
+              const v = interpretMap(pressureLevel, situationLevel);
+              return (
+                <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
+                  <p className="text-[15px] font-semibold">{v.headline}</p>
+                  <p className="mt-1 text-[13px] text-ink-80">{v.detail}</p>
+                </div>
+              );
+            })()}
+            <ul className="mt-3 space-y-1 text-[12px] text-ink-48">
+              <li>· 가로축(큰 장세 압력): 왼쪽 = 안정, 오른쪽 = 위험 누적. 시장 구조적 위험 수준.</li>
+              <li>· 세로축(오늘 상황): 위 = 완화(개선), 아래 = 악화(나빠짐). 오늘의 단기 흐름.</li>
+              <li>· 점이 <b>왼쪽 위</b>일수록 좋고, <b>오른쪽 아래</b>일수록 나쁩니다.</li>
+            </ul>
           </Card>
 
           {/* 수급 */}
@@ -111,6 +122,35 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
   );
 }
 
+// 사분면 해석: 압력(x) 낮음 + 상황(y) 완화 = 양호 / 압력 높음 + 악화 = 위험
+function interpretMap(
+  pressureLevel: number,
+  situationLevel: number,
+): { headline: string; detail: string } {
+  const pressureHigh = pressureLevel >= 0.5;
+  const worsening = situationLevel >= 0.5;
+
+  if (!pressureHigh && !worsening)
+    return {
+      headline: "🟢 양호 — 장이 좋은 편입니다",
+      detail: "큰 장세 압력이 낮고 오늘 상황도 개선 흐름입니다. 계획된 비중을 채우기 우호적인 구간입니다.",
+    };
+  if (pressureHigh && worsening)
+    return {
+      headline: "🔴 위험 — 장이 나쁜 편입니다",
+      detail: "구조적 위험이 높은데 오늘 상황도 악화 중입니다. 방어적 대응(비중 축소·현금 확보) 검토 구간입니다.",
+    };
+  if (!pressureHigh && worsening)
+    return {
+      headline: "🟡 주의 — 단기 흔들림",
+      detail: "큰 틀은 안정적이나 오늘 단기 흐름이 나빠지고 있습니다. 추격 매수보다 관망이 도움이 될 수 있습니다.",
+    };
+  return {
+    headline: "🟡 주의 — 압력 누적",
+    detail: "오늘은 버티고 있으나 구조적 위험이 높은 편입니다. 반등 시 비중 정리를 검토할 수 있습니다.",
+  };
+}
+
 function TwoAxisMap({
   pressureLevel,
   situationLevel,
@@ -132,9 +172,12 @@ function TwoAxisMap({
           <span>악화</span>
         </div>
         <div className="relative flex-1">
-          <div className="relative aspect-[16/9] rounded-[8px] border border-hairline bg-pearl">
+          <div className="relative aspect-[16/9] overflow-hidden rounded-[8px] border border-hairline bg-pearl">
             <div className="absolute left-1/2 top-0 h-full w-px bg-hairline" />
             <div className="absolute left-0 top-1/2 h-px w-full bg-hairline" />
+            {/* 사분면 라벨 */}
+            <span className="absolute left-2 top-1.5 text-[11px] font-medium text-ink-48">양호</span>
+            <span className="absolute right-2 bottom-1.5 text-[11px] font-medium text-ink-48">위험</span>
             <div
               className="absolute -translate-x-1/2 -translate-y-1/2"
               style={{ left: `${xPct}%`, top: `${yPct}%` }}
@@ -146,9 +189,9 @@ function TwoAxisMap({
             </div>
           </div>
           <div className="mt-1 flex justify-between text-[12px] text-ink-48">
-            <span>낮음</span>
+            <span>낮음(안정)</span>
             <span>큰 장세 압력</span>
-            <span>높음</span>
+            <span>높음(위험)</span>
           </div>
         </div>
       </div>
