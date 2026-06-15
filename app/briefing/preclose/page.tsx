@@ -1,12 +1,15 @@
 import { getBriefing } from "../actions";
 import { createClient } from "@/lib/supabase/server";
 import { generatePreclose } from "@/lib/ai/briefing";
-import { calculateRiskScores, calculateCompositeScore } from "@/lib/market/risk";
+import { fetchUpcomingUsEvents, hasFredKey } from "@/lib/calendar/fred";
 import PrecloseClient from "./PrecloseClient";
 import type { AiPrecloseOutput, MarketData, RiskScores } from "@/lib/market/types";
 
 export default async function PreClosePage() {
-  const snapshot = await getBriefing();
+  const [snapshot, econEvents] = await Promise.all([
+    getBriefing(),
+    fetchUpcomingUsEvents(5),
+  ]);
 
   let preclose: AiPrecloseOutput | null = null;
 
@@ -31,5 +34,12 @@ export default async function PreClosePage() {
     }
   }
 
-  return <PrecloseClient snapshot={snapshot} preclose={preclose} />;
+  return (
+    <PrecloseClient
+      snapshot={snapshot}
+      preclose={preclose}
+      econEvents={econEvents}
+      fredConfigured={hasFredKey()}
+    />
+  );
 }

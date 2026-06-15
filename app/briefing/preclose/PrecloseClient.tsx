@@ -8,13 +8,26 @@ import { Button } from "../../_components/Button";
 import { Card, SectionLabel, MetaRow } from "../../_components/primitives";
 import { bookmarkNextBriefing } from "./actions";
 import type { BriefingSnapshot, AiPrecloseOutput } from "@/lib/market/types";
+import type { EconEvent } from "@/lib/calendar/fred";
+
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+function fmtEventDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const today = new Date().toISOString().slice(0, 10);
+  const label = dateStr === today ? "오늘" : `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WEEKDAYS[d.getUTCDay()]})`;
+  return label;
+}
 
 export default function PrecloseClient({
   snapshot,
   preclose,
+  econEvents,
+  fredConfigured,
 }: {
   snapshot: BriefingSnapshot | null;
   preclose: AiPrecloseOutput | null;
+  econEvents: EconEvent[];
+  fredConfigured: boolean;
 }) {
   const router = useRouter();
   const [booked, setBooked] = useState(false);
@@ -49,8 +62,30 @@ export default function PrecloseClient({
         </Card>
       )}
 
-      {/* 야간 이벤트 */}
-      {preclose?.nightEvents && preclose.nightEvents.length > 0 && (
+      {/* 주요 경제지표 일정 — 실제 캘린더(FRED) 우선, 없으면 AI 예측 */}
+      {econEvents.length > 0 ? (
+        <Card className="mt-4">
+          <SectionLabel>향후 5일 주요 경제지표 (실제 일정)</SectionLabel>
+          <ul className="divide-y divide-divider">
+            {econEvents.map((e, i) => (
+              <li key={i} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  {e.importance === "high" ? (
+                    <span className="rounded bg-ink px-1.5 py-0.5 text-[11px] text-white">중요</span>
+                  ) : null}
+                  <span className="text-[15px] font-medium">{e.name}</span>
+                </div>
+                <span className="shrink-0 text-[14px] text-ink-48 tabular-nums">
+                  {fmtEventDate(e.date)} · {e.timeKst} (한국시간)
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[12px] text-ink-48">
+            출처: FRED 공식 릴리즈 캘린더. 발표 시각은 한국시간 환산값(서머타임 반영)입니다.
+          </p>
+        </Card>
+      ) : preclose?.nightEvents && preclose.nightEvents.length > 0 ? (
         <Card className="mt-4">
           <SectionLabel>오늘 밤 주요 이벤트 · AI 예측</SectionLabel>
           <div className="space-y-3">
@@ -61,8 +96,13 @@ export default function PrecloseClient({
               </div>
             ))}
           </div>
+          {!fredConfigured && (
+            <p className="mt-3 text-[12px] text-ink-48">
+              FRED_API_KEY를 설정하면 실제 발표 일정·시각이 표시됩니다.
+            </p>
+          )}
         </Card>
-      )}
+      ) : null}
 
       {/* 결과별 시나리오 */}
       {preclose?.scenarios && preclose.scenarios.length > 0 && (
