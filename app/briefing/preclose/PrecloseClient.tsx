@@ -124,12 +124,12 @@ export default function PrecloseClient({
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Card>
             <SectionLabel>큰 장세 × 오늘 상황</SectionLabel>
-            <p className="text-[15px] text-ink-80">{ai.coreIssues.join(" · ")}</p>
+            <p className="text-[15px] text-ink-80">{(ai.coreIssues ?? []).join(" · ")}</p>
             <p className="mt-2 text-[15px] font-semibold">{snapshot?.stage ?? ai.stage}</p>
           </Card>
           <Card>
             <SectionLabel>수급</SectionLabel>
-            <p className="text-[15px] text-ink-80">{ai.supplyNotes.join(" · ")}</p>
+            <p className="text-[15px] text-ink-80">{(ai.supplyNotes ?? []).join(" · ")}</p>
           </Card>
         </div>
       )}

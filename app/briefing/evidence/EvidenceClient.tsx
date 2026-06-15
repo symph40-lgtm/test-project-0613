@@ -46,6 +46,10 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
   const ai = snapshot?.ai_output;
   const riskScores = snapshot?.risk_scores;
   const evidenceScores = riskScores ? riskScoresToEvidence(riskScores) : null;
+  // AI 응답에 일부 배열 필드가 누락돼도 페이지가 죽지 않도록 방어
+  const coreIssues = ai?.coreIssues ?? [];
+  const supplyNotes = ai?.supplyNotes ?? [];
+  const issuesDuration = ai?.issuesDuration ?? [];
   // 가로축(큰 장세 압력) = 실제 종합 리스크 점수 기반 (AI 주관값 대신 데이터 기반)
   const pressureLevel =
     snapshot?.risk_score != null ? snapshot.risk_score / 100 : (ai?.pressureLevel ?? 0.5);
@@ -70,13 +74,13 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
                 <ScoreBar key={s.label} label={s.label} score={s.score} note={s.note} />
               ))}
             </div>
-            {ai.issuesDuration.length > 0 && (
+            {issuesDuration.length > 0 && (
               <p className="mt-3 text-[14px] text-ink-48">
                 이슈 지속성:{" "}
                 <span className="text-ink">
-                  {ai.issuesDuration[0].duration === "이상" ? "높음" : ai.issuesDuration[0].duration}
+                  {issuesDuration[0].duration === "이상" ? "높음" : issuesDuration[0].duration}
                 </span>{" "}
-                · {ai.issuesDuration[0].issue}
+                · {issuesDuration[0].issue}
               </p>
             )}
           </Card>
@@ -85,7 +89,7 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
           <Card className="mt-4">
             <SectionLabel>큰 장세 × 오늘 상황</SectionLabel>
             <p className="text-[15px] text-ink-80">
-              {ai.coreIssues.join(" · ")}
+              {coreIssues.join(" · ")}
             </p>
             <TwoAxisMap pressureLevel={pressureLevel} situationLevel={situationLevel} />
             {(() => {
@@ -108,7 +112,7 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
           <Card className="mt-4">
             <SectionLabel>수급</SectionLabel>
             <ul className="space-y-1.5">
-              {ai.supplyNotes.map((s) => (
+              {supplyNotes.map((s) => (
                 <li key={s} className="flex gap-2 text-[16px]">
                   <span className="text-ink-48">·</span>
                   {s}
@@ -121,7 +125,7 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
           <Card className="mt-4">
             <SectionLabel>핵심 이슈</SectionLabel>
             <ul className="space-y-1.5">
-              {ai.coreIssues.map((s) => (
+              {coreIssues.map((s) => (
                 <li key={s} className="flex gap-2 text-[16px]">
                   <span className="text-ink-48">·</span>
                   {s}

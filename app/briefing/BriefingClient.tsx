@@ -100,8 +100,8 @@ export default function BriefingClient({
             {/* 행동 / 금지 */}
             <Tile tone="light">
               <div className="mx-auto grid w-full max-w-[820px] gap-8 sm:grid-cols-2">
-                <ActionList title="해야 할 행동" items={ai.dos} tone="do" />
-                <ActionList title="하지 말아야 할 행동" items={ai.donts} tone="dont" />
+                <ActionList title="해야 할 행동" items={ai.dos ?? []} tone="do" />
+                <ActionList title="하지 말아야 할 행동" items={ai.donts ?? []} tone="dont" />
               </div>
             </Tile>
 
