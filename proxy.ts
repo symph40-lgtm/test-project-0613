@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-const PROTECTED_PATHS = [
+const PROTECTED_PREFIXES = [
   "/briefing",
   "/positions",
   "/journal",
@@ -11,10 +12,10 @@ const PROTECTED_PATHS = [
   "/principles",
 ];
 
-const ADMIN_PATHS = ["/admin"];
+const ADMIN_PREFIX = "/admin";
 
-export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+export async function proxy(req: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request: req });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,13 +23,11 @@ export async function proxy(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return req.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value),
-          );
-          supabaseResponse = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
+          supabaseResponse = NextResponse.next({ request: req });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );
@@ -37,52 +36,48 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  // 세션 갱신 (쿠키 새로고침 포함)
+  // 세션 갱신 — createServerClient 직후 바로 호출해야 함
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const { pathname } = req.nextUrl;
+  const isAdmin = pathname.startsWith(ADMIN_PREFIX);
+  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
 
-  const isAdminPath = ADMIN_PATHS.some((p) => pathname.startsWith(p));
-  const isProtectedPath = PROTECTED_PATHS.some((p) => pathname.startsWith(p));
-
-  // /admin/* 관리자 게이트
-  if (isAdminPath) {
-    if (!user) {
-      return NextResponse.redirect(new URL("/apply", request.url));
+  // 미인증 — 보호 경로 접근 시 /login으로 리다이렉트
+  if (!user) {
+    if (isProtected || isAdmin) {
+      return NextResponse.redirect(new URL("/login", req.url));
     }
+    return supabaseResponse;
+  }
 
+  // 인증됨 — 관리자 경로
+  if (isAdmin) {
     const { data: roleData } = await supabase
       .from("user_roles")
       .select("role")
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (roleData?.role !== "admin") {
-      return NextResponse.redirect(new URL("/", request.url));
+      return NextResponse.redirect(new URL("/", req.url));
     }
-
     return supabaseResponse;
   }
 
-  // 핵심 기능 경로 보호
-  if (isProtectedPath) {
-    if (!user) {
-      return NextResponse.redirect(new URL("/apply", request.url));
-    }
-
-    const { data: appData } = await supabase
+  // 인증됨 — 일반 보호 경로
+  if (isProtected) {
+    const { data: app } = await supabase
       .from("applications")
       .select("status")
       .eq("email", user.email!)
-      .single();
+      .maybeSingle();
 
-    if (appData?.status !== "approved") {
-      return NextResponse.redirect(new URL("/apply/status", request.url));
+    if (app?.status !== "approved") {
+      return NextResponse.redirect(new URL("/apply/status", req.url));
     }
-
-    return supabaseResponse;
   }
 
   return supabaseResponse;
@@ -90,6 +85,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    // static 파일, 이미지, favicon 제외
     "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

@@ -1,8 +1,44 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketData, QuoteData } from "./types";
+import { getYahooSymbol } from "../positions";
 
 // deprecated static method 대신 인스턴스 사용 (static quote()는 never를 반환)
 const yf = new YahooFinance();
+
+export type PositionQuote = {
+  ticker: string;       // 사용자가 입력한 원래 이름/티커
+  symbol: string;       // Yahoo 심볼
+  price: number | null;
+  changePercent: number | null;
+  currency: string | null;
+};
+
+// 사용자 보유 종목들의 실시간 시세를 조회한다 (한국·미국 모두 지원)
+export async function fetchPositionQuotes(
+  tickers: string[],
+): Promise<PositionQuote[]> {
+  const unique = [...new Set(tickers.map((t) => t.trim()).filter(Boolean))];
+
+  const results = await Promise.all(
+    unique.map(async (ticker): Promise<PositionQuote> => {
+      const symbol = getYahooSymbol(ticker);
+      try {
+        const r = await yf.quote(symbol);
+        return {
+          ticker,
+          symbol,
+          price: r.regularMarketPrice ?? null,
+          changePercent: r.regularMarketChangePercent ?? null,
+          currency: r.currency ?? null,
+        };
+      } catch {
+        return { ticker, symbol, price: null, changePercent: null, currency: null };
+      }
+    }),
+  );
+
+  return results;
+}
 
 const SYMBOLS = {
   sp500: "^GSPC",

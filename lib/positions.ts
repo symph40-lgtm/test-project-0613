@@ -82,6 +82,73 @@ export function getSectorHint(ticker: string): string | null {
   return SECTOR_MAP[ticker.trim()] ?? null;
 }
 
+// 종목명/티커 → Yahoo Finance 심볼 매핑
+// 한국 종목은 종목코드.KS(거래소)/.KQ(코스닥), 미국 종목은 티커 그대로 사용
+const YAHOO_SYMBOL_MAP: Record<string, string> = {
+  // 반도체
+  삼성전자: "005930.KS",
+  SK하이닉스: "000660.KS",
+  DB하이텍: "000990.KS",
+  하나마이크론: "067310.KQ",
+  이오테크닉스: "039030.KQ",
+  원익IPS: "240810.KQ",
+  리노공업: "058470.KQ",
+  // 2차전지
+  "LG에너지솔루션": "373220.KS",
+  삼성SDI: "006400.KS",
+  SK이노베이션: "096770.KS",
+  "POSCO홀딩스": "005490.KS",
+  에코프로비엠: "247540.KQ",
+  에코프로: "086520.KQ",
+  엘앤에프: "066970.KQ",
+  포스코퓨처엠: "003670.KS",
+  // 방산
+  "한화에어로스페이스": "012450.KS",
+  "한화에어로": "012450.KS",
+  LIG넥스원: "079550.KS",
+  현대로템: "064350.KS",
+  풍산: "103140.KS",
+  빅텍: "065450.KQ",
+  // 금융
+  삼성생명: "032830.KS",
+  삼성화재: "000810.KS",
+  KB금융: "105560.KS",
+  신한지주: "055550.KS",
+  하나금융지주: "086790.KS",
+  우리금융지주: "316140.KS",
+  메리츠금융지주: "138040.KS",
+  // IT/플랫폼
+  카카오: "035720.KS",
+  네이버: "035420.KS",
+  크래프톤: "259960.KS",
+  // 바이오
+  셀트리온: "068270.KS",
+  "삼성바이오로직스": "207940.KS",
+  유한양행: "000100.KS",
+  // ETF — 한국
+  KODEX200: "069500.KS",
+  TIGER200: "102110.KS",
+};
+
+// 한글 종목코드(6자리)만 입력한 경우도 처리
+export function getYahooSymbol(ticker: string): string {
+  const t = ticker.trim();
+  if (YAHOO_SYMBOL_MAP[t]) return YAHOO_SYMBOL_MAP[t];
+  // 6자리 숫자 = 한국 종목코드 → .KS 기본 (코스닥은 매핑 테이블 우선)
+  if (/^\d{6}$/.test(t)) return `${t}.KS`;
+  // 그 외(미국 티커 등)는 그대로
+  return t;
+}
+
+// 한국 종목 여부 (이름이 매핑에 있거나 한글 포함 또는 6자리 코드)
+export function isKoreanTicker(ticker: string): boolean {
+  const t = ticker.trim();
+  if (YAHOO_SYMBOL_MAP[t]) return true;
+  if (/[가-힣]/.test(t)) return true;
+  if (/^\d{6}$/.test(t)) return true;
+  return false;
+}
+
 type RiskInput = {
   weight: number;
   is_leverage: boolean;

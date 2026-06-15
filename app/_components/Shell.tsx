@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ShieldCheck } from "lucide-react";
+import { NavAuth } from "./NavAuth";
 
 /* 얇은 검정 글로벌 내비 — 모든 페이지 상단 고정 */
 export function GlobalNav() {
@@ -11,18 +12,7 @@ export function GlobalNav() {
         <span className="font-semibold">스탁가드</span>
       </Link>
       <nav className="flex items-center gap-5 text-[12px] tracking-[-0.12px] text-white/80">
-        <Link href="/briefing" className="hidden hover:text-white sm:inline">
-          브리핑
-        </Link>
-        <Link href="/positions" className="hidden hover:text-white sm:inline">
-          포트폴리오
-        </Link>
-        <Link href="/journal" className="hidden hover:text-white sm:inline">
-          행동 기록
-        </Link>
-        <Link href="/apply" className="text-guard-on-dark hover:text-white">
-          이용 신청
-        </Link>
+        <NavAuth />
       </nav>
     </header>
   );
