@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/email";
+import { sendSms, normalizePhone } from "@/lib/sms";
 
 export type AlertChannel = {
   channel_type: "email" | "sms";
@@ -41,12 +42,18 @@ export async function startOtpVerification(
   } = await supabase.auth.getUser();
   if (!user) redirect("/apply");
 
-  if (channelType === "sms") {
-    return { error: "SMS 인증은 현재 서비스 준비 중입니다." };
-  }
-
-  if (!contact || !contact.includes("@")) {
-    return { error: "유효한 이메일 주소를 입력해주세요." };
+  // 채널별 연락처 유효성 검사 + 정규화
+  let normalizedContact = contact;
+  if (channelType === "email") {
+    if (!contact || !contact.includes("@")) {
+      return { error: "유효한 이메일 주소를 입력해주세요." };
+    }
+  } else {
+    const phone = normalizePhone(contact);
+    if (!phone) {
+      return { error: "유효한 휴대폰 번호를 입력해주세요. (예: 010-1234-5678)" };
+    }
+    normalizedContact = phone;
   }
 
   const otp = generateOtp();
@@ -56,7 +63,7 @@ export async function startOtpVerification(
     {
       user_id: user.id,
       channel_type: channelType,
-      contact,
+      contact: normalizedContact,
       verified: false,
       otp_code: otp,
       otp_expires_at: expiresAt,
@@ -66,13 +73,20 @@ export async function startOtpVerification(
 
   if (dbError) return { error: "인증 요청 중 오류가 발생했습니다." };
 
-  const { ok, error: mailError } = await sendEmail({
-    to: contact,
-    subject: "[스탁가드] 이메일 인증 코드",
-    text: `스탁가드 이메일 인증 코드: ${otp}\n\n이 코드는 10분간 유효합니다.\n본인이 요청하지 않은 경우 이 메일을 무시해주세요.`,
-  });
-
-  if (!ok) return { error: mailError ?? "이메일 발송에 실패했습니다." };
+  if (channelType === "email") {
+    const { ok, error: mailError } = await sendEmail({
+      to: normalizedContact,
+      subject: "[스탁가드] 이메일 인증 코드",
+      text: `스탁가드 이메일 인증 코드: ${otp}\n\n이 코드는 10분간 유효합니다.\n본인이 요청하지 않은 경우 이 메일을 무시해주세요.`,
+    });
+    if (!ok) return { error: mailError ?? "이메일 발송에 실패했습니다." };
+  } else {
+    const { ok, error: smsError } = await sendSms({
+      to: normalizedContact,
+      text: `[스탁가드] 인증번호 ${otp} (10분 내 입력)`,
+    });
+    if (!ok) return { error: smsError ?? "문자 발송에 실패했습니다." };
+  }
 
   return {};
 }

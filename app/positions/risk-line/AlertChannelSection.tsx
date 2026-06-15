@@ -31,18 +31,27 @@ function initState(saved: AlertChannel | undefined): ChannelState {
   };
 }
 
-function EmailChannelRow({
+function ChannelRow({
+  channelType,
   saved,
 }: {
+  channelType: "email" | "sms";
   saved: AlertChannel | undefined;
 }) {
   const [state, setState] = useState<ChannelState>(() => initState(saved));
   const [isPending, startTransition] = useTransition();
 
+  const isEmail = channelType === "email";
+  const label = isEmail ? "이메일" : "휴대폰";
+  const placeholder = isEmail ? "이메일 주소" : "010-1234-5678";
+  const consentLabel = isEmail
+    ? "이메일 알림 수신에 동의합니다"
+    : "문자(SMS) 알림 수신에 동의합니다";
+
   function handleRequestOtp() {
     setState((s) => ({ ...s, error: null }));
     startTransition(async () => {
-      const result = await startOtpVerification("email", state.contact);
+      const result = await startOtpVerification(channelType, state.contact);
       if (result.error) {
         setState((s) => ({ ...s, error: result.error! }));
       } else {
@@ -54,7 +63,7 @@ function EmailChannelRow({
   function handleVerify() {
     setState((s) => ({ ...s, error: null }));
     startTransition(async () => {
-      const result = await verifyOtp("email", state.otp);
+      const result = await verifyOtp(channelType, state.otp);
       if (result.error) {
         setState((s) => ({ ...s, error: result.error! }));
       } else {
@@ -65,7 +74,7 @@ function EmailChannelRow({
 
   function handleConsent() {
     startTransition(async () => {
-      await saveConsent("email");
+      await saveConsent(channelType);
       setState((s) => ({ ...s, consent: true }));
     });
   }
@@ -73,7 +82,7 @@ function EmailChannelRow({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 py-2">
-        <span className="w-14 shrink-0 text-[14px] text-ink-48">이메일</span>
+        <span className="w-14 shrink-0 text-[14px] text-ink-48">{label}</span>
 
         {state.phase === "verified" ? (
           <>
@@ -85,12 +94,12 @@ function EmailChannelRow({
         ) : (
           <>
             <input
-              type="email"
+              type={isEmail ? "email" : "tel"}
               value={state.contact}
               onChange={(e) =>
                 setState((s) => ({ ...s, contact: e.target.value, phase: "input" }))
               }
-              placeholder="이메일 주소"
+              placeholder={placeholder}
               disabled={state.phase === "otp_sent"}
               className="h-9 flex-1 rounded-[8px] border border-hairline px-3 text-[15px] outline-none focus:border-guard disabled:bg-pearl disabled:text-ink-48"
             />
@@ -150,7 +159,7 @@ function EmailChannelRow({
           >
             <span className="grid size-5 place-items-center rounded-[5px] border border-hairline">
             </span>
-            이메일 알림 수신에 동의합니다
+            {consentLabel}
           </button>
         </div>
       ) : null}
@@ -171,17 +180,17 @@ export default function AlertChannelSection({
   initialChannels: AlertChannel[];
 }) {
   const emailChannel = initialChannels.find((c) => c.channel_type === "email");
+  const smsChannel = initialChannels.find((c) => c.channel_type === "sms");
 
   return (
     <Card className="mt-4">
       <SectionLabel>알림 채널</SectionLabel>
-      <EmailChannelRow saved={emailChannel} />
-      <div className="flex items-center gap-3 py-2">
-        <span className="w-14 shrink-0 text-[14px] text-ink-48">휴대폰</span>
-        <span className="flex-1 text-[15px] text-ink-48">서비스 준비 중</span>
+      <ChannelRow channelType="email" saved={emailChannel} />
+      <div className="mt-2 border-t border-divider pt-2">
+        <ChannelRow channelType="sms" saved={smsChannel} />
       </div>
       <p className="mt-2 text-[13px] text-ink-48">
-        인증 전에는 외부 발송 대신 앱 내 알림으로만 안내합니다.
+        인증·수신 동의를 완료한 채널로 위험 알림과 장중 시황이 발송됩니다.
       </p>
     </Card>
   );

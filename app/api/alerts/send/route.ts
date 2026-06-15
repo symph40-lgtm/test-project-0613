@@ -5,6 +5,7 @@ import { calculateRiskScores, calculateCompositeScore, classifyStage } from "@/l
 import { evaluateAlertTriggers } from "@/lib/alerts/triggers";
 import { composeAlertMessage, alertMessageToText } from "@/lib/alerts/compose";
 import { sendEmail } from "@/lib/email";
+import { sendSms } from "@/lib/sms";
 
 export async function POST(req: NextRequest) {
   let userId: string;
@@ -81,8 +82,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ sent: 0, reason: "no new triggers" });
   }
 
-  // 이메일 채널 조회
+  // 인증·동의 완료된 채널 조회
   const emailChannel = channels.find((c) => c.channel_type === "email");
+  const smsChannel = channels.find((c) => c.channel_type === "sms");
   let sentCount = 0;
 
   for (const trigger of newTriggers) {
@@ -96,8 +98,17 @@ export async function POST(req: NextRequest) {
         subject: msg.subject,
         text,
       });
-      isSent = result.ok;
-    } else {
+      isSent = result.ok || isSent;
+    }
+
+    if (smsChannel?.contact) {
+      // SMS는 길이 제한이 있어 핵심만 발송
+      const smsText = `[스탁가드] ${msg.subject}\n${trigger.reason}`;
+      const result = await sendSms({ to: smsChannel.contact, text: smsText });
+      isSent = result.ok || isSent;
+    }
+
+    if (!emailChannel?.contact && !smsChannel?.contact) {
       // 채널 미인증 — DB만 저장
       console.log(`[ALERT NO CHANNEL]\n${text}`);
     }

@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchMarketData } from "@/lib/market/fetch";
 import { calculateRiskScores, calculateCompositeScore, classifyStage } from "@/lib/market/risk";
 import { sendEmail } from "@/lib/email";
+import { sendSms } from "@/lib/sms";
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -38,34 +39,54 @@ export async function GET(req: NextRequest) {
     const admin = createAdminClient();
     const { data: channels } = await admin
       .from("alert_channels")
-      .select("user_id, email")
-      .eq("channel_type", "email")
+      .select("user_id, channel_type, contact")
+      .in("channel_type", ["email", "sms"])
       .eq("verified", true)
       .eq("consent_given", true);
+
+    // 사용자별로 채널 묶기
+    const byUser = new Map<string, { email?: string; sms?: string }>();
+    for (const ch of channels ?? []) {
+      if (!ch.contact) continue;
+      const entry = byUser.get(ch.user_id) ?? {};
+      if (ch.channel_type === "email") entry.email = ch.contact;
+      if (ch.channel_type === "sms") entry.sms = ch.contact;
+      byUser.set(ch.user_id, entry);
+    }
+
+    const smsText = `[스탁가드] 장중 시황 ${stage} (리스크 ${composite})\n${summaryText}`;
 
     let sent = 0;
     const now = new Date().toISOString();
 
-    for (const ch of channels ?? []) {
-      if (!ch.email) continue;
+    for (const [userId, contacts] of byUser) {
+      let isSent = false;
 
-      const emailResult = await sendEmail({
-        to: ch.email,
-        subject: `[스탁가드] 장중 시황 — ${stage}`,
-        text: emailText,
-      });
+      if (contacts.email) {
+        const r = await sendEmail({
+          to: contacts.email,
+          subject: `[스탁가드] 장중 시황 — ${stage}`,
+          text: emailText,
+        });
+        isSent = r.ok || isSent;
+      }
+
+      if (contacts.sms) {
+        const r = await sendSms({ to: contacts.sms, text: smsText });
+        isSent = r.ok || isSent;
+      }
 
       await admin.from("alerts").insert({
-        user_id: ch.user_id,
+        user_id: userId,
         trigger_key: "intraday_summary",
         severity: composite >= 50 ? "high" : composite >= 25 ? "medium" : "low",
         message: { subject: `장중 시황 — ${stage}`, action: "", prohibition: "", reasons: lines, nonCompliance: { cause: "", vulnerableTicker: "", lossOutcome: "", indicatorsToCheck: "" }, buffett: "" },
         market_snapshot: { composite, stage },
-        is_sent: emailResult.ok,
-        sent_at: emailResult.ok ? now : null,
+        is_sent: isSent,
+        sent_at: isSent ? now : null,
       });
 
-      if (emailResult.ok) sent++;
+      if (isSent) sent++;
     }
 
     return NextResponse.json({ ok: true, sent, stage, composite });
