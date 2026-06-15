@@ -7,37 +7,75 @@ const yf = new YahooFinance();
 
 export type PositionQuote = {
   ticker: string;       // 사용자가 입력한 원래 이름/티커
-  symbol: string;       // Yahoo 심볼
+  symbol: string | null; // 해석된 Yahoo 심볼
   price: number | null;
   changePercent: number | null;
   currency: string | null;
 };
+
+// 한국 거래소 코드 (KOSPI=KSC, KOSDAQ=KOE/KOQ)
+const KR_EXCHANGES = new Set(["KSC", "KOE", "KOQ"]);
+
+// Yahoo 검색으로 종목명 → 심볼 해석 (매핑 실패 시 폴백)
+async function resolveSymbolBySearch(query: string): Promise<string | null> {
+  try {
+    const r = await yf.search(query, { quotesCount: 6, newsCount: 0 });
+    const quotes = (r.quotes ?? []).filter(
+      (q): q is typeof q & { symbol: string } => "symbol" in q && !!q.symbol,
+    );
+    if (quotes.length === 0) return null;
+
+    // 한국 거래소(.KS/.KQ) 결과 우선
+    const kr = quotes.find(
+      (q) =>
+        ("exchange" in q && KR_EXCHANGES.has(String(q.exchange))) ||
+        /\.(KS|KQ)$/.test(q.symbol),
+    );
+    if (kr) return kr.symbol;
+
+    // 주식/ETF 타입 우선
+    const equity = quotes.find(
+      (q) => "quoteType" in q && (q.quoteType === "EQUITY" || q.quoteType === "ETF"),
+    );
+    return (equity ?? quotes[0]).symbol;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOneQuote(ticker: string): Promise<PositionQuote> {
+  // 1·2단계: 매핑/코드
+  let symbol = getYahooSymbol(ticker);
+
+  // 3단계: 검색 폴백
+  if (!symbol) {
+    symbol = await resolveSymbolBySearch(ticker);
+  }
+
+  if (!symbol) {
+    return { ticker, symbol: null, price: null, changePercent: null, currency: null };
+  }
+
+  try {
+    const r = await yf.quote(symbol);
+    return {
+      ticker,
+      symbol,
+      price: r.regularMarketPrice ?? null,
+      changePercent: r.regularMarketChangePercent ?? null,
+      currency: r.currency ?? null,
+    };
+  } catch {
+    return { ticker, symbol, price: null, changePercent: null, currency: null };
+  }
+}
 
 // 사용자 보유 종목들의 실시간 시세를 조회한다 (한국·미국 모두 지원)
 export async function fetchPositionQuotes(
   tickers: string[],
 ): Promise<PositionQuote[]> {
   const unique = [...new Set(tickers.map((t) => t.trim()).filter(Boolean))];
-
-  const results = await Promise.all(
-    unique.map(async (ticker): Promise<PositionQuote> => {
-      const symbol = getYahooSymbol(ticker);
-      try {
-        const r = await yf.quote(symbol);
-        return {
-          ticker,
-          symbol,
-          price: r.regularMarketPrice ?? null,
-          changePercent: r.regularMarketChangePercent ?? null,
-          currency: r.currency ?? null,
-        };
-      } catch {
-        return { ticker, symbol, price: null, changePercent: null, currency: null };
-      }
-    }),
-  );
-
-  return results;
+  return Promise.all(unique.map(fetchOneQuote));
 }
 
 const SYMBOLS = {

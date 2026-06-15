@@ -93,6 +93,7 @@ const YAHOO_SYMBOL_MAP: Record<string, string> = {
   이오테크닉스: "039030.KQ",
   원익IPS: "240810.KQ",
   리노공업: "058470.KQ",
+  가온칩스: "399720.KQ",
   // 2차전지
   "LG에너지솔루션": "373220.KS",
   삼성SDI: "006400.KS",
@@ -130,14 +131,31 @@ const YAHOO_SYMBOL_MAP: Record<string, string> = {
   TIGER200: "102110.KS",
 };
 
-// 한글 종목코드(6자리)만 입력한 경우도 처리
-export function getYahooSymbol(ticker: string): string {
+// 대소문자·공백 무시 매칭용 정규화 키 맵 (1회 생성)
+const NORMALIZED_SYMBOL_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(YAHOO_SYMBOL_MAP).map(([k, v]) => [
+    k.toLowerCase().replace(/\s+/g, ""),
+    v,
+  ]),
+);
+
+// 종목명 → Yahoo 심볼 (매핑 + 6자리코드). 해석 실패 시 null
+// (검색 폴백은 fetch.ts에서 비동기로 처리)
+export function getYahooSymbol(ticker: string): string | null {
   const t = ticker.trim();
   if (YAHOO_SYMBOL_MAP[t]) return YAHOO_SYMBOL_MAP[t];
-  // 6자리 숫자 = 한국 종목코드 → .KS 기본 (코스닥은 매핑 테이블 우선)
+
+  const norm = t.toLowerCase().replace(/\s+/g, "");
+  if (NORMALIZED_SYMBOL_MAP[norm]) return NORMALIZED_SYMBOL_MAP[norm];
+
+  // 6자리 숫자 = 한국 종목코드
   if (/^\d{6}$/.test(t)) return `${t}.KS`;
-  // 그 외(미국 티커 등)는 그대로
-  return t;
+
+  // 한글이 없고 영문/숫자로만 된 티커는 미국 종목으로 간주 (SOXL, NVDA 등)
+  if (!/[가-힣]/.test(t) && /^[A-Za-z0-9.\-]+$/.test(t)) return t.toUpperCase();
+
+  // 그 외(자유 입력 한글명)는 검색 폴백 필요 → null
+  return null;
 }
 
 // 한국 종목 여부 (이름이 매핑에 있거나 한글 포함 또는 6자리 코드)
