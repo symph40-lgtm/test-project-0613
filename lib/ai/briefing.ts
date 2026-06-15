@@ -40,19 +40,20 @@ function makeFallbackBriefing(scores: RiskScores, composite: number): AiBriefing
 
 function makeFallbackPreclose(positions: { ticker: string }[]): AiPrecloseOutput {
   return {
-    todaySummary: "오늘 장 데이터를 분석하지 못했습니다.",
+    todaySummary:
+      "AI 분석을 사용할 수 없어 일반 가이드를 표시합니다. (ANTHROPIC_API_KEY 설정 및 서버 재시작 필요)",
     nightEvents: [
-      { event: "미국 주요 경제지표 발표 가능", expectedTime: "22:30~23:30" },
-      { event: "연준 관련 발언 모니터링 권장", expectedTime: "미정" },
+      { event: "미국 CPI·고용지표·FOMC 등 주요 경제지표 발표 여부 확인 권장", expectedTime: "22:30 전후" },
+      { event: "연준 위원 발언·국채 입찰 모니터링 권장", expectedTime: "야간" },
     ],
     perStockCalls: positions.map((p) => ({
       ticker: p.ticker,
-      call: "현황 유지 (데이터 부족으로 판단 불가)",
+      call: "현황 유지 (AI 분석 비활성)",
     })),
     scenarios: [
-      { result: "지표 상회", impact: "기술주·레버리지 부담 확대 가능" },
-      { result: "지표 부합", impact: "기존 장세 흐름 유지 가능" },
-      { result: "지표 하회", impact: "경기 둔화 우려 단기 부각 가능" },
+      { result: "야간 미국 지표(CPI/고용 등) 예상 상회", impact: "금리 상승 → 기술주·레버리지 부담 확대 가능" },
+      { result: "야간 미국 지표 예상 부합", impact: "기존 장세 흐름 유지 가능" },
+      { result: "야간 미국 지표 예상 하회", impact: "경기 둔화 우려로 위험자산 단기 변동 가능" },
     ],
   };
 }
@@ -156,12 +157,16 @@ export async function generatePreclose(
 ## 포지션
 ${positions.map((p) => `- ${p.ticker} 비중${p.weight}% ${p.is_leverage ? "[레버]" : ""} 섹터:${p.sector ?? "기타"}`).join("\n")}
 
+규칙:
+- nightEvents의 event에는 구체적 지표명을 명시하십시오 (예: "미국 5월 CPI", "주간 신규 실업수당 청구건수", "FOMC 의사록", "엔비디아 실적").
+- scenarios의 result에는 어떤 지표 기준인지 반드시 포함하십시오 (예: "미국 CPI 예상 상회"). 막연히 "상회"라고만 쓰지 마십시오.
+
 다음 JSON 형식으로만 응답하십시오:
 {
   "todaySummary": "오늘 장 흐름 한 줄 요약",
-  "nightEvents": [{"event": "이벤트명", "expectedTime": "예상 시각"}],
+  "nightEvents": [{"event": "구체적 지표/이벤트명", "expectedTime": "예상 시각(한국시간)"}],
   "perStockCalls": [{"ticker": "티커", "call": "유지 가능|축소 검토|매도 검토|현금화 검토"}],
-  "scenarios": [{"result": "상회|부합|하회", "impact": "예상 영향"}]
+  "scenarios": [{"result": "지표명 + 상회/부합/하회", "impact": "예상 영향"}]
 }`;
 
   try {

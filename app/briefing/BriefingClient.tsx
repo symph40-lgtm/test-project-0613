@@ -6,6 +6,7 @@ import { History, X } from "lucide-react";
 import { GlobalNav, SubNav, Disclaimer } from "../_components/Shell";
 import { ButtonLink, Button } from "../_components/Button";
 import { Tile, ActionList, StateNote } from "../_components/primitives";
+import { stagePosture } from "@/lib/market/risk";
 import type { BriefingSnapshot } from "@/lib/market/types";
 
 export default function BriefingClient({
@@ -70,6 +71,24 @@ export default function BriefingClient({
                 <p className="mt-3 text-[17px] text-body-muted">
                   현재 장세 {snapshot.stage ?? ai.stage} · 하락 리스크 {snapshot.risk_score ?? 0}점
                 </p>
+                {(() => {
+                  const posture = stagePosture(snapshot.stage ?? ai.stage);
+                  return (
+                    <div className="mt-4 rounded-[12px] border border-white/15 bg-white/5 p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-guard-on-dark/20 px-2.5 py-0.5 text-[13px] font-semibold text-guard-on-dark">
+                          권장 자세: {posture.stance}
+                        </span>
+                        <span className="text-[13px] text-body-muted">
+                          공격성 {posture.aggressiveness}/100
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[15px] leading-snug text-body-muted">
+                        {posture.guidance}
+                      </p>
+                    </div>
+                  );
+                })()}
                 {isFallback && (
                   <p className="mt-4 inline-block rounded-full bg-white/10 px-3 py-1 text-[13px] text-body-muted">
                     일부 시세를 불러오지 못해 저장된 기준 가격으로 판단했습니다. 신뢰도 낮음.
