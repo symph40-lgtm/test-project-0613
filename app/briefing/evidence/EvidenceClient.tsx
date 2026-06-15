@@ -24,13 +24,34 @@ function riskScoresToEvidence(scores: RiskScores) {
   ];
 }
 
+// 세로축(오늘 상황)을 실제 지수 등락률로 산출 — 0=완화(개선), 1=악화
+// 주요 지수가 오를수록 0(완화)에 가깝게, 내릴수록 1(악화)에 가깝게
+function deriveSituationLevel(snapshot: BriefingSnapshot): number | null {
+  const m = snapshot.market_data;
+  if (!m) return null;
+  const changes = [
+    m.nasdaq?.changePercent,
+    m.sox?.changePercent,
+    m.kospi?.changePercent,
+    m.sp500?.changePercent,
+  ].filter((v): v is number => typeof v === "number");
+  if (changes.length === 0) return null;
+  const avg = changes.reduce((a, b) => a + b, 0) / changes.length;
+  // 평균 +3% → 0(완화), 0% → 0.5, -3% → 1(악화)
+  return Math.max(0, Math.min(1, 0.5 - avg / 6));
+}
+
 export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapshot | null }) {
   const router = useRouter();
   const ai = snapshot?.ai_output;
   const riskScores = snapshot?.risk_scores;
   const evidenceScores = riskScores ? riskScoresToEvidence(riskScores) : null;
-  const pressureLevel = ai?.pressureLevel ?? 0.5;
-  const situationLevel = ai?.situationLevel ?? 0.5;
+  // 가로축(큰 장세 압력) = 실제 종합 리스크 점수 기반 (AI 주관값 대신 데이터 기반)
+  const pressureLevel =
+    snapshot?.risk_score != null ? snapshot.risk_score / 100 : (ai?.pressureLevel ?? 0.5);
+  // 세로축(오늘 상황) = 실제 지수 등락률 기반, 없으면 AI값 폴백
+  const situationLevel =
+    (snapshot ? deriveSituationLevel(snapshot) : null) ?? ai?.situationLevel ?? 0.5;
 
   return (
     <PageShell title="판단 근거">
