@@ -47,19 +47,25 @@ async function fetchOneQuote(
   ticker: string,
   knownSymbol?: string | null,
 ): Promise<PositionQuote> {
-  // 0단계: 자동완성으로 이미 확정된 심볼이 있으면 그대로 사용
-  let symbol = knownSymbol?.trim() || getYahooSymbol(ticker);
-
-  // 3단계: 검색 폴백
-  if (!symbol) {
-    symbol = await resolveSymbolBySearch(ticker);
-  }
-
-  if (!symbol) {
-    return { ticker, symbol: null, price: null, changePercent: null, currency: null };
-  }
+  const empty: PositionQuote = {
+    ticker,
+    symbol: null,
+    price: null,
+    changePercent: null,
+    currency: null,
+  };
 
   try {
+    // 0단계: 자동완성으로 이미 확정된 심볼이 있으면 그대로 사용
+    let symbol = knownSymbol?.trim() || getYahooSymbol(ticker);
+
+    // 3단계: 검색 폴백
+    if (!symbol) {
+      symbol = await resolveSymbolBySearch(ticker);
+    }
+
+    if (!symbol) return empty;
+
     const r = await yf.quote(symbol);
     return {
       ticker,
@@ -69,7 +75,7 @@ async function fetchOneQuote(
       currency: r.currency ?? null,
     };
   } catch {
-    return { ticker, symbol, price: null, changePercent: null, currency: null };
+    return empty;
   }
 }
 

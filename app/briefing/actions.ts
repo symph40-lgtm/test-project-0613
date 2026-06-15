@@ -15,12 +15,13 @@ export async function getBriefing(date?: string): Promise<BriefingSnapshot | nul
 
   const targetDate = date ?? new Date().toISOString().slice(0, 10);
 
-  // 캐시 히트 확인 (1시간 TTL)
+  // 캐시 히트 확인 (1시간 TTL) — 단, 폴백 스냅샷은 재사용하지 않고 재생성
   const { data: cached } = await supabase
     .from("briefing_snapshots")
     .select("*")
     .eq("user_id", user.id)
     .eq("date", targetDate)
+    .eq("is_fallback", false)
     .gte("updated_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
     .maybeSingle();
 
@@ -46,7 +47,7 @@ export async function getBriefing(date?: string): Promise<BriefingSnapshot | nul
     const composite = calculateCompositeScore(riskScores);
     const stage = classifyStage(composite);
 
-    const aiOutput = await generateBriefing(
+    const { output: aiOutput, isFallback } = await generateBriefing(
       marketResult,
       riskScores,
       composite,
@@ -62,7 +63,7 @@ export async function getBriefing(date?: string): Promise<BriefingSnapshot | nul
       risk_score: composite,
       stage,
       ai_output: aiOutput,
-      is_fallback: false,
+      is_fallback: isFallback,
     };
 
     const { data: upserted } = await supabase

@@ -63,9 +63,9 @@ export async function generateBriefing(
   composite: number,
   positions: { ticker: string; weight: number; is_leverage: boolean; sector: string | null; risk_level: string }[],
   principles: { principle_key: string; is_on: boolean }[]
-): Promise<AiBriefingOutput> {
+): Promise<{ output: AiBriefingOutput; isFallback: boolean }> {
   if (!hasAiKey()) {
-    return makeFallbackBriefing(riskScores, composite);
+    return { output: makeFallbackBriefing(riskScores, composite), isFallback: true };
   }
 
   const stage = classifyStage(composite);
@@ -128,9 +128,9 @@ ${activePrinciples || "없음"}
 
     const text = message.content[0].type === "text" ? message.content[0].text : "";
     const parsed = JSON.parse(text) as AiBriefingOutput;
-    return parsed;
+    return { output: parsed, isFallback: false };
   } catch {
-    return makeFallbackBriefing(riskScores, composite);
+    return { output: makeFallbackBriefing(riskScores, composite), isFallback: true };
   }
 }
 
