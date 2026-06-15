@@ -131,6 +131,32 @@ const YAHOO_SYMBOL_MAP: Record<string, string> = {
   TIGER200: "102110.KS",
 };
 
+// 로컬 종목 사전 검색 (Yahoo가 순수 한글 쿼리를 거부하는 문제 보완)
+// 매핑 테이블 이름에 대해 부분 일치 검색
+export type LocalTicker = { symbol: string; name: string; exchange: string };
+
+export function searchLocalTickers(query: string): LocalTicker[] {
+  const q = query.trim().toLowerCase().replace(/\s+/g, "");
+  if (!q) return [];
+
+  const out: LocalTicker[] = [];
+  for (const [name, symbol] of Object.entries(YAHOO_SYMBOL_MAP)) {
+    const key = name.toLowerCase().replace(/\s+/g, "");
+    if (key.includes(q) || q.includes(key)) {
+      const exchange = symbol.endsWith(".KQ")
+        ? "KOSDAQ"
+        : symbol.endsWith(".KS")
+          ? "KOSPI"
+          : "";
+      // 중복 심볼 방지
+      if (!out.some((o) => o.symbol === symbol)) {
+        out.push({ symbol, name, exchange });
+      }
+    }
+  }
+  return out;
+}
+
 // 대소문자·공백 무시 매칭용 정규화 키 맵 (1회 생성)
 const NORMALIZED_SYMBOL_MAP: Record<string, string> = Object.fromEntries(
   Object.entries(YAHOO_SYMBOL_MAP).map(([k, v]) => [

@@ -43,9 +43,12 @@ async function resolveSymbolBySearch(query: string): Promise<string | null> {
   }
 }
 
-async function fetchOneQuote(ticker: string): Promise<PositionQuote> {
-  // 1·2단계: 매핑/코드
-  let symbol = getYahooSymbol(ticker);
+async function fetchOneQuote(
+  ticker: string,
+  knownSymbol?: string | null,
+): Promise<PositionQuote> {
+  // 0단계: 자동완성으로 이미 확정된 심볼이 있으면 그대로 사용
+  let symbol = knownSymbol?.trim() || getYahooSymbol(ticker);
 
   // 3단계: 검색 폴백
   if (!symbol) {
@@ -71,11 +74,23 @@ async function fetchOneQuote(ticker: string): Promise<PositionQuote> {
 }
 
 // 사용자 보유 종목들의 실시간 시세를 조회한다 (한국·미국 모두 지원)
+// 입력은 종목명 문자열 배열 또는 {ticker, symbol} 객체 배열 모두 허용
 export async function fetchPositionQuotes(
-  tickers: string[],
+  positions: string[] | { ticker: string; symbol?: string | null }[],
 ): Promise<PositionQuote[]> {
-  const unique = [...new Set(tickers.map((t) => t.trim()).filter(Boolean))];
-  return Promise.all(unique.map(fetchOneQuote));
+  const normalized = positions.map((p) =>
+    typeof p === "string" ? { ticker: p.trim(), symbol: null } : { ticker: p.ticker.trim(), symbol: p.symbol ?? null },
+  );
+
+  // ticker 기준 중복 제거
+  const seen = new Set<string>();
+  const unique = normalized.filter((p) => {
+    if (!p.ticker || seen.has(p.ticker)) return false;
+    seen.add(p.ticker);
+    return true;
+  });
+
+  return Promise.all(unique.map((p) => fetchOneQuote(p.ticker, p.symbol)));
 }
 
 const SYMBOLS = {

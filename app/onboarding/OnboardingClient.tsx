@@ -4,9 +4,16 @@ import { useState, useTransition } from "react";
 import { Plus, X } from "lucide-react";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { Button } from "../_components/Button";
+import { TickerInput } from "../_components/TickerInput";
 import { savePositions, type SavePositionsRow } from "./actions";
 
-type Row = { id: number; ticker: string; weight: string; leverage: boolean };
+type Row = {
+  id: number;
+  ticker: string;
+  symbol: string | null;
+  weight: string;
+  leverage: boolean;
+};
 
 let nextId = 100;
 
@@ -19,6 +26,7 @@ function toClientRows(
   return initial.map((p, i) => ({
     id: i + 1,
     ticker: p.ticker,
+    symbol: null,
     weight: String(p.weight),
     leverage: p.is_leverage,
   }));
@@ -41,7 +49,10 @@ export default function OnboardingClient({
   }
   function add() {
     if (rows.length >= 10) return;
-    setRows((rs) => [...rs, { id: nextId++, ticker: "", weight: "", leverage: false }]);
+    setRows((rs) => [
+      ...rs,
+      { id: nextId++, ticker: "", symbol: null, weight: "", leverage: false },
+    ]);
   }
   function remove(id: number) {
     setRows((rs) => rs.filter((r) => r.id !== id));
@@ -51,6 +62,7 @@ export default function OnboardingClient({
     setError(null);
     const payload: SavePositionsRow[] = rows.map((r) => ({
       ticker: r.ticker,
+      symbol: r.symbol,
       weight: r.weight,
       leverage: r.leverage,
     }));
@@ -91,11 +103,10 @@ export default function OnboardingClient({
           <div className="space-y-2.5">
             {rows.map((r) => (
               <div key={r.id} className="flex items-center gap-2">
-                <input
+                <TickerInput
                   value={r.ticker}
-                  onChange={(e) => update(r.id, { ticker: e.target.value })}
-                  placeholder="종목명"
-                  className="h-11 flex-1 rounded-[8px] border border-hairline px-3 text-[16px] outline-none focus:border-guard"
+                  symbol={r.symbol}
+                  onChange={(name, sym) => update(r.id, { ticker: name, symbol: sym })}
                 />
                 <div className="relative w-24">
                   <input

@@ -19,17 +19,22 @@ export default async function IntradaySummaryPage() {
   const { data: positions } = user
     ? await supabase
         .from("positions")
-        .select("ticker, weight, is_leverage, sector, risk_level")
+        .select("ticker, name, weight, is_leverage, sector, risk_level")
         .eq("user_id", user.id)
         .order("weight", { ascending: false })
     : { data: [] };
 
   const tickers = (positions ?? []).map((p) => p.ticker);
+  // name 컬럼에 저장된 확정 심볼을 함께 전달 (정확도)
+  const quoteInputs = (positions ?? []).map((p) => ({
+    ticker: p.ticker,
+    symbol: p.name as string | null,
+  }));
 
   // 시장 데이터 · 종목 시세 · 뉴스 병렬 조회
   const [market, quotes, news] = await Promise.all([
     fetchMarketData(),
-    fetchPositionQuotes(tickers),
+    fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
   ]);
 

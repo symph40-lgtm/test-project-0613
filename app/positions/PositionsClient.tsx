@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
 import { ButtonLink } from "../_components/Button";
 import { RiskBadge, StateNote } from "../_components/primitives";
+import { TickerInput } from "../_components/TickerInput";
 import {
   addPosition,
   updatePosition,
@@ -21,6 +22,7 @@ type EditState = {
 
 type AddState = {
   ticker: string;
+  symbol: string | null;
   weight: string;
   is_leverage: boolean;
 };
@@ -35,6 +37,7 @@ export default function PositionsClient({
   const [adding, setAdding] = useState(false);
   const [addState, setAddState] = useState<AddState>({
     ticker: "",
+    symbol: null,
     weight: "",
     is_leverage: false,
   });
@@ -100,6 +103,7 @@ export default function PositionsClient({
     setError(null);
     const formData = new FormData();
     formData.set("ticker", addState.ticker);
+    formData.set("symbol", addState.symbol ?? "");
     formData.set("weight", addState.weight);
     formData.set("is_leverage", String(addState.is_leverage));
 
@@ -109,7 +113,7 @@ export default function PositionsClient({
         setError(result.error);
       } else {
         setAdding(false);
-        setAddState({ ticker: "", weight: "", is_leverage: false });
+        setAddState({ ticker: "", symbol: null, weight: "", is_leverage: false });
         // 서버에서 최신 데이터 반영 위해 페이지 새로고침 (revalidatePath 트리거)
         window.location.reload();
       }
@@ -302,12 +306,13 @@ export default function PositionsClient({
       {/* 종목 추가 행 */}
       {adding ? (
         <div className="mt-3 flex items-center gap-2">
-          <input
+          <TickerInput
             value={addState.ticker}
-            onChange={(e) => setAddState((s) => ({ ...s, ticker: e.target.value }))}
-            placeholder="종목명"
+            symbol={addState.symbol}
+            onChange={(name, sym) =>
+              setAddState((s) => ({ ...s, ticker: name, symbol: sym }))
+            }
             autoFocus
-            className="h-11 flex-1 rounded-[8px] border border-hairline px-3 text-[16px] outline-none focus:border-guard"
           />
           <div className="relative w-24">
             <input

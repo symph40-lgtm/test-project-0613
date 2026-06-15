@@ -40,6 +40,7 @@ export async function addPosition(formData: FormData): Promise<{ error?: string 
   if (!user) redirect("/apply");
 
   const ticker = (formData.get("ticker") as string)?.trim();
+  const symbol = ((formData.get("symbol") as string) ?? "").trim() || null;
   const weight = Number(formData.get("weight"));
   const is_leverage = formData.get("is_leverage") === "true";
 
@@ -58,7 +59,8 @@ export async function addPosition(formData: FormData): Promise<{ error?: string 
   const risk_level = calculateRiskLevel({ weight, is_leverage });
 
   const { error } = await supabase.from("positions").upsert(
-    { user_id: user.id, ticker, weight, is_leverage, sector, risk_level },
+    // name 컬럼에 확정된 Yahoo 심볼 저장 (시세 조회 정확도용)
+    { user_id: user.id, ticker, name: symbol, weight, is_leverage, sector, risk_level },
     { onConflict: "user_id,ticker" },
   );
 

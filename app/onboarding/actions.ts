@@ -6,6 +6,7 @@ import { getSectorHint, calculateRiskLevel } from "@/lib/positions";
 
 export type SavePositionsRow = {
   ticker: string;
+  symbol?: string | null; // 자동완성으로 확정된 Yahoo 심볼
   weight: string;
   leverage: boolean;
 };
@@ -56,6 +57,8 @@ export async function savePositions(rows: SavePositionsRow[]): Promise<void> {
       {
         user_id: user.id,
         ticker,
+        // name 컬럼에 확정된 Yahoo 심볼 저장 (시세 조회 정확도용)
+        name: row.symbol ?? null,
         weight,
         is_leverage,
         sector,
