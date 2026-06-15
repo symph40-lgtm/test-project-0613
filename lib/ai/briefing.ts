@@ -1,6 +1,6 @@
 import type { MarketData, RiskScores, AiBriefingOutput, AiPrecloseOutput } from "../market/types";
 import { classifyStage } from "../market/risk";
-import { getAiClient, hasAiKey } from "./client";
+import { getAiClient, hasAiKey, parseJsonLoose } from "./client";
 
 // FR-029 리스크 코칭 언어 시스템 프롬프트
 const SYSTEM_PROMPT = `당신은 개인 투자자를 위한 리스크 코칭 AI입니다.
@@ -128,7 +128,7 @@ ${activePrinciples || "없음"}
     });
 
     const text = message.content[0].type === "text" ? message.content[0].text : "";
-    const parsed = JSON.parse(text) as AiBriefingOutput;
+    const parsed = parseJsonLoose<AiBriefingOutput>(text);
     return { output: parsed, isFallback: false };
   } catch {
     return { output: makeFallbackBriefing(riskScores, composite), isFallback: true };
@@ -179,7 +179,7 @@ ${positions.map((p) => `- ${p.ticker} 비중${p.weight}% ${p.is_leverage ? "[레
     });
 
     const text = message.content[0].type === "text" ? message.content[0].text : "";
-    const parsed = JSON.parse(text) as AiPrecloseOutput;
+    const parsed = parseJsonLoose<AiPrecloseOutput>(text);
     return parsed;
   } catch {
     return makeFallbackPreclose(positions);

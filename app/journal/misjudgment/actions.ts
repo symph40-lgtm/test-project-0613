@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { getAiClient, hasAiKey } from "@/lib/ai/client";
+import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
 import { getPersonalizationSettings } from "../insights/actions";
 
 export type MisjudgmentLog = {
@@ -132,7 +132,7 @@ ${context}
     });
 
     const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
-    return JSON.parse(text) as MisjudgmentReport;
+    return parseJsonLoose<MisjudgmentReport>(text);
   } catch {
     return fallback;
   }

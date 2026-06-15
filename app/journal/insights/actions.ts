@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getAiClient, hasAiKey } from "@/lib/ai/client";
+import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
 
 export type PersonalizationSettings = {
   enabled: boolean;
@@ -134,7 +134,7 @@ ${summary}
     });
 
     const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
-    return JSON.parse(text) as InsightsData;
+    return parseJsonLoose<InsightsData>(text);
   } catch {
     return makeRuleBased();
   }
