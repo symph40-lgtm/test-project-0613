@@ -111,14 +111,30 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
           {/* 수급 */}
           <Card className="mt-4">
             <SectionLabel>수급</SectionLabel>
-            <ul className="space-y-1.5">
-              {supplyNotes.map((s) => (
-                <li key={s} className="flex gap-2 text-[16px]">
-                  <span className="text-ink-48">·</span>
-                  {s}
-                </li>
-              ))}
-            </ul>
+            {supplyNotes.length > 0 ? (
+              <ul className="space-y-1.5">
+                {supplyNotes.map((s) => (
+                  <li key={s} className="flex gap-2 text-[16px]">
+                    <span className="text-ink-48">·</span>
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-[15px] text-ink-80">
+                <p>
+                  지수 흐름 기반 수급 위험 점수:{" "}
+                  <span className="font-semibold">
+                    {riskScores ? Math.round(riskScores.supply) : "—"}점
+                  </span>{" "}
+                  ({riskScores ? scoreNote(riskScores.supply) : "—"})
+                </p>
+                <p className="mt-1 text-[13px] text-ink-48">
+                  외국인·기관 실시간 매매 수급 데이터는 현재 연동돼 있지 않아, 주요 지수
+                  등락으로 추정한 수급 위험만 표시합니다.
+                </p>
+              </div>
+            )}
           </Card>
 
           {/* 핵심 이슈 */}
