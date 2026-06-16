@@ -72,6 +72,28 @@ export function hasFredKey(): boolean {
   return Boolean(process.env.FRED_API_KEY);
 }
 
+// FOMC 정례회의 결과 발표일 (둘째 날, 미 동부 14:00 발표)
+// 미 연준이 사전 공표한 2026년 일정. FRED 릴리즈에는 없어 별도 관리.
+const FOMC_ANNOUNCEMENTS_2026 = [
+  "2026-01-28",
+  "2026-03-18",
+  "2026-04-29",
+  "2026-06-17",
+  "2026-07-29",
+  "2026-09-16",
+  "2026-10-28",
+  "2026-12-09",
+];
+
+function fomcEventsInRange(start: string, end: string): EconEvent[] {
+  return FOMC_ANNOUNCEMENTS_2026.filter((d) => d >= start && d <= end).map((date) => ({
+    name: "미국 FOMC 통화정책 결정",
+    date,
+    timeKst: etToKst(date, 14, 0), // 14:00 ET → 익일 새벽 KST
+    importance: "high" as const,
+  }));
+}
+
 // 당일 포함 향후 days일 내 주요 미국 경제지표 일정
 export async function fetchUpcomingUsEvents(days = 5): Promise<EconEvent[]> {
   const apiKey = process.env.FRED_API_KEY;
@@ -115,6 +137,15 @@ export async function fetchUpcomingUsEvents(days = 5): Promise<EconEvent[]> {
       });
     }
 
+    // FOMC 일정 병합
+    for (const f of fomcEventsInRange(start, end)) {
+      const key = `${f.name}|${f.date}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        events.push(f);
+      }
+    }
+
     // 날짜 → 중요도 순 정렬
     events.sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? -1 : 1;
@@ -124,6 +155,7 @@ export async function fetchUpcomingUsEvents(days = 5): Promise<EconEvent[]> {
 
     return events.slice(0, 8);
   } catch {
-    return [];
+    // FRED 실패해도 FOMC는 표시
+    return fomcEventsInRange(start, end);
   }
 }

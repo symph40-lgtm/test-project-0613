@@ -18,16 +18,27 @@ function fmtEventDate(dateStr: string): string {
   return label;
 }
 
+type EventScenario = {
+  eventName: string;
+  date: string;
+  timeKst: string;
+  scenarios: { result: string; impact: string }[];
+} | null;
+
 export default function PrecloseClient({
   snapshot,
   preclose,
   econEvents,
   fredConfigured,
+  marketSummary,
+  eventScenario,
 }: {
   snapshot: BriefingSnapshot | null;
   preclose: AiPrecloseOutput | null;
   econEvents: EconEvent[];
   fredConfigured: boolean;
+  marketSummary: string;
+  eventScenario: EventScenario;
 }) {
   const router = useRouter();
   const [booked, setBooked] = useState(false);
@@ -54,13 +65,14 @@ export default function PrecloseClient({
         </p>
       </div>
 
-      {/* 오늘 장 요약 */}
-      {preclose?.todaySummary && (
-        <Card className="mt-4">
-          <SectionLabel>오늘 장 요약</SectionLabel>
-          <p className="text-[15px] text-ink-80">{preclose.todaySummary}</p>
-        </Card>
-      )}
+      {/* 오늘 장 요약 — 시세 기반 (항상 표시) */}
+      <Card className="mt-4">
+        <SectionLabel>오늘 장 요약</SectionLabel>
+        <p className="text-[15px] text-ink-80">{marketSummary}</p>
+        {preclose?.todaySummary && !preclose.todaySummary.includes("AI 분석을 사용할 수 없") && (
+          <p className="mt-2 text-[14px] text-ink-48">{preclose.todaySummary}</p>
+        )}
+      </Card>
 
       {/* 주요 경제지표 일정 — 실제 캘린더(FRED) 우선, 없으면 AI 예측 */}
       {econEvents.length > 0 ? (
@@ -104,14 +116,21 @@ export default function PrecloseClient({
         </Card>
       ) : null}
 
-      {/* 결과별 시나리오 */}
-      {preclose?.scenarios && preclose.scenarios.length > 0 && (
+      {/* 결과별 시나리오 — 다가오는 실제 지표 기준 */}
+      {eventScenario && (
         <Card className="mt-4">
-          <SectionLabel>결과별 시나리오</SectionLabel>
-          <ul className="divide-y divide-divider">
-            {preclose.scenarios.map((s) => (
+          <SectionLabel>다가오는 지표 영향 시나리오</SectionLabel>
+          <p className="text-[14px] text-ink-80">
+            가장 임박한 주요 지표:{" "}
+            <span className="font-semibold">{eventScenario.eventName}</span>{" "}
+            <span className="text-ink-48">
+              ({eventScenario.date} · {eventScenario.timeKst} 한국시간)
+            </span>
+          </p>
+          <ul className="mt-2 divide-y divide-divider">
+            {eventScenario.scenarios.map((s) => (
               <li key={s.result} className="flex gap-3 py-2.5">
-                <span className="w-20 shrink-0 text-[15px] font-semibold">{s.result}</span>
+                <span className="w-24 shrink-0 text-[15px] font-semibold">{s.result}</span>
                 <span className="text-[15px] text-ink-80">{s.impact}</span>
               </li>
             ))}
