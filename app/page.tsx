@@ -4,6 +4,9 @@ import { GlobalNav } from "./_components/Shell";
 import { ButtonLink } from "./_components/Button";
 import { createClient } from "@/lib/supabase/server";
 
+// 로그인 상태에 따라 항상 최신으로 렌더링 (캐시 방지)
+export const dynamic = "force-dynamic";
+
 const features = [
   {
     icon: TrendingUp,
