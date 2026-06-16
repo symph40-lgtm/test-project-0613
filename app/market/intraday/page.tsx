@@ -14,6 +14,7 @@ import {
   stagePosture,
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
+import { recommendForHolding } from "@/lib/market/recommend";
 import { fetchSemiAiEarnings } from "@/lib/market/earnings";
 import { fetchPositionNews } from "@/lib/news/fetch";
 import IntradayClient from "./_client";
@@ -98,6 +99,21 @@ export default async function IntradaySummaryPage() {
     };
   });
 
+  // 보유 종목별 매매 판단 (매수/보유/매도 + 3단계)
+  const recs = (positions ?? []).map((p) =>
+    recommendForHolding(
+      {
+        ticker: p.ticker,
+        weight: Number(p.weight),
+        is_leverage: p.is_leverage,
+        sector: p.sector,
+        risk_level: p.risk_level as string | null,
+        changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
+      },
+      { composite, soxChange: market.sox.changePercent },
+    ),
+  );
+
   return (
     <IntradayClient
       market={{
@@ -119,6 +135,7 @@ export default async function IntradaySummaryPage() {
       semiCompare={semiCompare}
       earnings={earnings}
       holdings={holdings}
+      recs={recs}
       news={news}
     />
   );

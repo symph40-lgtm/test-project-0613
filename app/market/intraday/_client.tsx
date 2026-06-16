@@ -9,6 +9,8 @@ import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
 import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain } from "./actions";
+import { HoldingCalls } from "../../_components/HoldingCalls";
+import type { Recommendation } from "@/lib/market/recommend";
 
 type Sess = "프리장" | "애프터장" | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
@@ -88,11 +90,11 @@ function SessionTag({ session }: { session?: Sess }) {
 }
 
 export default function IntradayClient({
-  market, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, news,
+  market, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
 }: {
   market: MarketBlock; composite: number; stage: string; posture: Posture;
   session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
-  earnings: EarningsEvent[]; holdings: Holding[]; news: NewsItem[];
+  earnings: EarningsEvent[]; holdings: Holding[]; recs: Recommendation[]; news: NewsItem[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -426,6 +428,14 @@ export default function IntradayClient({
             ))}
           </div>
           <p className="mt-3 text-[12px] text-ink-48">한국 종목은 약 15분 지연 시세일 수 있습니다 (Yahoo Finance).</p>
+        </Card>
+      )}
+
+      {/* 보유 종목별 매매 판단 (매수/보유/매도 · 3단계) */}
+      {recs.length > 0 && (
+        <Card className="mt-4">
+          <SectionLabel>보유 종목 매매 판단 (매수·보유·매도 · 3단계)</SectionLabel>
+          <HoldingCalls recs={recs} />
         </Card>
       )}
 

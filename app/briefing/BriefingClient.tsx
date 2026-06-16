@@ -7,14 +7,18 @@ import { GlobalNav, SubNav, Disclaimer } from "../_components/Shell";
 import { ButtonLink, Button } from "../_components/Button";
 import { Tile, ActionList, StateNote } from "../_components/primitives";
 import { stagePosture } from "@/lib/market/risk";
+import { HoldingCalls } from "../_components/HoldingCalls";
+import type { Recommendation } from "@/lib/market/recommend";
 import type { BriefingSnapshot } from "@/lib/market/types";
 
 export default function BriefingClient({
   snapshot,
   hasBookmark,
+  recs = [],
 }: {
   snapshot: BriefingSnapshot | null;
   hasBookmark: boolean;
+  recs?: Recommendation[];
 }) {
   const router = useRouter();
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -107,6 +111,20 @@ export default function BriefingClient({
                 <ActionList title="하지 말아야 할 행동" items={ai.donts ?? []} tone="dont" />
               </div>
             </Tile>
+
+            {/* 보유 종목별 매매 판단 */}
+            {recs.length > 0 && (
+              <Tile tone="light">
+                <div className="mx-auto w-full max-w-[820px]">
+                  <h3 className="text-[14px] font-semibold tracking-[-0.224px] text-ink-48">
+                    보유 종목 매매 판단 (매수·보유·매도 · 3단계)
+                  </h3>
+                  <div className="mt-3">
+                    <HoldingCalls recs={recs} />
+                  </div>
+                </div>
+              </Tile>
+            )}
 
             {/* 버핏식 관점 */}
             <Tile tone="parchment">
