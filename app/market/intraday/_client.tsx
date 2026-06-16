@@ -8,6 +8,7 @@ import { Button } from "../../_components/Button";
 import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
+import { getIntradayConsult, type IntradayConsult } from "./actions";
 
 type Ind = { price: number | null; changePercent: number | null };
 type MarketBlock = {
@@ -51,6 +52,13 @@ function Chg({ v }: { v: number | null }) {
   );
 }
 
+// 매매 액션 배지 색 (한국식: 매수=빨강, 매도=파랑)
+function callStyle(action: string): string {
+  if (action.includes("매수")) return "bg-red-50 text-red-600";
+  if (action.includes("매도") || action.includes("축소")) return "bg-blue-50 text-blue-600";
+  return "bg-ink/10 text-ink-80";
+}
+
 // 장세 단계 풀이
 function stageMeaning(stage: string): string {
   if (stage.startsWith("상승장"))
@@ -70,6 +78,20 @@ export default function IntradayClient({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [refreshing, setRefreshing] = useState(false);
+  const [consult, setConsult] = useState<IntradayConsult | null>(null);
+  const [consulting, setConsulting] = useState(false);
+
+  function runConsult() {
+    setConsulting(true);
+    startTransition(async () => {
+      try {
+        const r = await getIntradayConsult();
+        setConsult(r);
+      } finally {
+        setConsulting(false);
+      }
+    });
+  }
 
   const fetchedTime = new Date(market.fetchedAt).toLocaleTimeString("ko-KR", {
     hour: "2-digit", minute: "2-digit",
@@ -140,6 +162,54 @@ export default function IntradayClient({
       <Card className="mt-4">
         <SectionLabel>지금 ({session.label}) 무엇을 봐야 하나</SectionLabel>
         <p className="text-[15px] leading-relaxed text-ink-80">{session.focus}</p>
+      </Card>
+
+      {/* AI 매매 컨설팅 (클릭 시 그 시점 데이터로 종목별 판단 생성) */}
+      <Card className="mt-4">
+        <div className="flex items-center justify-between gap-3">
+          <SectionLabel>AI 매매 컨설팅</SectionLabel>
+          <Button variant="primary" onClick={runConsult} disabled={isPending} className="!px-4 !py-2 !text-[14px]">
+            {consulting ? "분석 중…" : consult ? "다시 분석" : "지금 컨설팅 받기"}
+          </Button>
+        </div>
+
+        {!consult && !consulting && (
+          <p className="text-[14px] text-ink-48">
+            현재 세션·장세·보유 종목을 종합해 종목별 매수/매도/유지 판단을 생성합니다.
+          </p>
+        )}
+
+        {consult && (
+          <div className="mt-1">
+            <div className="rounded-[10px] border border-hairline bg-pearl p-3">
+              <p className="text-[15px] leading-snug">{consult.overall}</p>
+              <p className="mt-1.5 text-[12px] text-ink-48">
+                {consult.session} · {consult.stage} ·{" "}
+                {new Date(consult.generatedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 생성
+                {consult.isFallback ? " · AI 비활성(기본 판단)" : ""}
+              </p>
+            </div>
+
+            {consult.calls.length > 0 && (
+              <ul className="mt-3 divide-y divide-divider">
+                {consult.calls.map((c) => (
+                  <li key={c.ticker} className="py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[15px] font-medium">{c.ticker}</span>
+                      <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-medium ${callStyle(c.action)}`}>
+                        {c.action}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[13px] leading-snug text-ink-80">{c.reason}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-[12px] text-ink-48">
+              투자 권유가 아니라 리스크 코칭입니다. 최종 판단·책임은 본인에게 있습니다.
+            </p>
+          </div>
+        )}
       </Card>
 
       {/* 주요 지표 — 값 + 등락률 */}

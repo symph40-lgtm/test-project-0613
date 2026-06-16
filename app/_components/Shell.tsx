@@ -83,7 +83,7 @@ export function Disclaimer() {
   return (
     <p className="mt-8 text-[12px] leading-relaxed text-ink-48">
       스탁가드는 저장한 원칙과 현재 위험 조건에 근거한 리스크 코칭을 제공하며, 투자 권유나
-      매매 지시가 아닙니다. 최종 판단과 책임은 본인에게 있습니다. (목업 · 더미 데이터)
+      매매 지시가 아닙니다. 최종 판단과 책임은 본인에게 있습니다.
     </p>
   );
 }
