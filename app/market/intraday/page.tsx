@@ -107,6 +107,7 @@ export default async function IntradaySummaryPage() {
         usdkrw: indicator(market.usdkrw),
         oil: indicator(market.oil),
         treasury10y: indicator(market.treasury10y),
+        vix: indicator(market.vix),
         fetchedAt: market.fetchedAt,
       }}
       composite={composite}

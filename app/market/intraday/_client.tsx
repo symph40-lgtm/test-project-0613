@@ -13,7 +13,7 @@ import { getIntradayConsult, type IntradayConsult } from "./actions";
 type Sess = "프리장" | "애프터장" | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
 type MarketBlock = {
-  nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind;
+  nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind; vix: Ind;
   fetchedAt: string;
 };
 type Posture = { stance: string; aggressiveness: number; guidance: string };
@@ -250,7 +250,18 @@ export default function IntradayClient({
       </Card>
 
       {/* 채권(미국채 10Y) 흐름 */}
-      <BondCard ind={market.treasury10y} history={bondHistory} etf={bondEtf} />
+      <BondCard
+        ind={market.treasury10y}
+        history={bondHistory}
+        etf={bondEtf}
+        signals={{
+          nasdaq: market.nasdaq.changePercent,
+          sox: market.sox.changePercent,
+          usdkrw: market.usdkrw.changePercent,
+          vixLevel: market.vix.price,
+          vixChange: market.vix.changePercent,
+        }}
+      />
 
       {/* 글로벌 반도체 비교 (한국 ↔ 미국 메모리/스토리지) */}
       {semiCompare.length > 0 && (
@@ -360,7 +371,95 @@ export default function IntradayClient({
   );
 }
 
-function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: BondEtf }) {
+type BondSignals = {
+  nasdaq: number | null;
+  sox: number | null;
+  usdkrw: number | null;
+  vixLevel: number | null;
+  vixChange: number | null;
+};
+
+// 채권 가격 추세 + 동반 신호로 반도체 영향 국면 분류
+function classifyBondRegime(
+  priceTrend: "상승" | "하락" | "보합",
+  s: BondSignals,
+): { verdict: "긍정" | "주의" | "부정" | "중립"; headline: string; detail: string; action: string } {
+  const equityUp = (s.nasdaq ?? 0) > 0 && (s.sox ?? 0) > 0;
+  const equityDown = (s.nasdaq ?? 0) < 0 && (s.sox ?? 0) < 0;
+  const wonWeak = (s.usdkrw ?? 0) > 0.3; // 원화 약세(달러 강세) = 한국 반도체 부담
+  const fear = (s.vixLevel ?? 0) >= 20 || (s.vixChange ?? 0) > 5;
+
+  if (priceTrend === "상승") {
+    // 채권 가격 상승 = 금리 하락
+    if (equityDown || fear) {
+      return {
+        verdict: "부정",
+        headline: "위험회피형 채권 강세 — 반도체에 부정적 신호",
+        detail:
+          "채권 가격이 오르는데 나스닥·반도체(SOX)가 동반 약세이고 변동성(VIX)이 높습니다. 금리 하락이 '경기 둔화·안전자산 도피' 때문일 가능성이 큽니다. 이런 국면에서는 반도체주에 부정적입니다.",
+        action: "추격 매수보다 관망·비중 축소 검토. 반등해도 추세 전환 확인 후 대응이 안전합니다.",
+      };
+    }
+    if (equityUp) {
+      return {
+        verdict: "긍정",
+        headline: "금리 하락형 채권 강세 — 반도체에 우호적",
+        detail:
+          "채권 가격 상승(금리 하락)에 나스닥·반도체(SOX)가 동반 상승합니다. 할인율 하락이 성장주·반도체 밸류에이션 부담을 덜어주는 '좋은 금리 하락' 국면입니다." +
+          (wonWeak ? " 다만 원화 약세는 외국인 수급에 부담일 수 있습니다." : " 원/달러도 안정적이라 외국인 수급에 우호적입니다."),
+        action: "마이크론·삼성전자·SK하이닉스 등 비중 확대를 검토할 수 있는 구간. 단 분할 접근 권장.",
+      };
+    }
+    return {
+      verdict: "중립",
+      headline: "채권 강세(금리 하락) — 방향 혼조",
+      detail:
+        "금리 하락 자체는 반도체에 우호적이나, 증시가 뚜렷한 방향을 보이지 않습니다. 나스닥·SOX·환율이 같이 돌아서는지 확인이 필요합니다.",
+      action: "나스닥·SOX 동반 상승 확인 시 매수, 동반 하락 시 관망.",
+    };
+  }
+
+  if (priceTrend === "하락") {
+    // 채권 가격 하락 = 금리 상승
+    if (equityDown || wonWeak) {
+      return {
+        verdict: "부정",
+        headline: "금리 상승 부담 — 반도체에 부정적",
+        detail:
+          "채권 가격 하락(금리 상승)에 증시도 약하거나 원화가 약세입니다. 할인율·차입비용 상승으로 기술주·반도체·레버리지에 부담이 큰 국면입니다.",
+        action: "레버리지·고비중 종목 축소 검토. 금리 진정 신호 전까지 신규 진입 보류.",
+      };
+    }
+    if (equityUp) {
+      return {
+        verdict: "주의",
+        headline: "금리 상승에도 위험선호 — 견조하나 주의",
+        detail:
+          "금리가 오르는데도 나스닥·반도체가 버티고 있습니다. 실적·업황 기대가 금리 부담을 상쇄하는 국면이나, 금리가 더 오르면 변동성이 커질 수 있습니다.",
+        action: "보유는 유지 가능하나 신규 비중 확대는 신중히. 금리 추가 상승 여부 모니터링.",
+      };
+    }
+    return {
+      verdict: "주의",
+      headline: "금리 상승 — 부담 누적 주의",
+      detail: "채권 가격 하락(금리 상승)이 진행 중입니다. 증시 방향이 불확실해 반도체 변동성에 유의해야 합니다.",
+      action: "추격 매수 자제, 금리·환율 안정 확인 후 대응.",
+    };
+  }
+
+  return {
+    verdict: "중립",
+    headline: "채권 가격 보합 — 뚜렷한 신호 없음",
+    detail: "채권 가격 변동이 크지 않아 금리발 방향성은 제한적입니다. 나스닥·SOX·환율 등 다른 신호를 우선 참고하세요.",
+    action: "채권보다 증시·환율·업황 신호 중심으로 판단.",
+  };
+}
+
+function BondCard({
+  ind, history, etf, signals,
+}: {
+  ind: Ind; history: BondPoint[]; etf: BondEtf; signals: BondSignals;
+}) {
   const yieldChange = ind.changePercent;
 
   // 채권 가격 방향: 실제 TLT 가격 추세(기간 시작 vs 끝) 기준 — 차트와 일치
@@ -420,29 +519,40 @@ function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: 
         </p>
       )}
 
-      {/* 증시 영향 인사이트 — 추세 방향 기준 */}
-      {trendDir && trendDir !== "보합" && (
-        <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
-          <p className="text-[13px] font-semibold text-ink-48">증시 영향</p>
-          {trendDir === "상승" ? (
-            <p className="mt-1 text-[14px] leading-snug text-ink-80">
-              채권 가격 상승(금리 하락)은 <b>주식 밸류에이션에 우호적</b>입니다. 할인율이
-              낮아져 성장주·기술주·반도체에 특히 긍정적이며, 위험자산 선호가 살아날 수 있습니다.
-              다만 <b>급격한 채권 강세</b>는 경기 침체·안전자산 도피 신호일 수 있어, 동반되는
-              주가 약세 여부를 함께 봐야 합니다.
+      {/* 동반 신호 */}
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+        <span className="text-ink-48">나스닥 <span className={colorOf(signals.nasdaq)}>{fmtPct(signals.nasdaq)}</span></span>
+        <span className="text-ink-48">반도체SOX <span className={colorOf(signals.sox)}>{fmtPct(signals.sox)}</span></span>
+        <span className="text-ink-48">달러/원 <span className={colorOf(signals.usdkrw)}>{fmtPct(signals.usdkrw)}</span></span>
+        <span className="text-ink-48">VIX {signals.vixLevel?.toFixed(1) ?? "—"} <span className={colorOf(signals.vixChange)}>{fmtPct(signals.vixChange)}</span></span>
+      </div>
+
+      {/* 반도체 영향 국면 판단 */}
+      {trendDir && (() => {
+        const r = classifyBondRegime(trendDir, signals);
+        const vColor =
+          r.verdict === "긍정" ? "bg-red-50 text-red-600"
+          : r.verdict === "부정" ? "bg-blue-50 text-blue-600"
+          : "bg-ink/10 text-ink-80";
+        return (
+          <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${vColor}`}>
+                반도체 영향: {r.verdict}
+              </span>
+              <span className="text-[14px] font-semibold">{r.headline}</span>
+            </div>
+            <p className="mt-1.5 text-[14px] leading-snug text-ink-80">{r.detail}</p>
+            <p className="mt-2 text-[14px] leading-snug">
+              <span className="font-semibold text-ink-48">매매 시사점 · </span>
+              {r.action}
             </p>
-          ) : (
-            <p className="mt-1 text-[14px] leading-snug text-ink-80">
-              채권 가격 하락(금리 상승)은 <b>주식, 특히 기술주·레버리지·고성장주에 부담</b>입니다.
-              할인율이 높아져 밸류에이션 압박이 커지고, 차입 비용 상승으로 위험자산 선호가 약해질
-              수 있습니다. 금리 상승이 가파를수록 반도체·성장주 변동성에 유의하세요.
-            </p>
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       <p className="mt-2 text-[12px] text-ink-48">
-        금리와 채권 가격은 반대로 움직입니다. 위 판단은 최근 가격 추세 기준이며, 당일 등락은 다를 수 있습니다.
+        금리와 채권 가격은 반대로 움직입니다. 위 판단은 최근 가격 추세 + 동반 신호(나스닥·SOX·환율·VIX) 기준이며, 투자 권유가 아닙니다.
       </p>
     </Card>
   );

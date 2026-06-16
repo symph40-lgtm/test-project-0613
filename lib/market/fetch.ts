@@ -118,6 +118,7 @@ const SYMBOLS = {
   usdkrw: "USDKRW=X",
   oil: "CL=F",
   treasury10y: "^TNX",
+  vix: "^VIX",
 } as const;
 
 async function fetchQuote(symbol: string): Promise<QuoteData> {
@@ -238,7 +239,7 @@ export async function fetchTreasuryHistory(limit = 20): Promise<TreasuryPoint[]>
 }
 
 export async function fetchMarketData(): Promise<MarketData> {
-  const [sp500, nasdaq, sox, kospi, usdkrw, oil, treasury10y, fredRate] =
+  const [sp500, nasdaq, sox, kospi, usdkrw, oil, treasury10y, vix, fredRate] =
     await Promise.all([
       fetchQuote(SYMBOLS.sp500),
       fetchQuote(SYMBOLS.nasdaq),
@@ -247,6 +248,7 @@ export async function fetchMarketData(): Promise<MarketData> {
       fetchQuote(SYMBOLS.usdkrw),
       fetchQuote(SYMBOLS.oil),
       fetchQuote(SYMBOLS.treasury10y),
+      fetchQuote(SYMBOLS.vix),
       fetchFredRate(),
     ]);
 
@@ -267,6 +269,7 @@ export async function fetchMarketData(): Promise<MarketData> {
     usdkrw,
     oil,
     treasury10y,
+    vix,
     fetchedAt: new Date().toISOString(),
   };
 }
