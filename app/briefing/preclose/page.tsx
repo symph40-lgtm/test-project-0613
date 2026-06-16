@@ -2,6 +2,7 @@ import { getBriefing } from "../actions";
 import { createClient } from "@/lib/supabase/server";
 import { generatePreclose } from "@/lib/ai/briefing";
 import { fetchUpcomingUsEvents, hasFredKey, type EconEvent } from "@/lib/calendar/fred";
+import { fetchHoldingsFlow, toKrCode, type StockFlow } from "@/lib/market/naver-flow";
 import PrecloseClient from "./PrecloseClient";
 import type { AiPrecloseOutput, MarketData, RiskScores } from "@/lib/market/types";
 
@@ -82,6 +83,7 @@ export default async function PreClosePage() {
   const [snapshot, econEvents] = await Promise.all([getBriefing(), fetchUpcomingUsEvents(5)]);
 
   let preclose: AiPrecloseOutput | null = null;
+  let supplyFlows: StockFlow[] = [];
 
   if (snapshot?.market_data && snapshot.risk_scores && snapshot.risk_score !== null) {
     const supabase = await createClient();
@@ -92,8 +94,9 @@ export default async function PreClosePage() {
     if (user) {
       const { data: positions } = await supabase
         .from("positions")
-        .select("ticker, weight, is_leverage, sector")
-        .eq("user_id", user.id);
+        .select("ticker, name, weight, is_leverage, sector")
+        .eq("user_id", user.id)
+        .order("weight", { ascending: false });
 
       preclose = await generatePreclose(
         snapshot.market_data as MarketData,
@@ -101,6 +104,21 @@ export default async function PreClosePage() {
         snapshot.risk_score,
         positions ?? [],
       );
+
+      // 네이버 수급(외국인·기관 순매매)
+      const krHoldings = (positions ?? [])
+        .map((p) => {
+          const code = toKrCode(p.name as string | null, p.ticker);
+          return code ? { ticker: p.ticker, code } : null;
+        })
+        .filter((v): v is { ticker: string; code: string } => v !== null);
+      if (krHoldings.length > 0) {
+        try {
+          supplyFlows = await fetchHoldingsFlow(krHoldings, 6);
+        } catch {
+          supplyFlows = [];
+        }
+      }
     }
   }
 
@@ -115,6 +133,7 @@ export default async function PreClosePage() {
       fredConfigured={hasFredKey()}
       marketSummary={marketSummary}
       eventScenario={eventScenario}
+      supplyFlows={supplyFlows}
     />
   );
 }

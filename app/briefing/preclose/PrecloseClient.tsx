@@ -9,6 +9,13 @@ import { Card, SectionLabel, MetaRow } from "../../_components/primitives";
 import { bookmarkNextBriefing } from "./actions";
 import type { BriefingSnapshot, AiPrecloseOutput } from "@/lib/market/types";
 import type { EconEvent } from "@/lib/calendar/fred";
+import type { StockFlow } from "@/lib/market/naver-flow";
+
+function flowText(v: number | null): { text: string; cls: string } {
+  if (v === null) return { text: "—", cls: "text-ink-48" };
+  const cls = v > 0 ? "text-red-600" : v < 0 ? "text-blue-600" : "text-ink-48";
+  return { text: `${v > 0 ? "+" : ""}${v.toLocaleString("ko-KR")}주`, cls };
+}
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 function fmtEventDate(dateStr: string): string {
@@ -32,6 +39,7 @@ export default function PrecloseClient({
   fredConfigured,
   marketSummary,
   eventScenario,
+  supplyFlows,
 }: {
   snapshot: BriefingSnapshot | null;
   preclose: AiPrecloseOutput | null;
@@ -39,6 +47,7 @@ export default function PrecloseClient({
   fredConfigured: boolean;
   marketSummary: string;
   eventScenario: EventScenario;
+  supplyFlows: StockFlow[];
 }) {
   const router = useRouter();
   const [booked, setBooked] = useState(false);
@@ -147,8 +156,29 @@ export default function PrecloseClient({
             <p className="mt-2 text-[15px] font-semibold">{snapshot?.stage ?? ai.stage}</p>
           </Card>
           <Card>
-            <SectionLabel>수급</SectionLabel>
-            <p className="text-[15px] text-ink-80">{(ai.supplyNotes ?? []).join(" · ")}</p>
+            <SectionLabel>수급 (외국인·기관 순매매)</SectionLabel>
+            {supplyFlows.length > 0 ? (
+              <>
+                <ul className="divide-y divide-divider">
+                  {supplyFlows.map((f) => {
+                    const fo = flowText(f.foreign);
+                    const inst = flowText(f.institution);
+                    return (
+                      <li key={f.code} className="flex items-center justify-between gap-2 py-1.5 text-[14px]">
+                        <span>{f.ticker}</span>
+                        <span className="flex gap-2 tabular-nums">
+                          <span className={fo.cls}>외 {fo.text}</span>
+                          <span className={inst.cls}>기 {inst.text}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="mt-2 text-[11px] text-ink-48">{supplyFlows[0]?.date} · 출처: 네이버 금융</p>
+              </>
+            ) : (
+              <p className="text-[15px] text-ink-80">{(ai.supplyNotes ?? []).join(" · ") || "보유 한국 종목 수급 데이터가 없습니다."}</p>
+            )}
           </Card>
         </div>
       )}

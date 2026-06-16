@@ -38,7 +38,9 @@ function makeFallbackBriefing(scores: RiskScores, composite: number): AiBriefing
   };
 }
 
-function makeFallbackPreclose(positions: { ticker: string }[]): AiPrecloseOutput {
+function makeFallbackPreclose(
+  positions: { ticker: string; weight?: number; is_leverage?: boolean }[],
+): AiPrecloseOutput {
   return {
     todaySummary:
       "AI 분석을 사용할 수 없어 일반 가이드를 표시합니다. (ANTHROPIC_API_KEY 설정 및 서버 재시작 필요)",
@@ -48,7 +50,15 @@ function makeFallbackPreclose(positions: { ticker: string }[]): AiPrecloseOutput
     ],
     perStockCalls: positions.map((p) => ({
       ticker: p.ticker,
-      call: "현황 유지 (AI 분석 비활성)",
+      // 위험도 기반 기본 판단 (AI 미사용 시)
+      call:
+        p.is_leverage && (p.weight ?? 0) >= 15
+          ? "비중 관리 검토 (레버리지·고비중)"
+          : p.is_leverage
+            ? "변동성 주의 (레버리지)"
+            : (p.weight ?? 0) >= 30
+              ? "비중 점검 (고비중)"
+              : "현황 유지 가능",
     })),
     scenarios: [
       { result: "야간 미국 지표(CPI/고용 등) 예상 상회", impact: "금리 상승 → 기술주·레버리지 부담 확대 가능" },
