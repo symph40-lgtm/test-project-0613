@@ -1,14 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
-import { fetchMarketData, fetchPositionQuotes } from "@/lib/market/fetch";
+import { fetchMarketData, fetchPositionQuotes, fetchTreasuryHistory } from "@/lib/market/fetch";
 import {
   calculateRiskScores,
   calculateCompositeScore,
   classifyStage,
+  stagePosture,
 } from "@/lib/market/risk";
+import { getMarketSession } from "@/lib/market/session";
 import { fetchPositionNews } from "@/lib/news/fetch";
 import IntradayClient from "./_client";
 
-export const revalidate = 300; // 5분마다 재생성
+// 클릭(새로고침) 시 항상 그 시점 실시간 데이터를 가져오도록 동적 렌더링
+export const dynamic = "force-dynamic";
+
+function indicator(q: { price: number | null; changePercent: number | null }) {
+  return { price: q.price, changePercent: q.changePercent };
+}
 
 export default async function IntradaySummaryPage() {
   const supabase = await createClient();
@@ -25,24 +32,24 @@ export default async function IntradaySummaryPage() {
     : { data: [] };
 
   const tickers = (positions ?? []).map((p) => p.ticker);
-  // name 컬럼에 저장된 확정 심볼을 함께 전달 (정확도)
   const quoteInputs = (positions ?? []).map((p) => ({
     ticker: p.ticker,
     symbol: p.name as string | null,
   }));
 
-  // 시장 데이터 · 종목 시세 · 뉴스 병렬 조회
-  const [market, quotes, news] = await Promise.all([
+  const [market, quotes, news, bondHistory] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
+    fetchTreasuryHistory(20),
   ]);
 
   const riskScores = calculateRiskScores(market);
   const composite = calculateCompositeScore(riskScores);
   const stage = classifyStage(composite);
+  const posture = stagePosture(stage);
+  const session = getMarketSession();
 
-  // 종목별 시세를 positions에 병합
   const quoteMap = new Map(quotes.map((q) => [q.ticker, q]));
   const holdings = (positions ?? []).map((p) => {
     const q = quoteMap.get(p.ticker);
@@ -61,16 +68,19 @@ export default async function IntradaySummaryPage() {
   return (
     <IntradayClient
       market={{
-        nasdaq: market.nasdaq.changePercent,
-        sox: market.sox.changePercent,
-        kospi: market.kospi.changePercent,
-        usdkrw: market.usdkrw.changePercent,
-        oil: market.oil.changePercent,
-        treasury10y: market.treasury10y.changePercent,
+        nasdaq: indicator(market.nasdaq),
+        sox: indicator(market.sox),
+        kospi: indicator(market.kospi),
+        usdkrw: indicator(market.usdkrw),
+        oil: indicator(market.oil),
+        treasury10y: indicator(market.treasury10y),
         fetchedAt: market.fetchedAt,
       }}
       composite={composite}
       stage={stage}
+      posture={posture}
+      session={session}
+      bondHistory={bondHistory}
       holdings={holdings}
       news={news}
     />

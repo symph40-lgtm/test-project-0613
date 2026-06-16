@@ -142,6 +142,28 @@ async function fetchFredRate(): Promise<number | null> {
   }
 }
 
+export type TreasuryPoint = { date: string; value: number };
+
+// 미국 10년물 국채 금리 최근 이력 (FRED DGS10) — 채권 흐름 그래프용
+export async function fetchTreasuryHistory(limit = 20): Promise<TreasuryPoint[]> {
+  const apiKey = process.env.FRED_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const url =
+      `https://api.stlouisfed.org/fred/series/observations?series_id=DGS10` +
+      `&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${limit}`;
+    const res = await fetch(url, { next: { revalidate: 3600 } });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { observations?: { date: string; value: string }[] };
+    const points = (data.observations ?? [])
+      .map((o) => ({ date: o.date, value: parseFloat(o.value) }))
+      .filter((p) => !isNaN(p.value));
+    return points.reverse(); // 과거 → 최근 순
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchMarketData(): Promise<MarketData> {
   const [sp500, nasdaq, sox, kospi, usdkrw, oil, treasury10y, fredRate] =
     await Promise.all([

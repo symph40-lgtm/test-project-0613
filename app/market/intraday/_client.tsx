@@ -1,179 +1,205 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
+import { ExternalLink, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
 import { PageShell, Disclaimer } from "../../_components/Shell";
 import { Button } from "../../_components/Button";
-import { Card, MetaRow, SectionLabel, RiskBadge } from "../../_components/primitives";
+import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
 
-type MarketChanges = {
-  nasdaq: number | null;
-  sox: number | null;
-  kospi: number | null;
-  usdkrw: number | null;
-  oil: number | null;
-  treasury10y: number | null;
+type Ind = { price: number | null; changePercent: number | null };
+type MarketBlock = {
+  nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind;
   fetchedAt: string;
 };
-
+type Posture = { stance: string; aggressiveness: number; guidance: string };
+type Session = { key: string; label: string; focus: string };
+type BondPoint = { date: string; value: number };
 type Holding = {
-  ticker: string;
-  weight: number;
-  is_leverage: boolean;
-  sector: string | null;
-  risk_level: string | null;
-  price: number | null;
-  changePercent: number | null;
-  currency: string | null;
+  ticker: string; weight: number; is_leverage: boolean; sector: string | null;
+  risk_level: string | null; price: number | null; changePercent: number | null; currency: string | null;
 };
 
+// 한국식 색상: 상승=빨강, 하락=파랑
+function colorOf(v: number | null): string {
+  if (v === null || v === 0) return "text-ink-48";
+  return v > 0 ? "text-red-600" : "text-blue-600";
+}
 function fmtPct(v: number | null): string {
   if (v === null) return "—";
   return `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
 }
-
+function fmtNum(v: number | null, digits = 2): string {
+  if (v === null) return "—";
+  return v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
 function fmtPrice(v: number | null, currency: string | null): string {
   if (v === null) return "—";
-  const isKrw = currency === "KRW";
-  return isKrw
-    ? `${Math.round(v).toLocaleString("ko-KR")}원`
-    : `$${v.toFixed(2)}`;
+  return currency === "KRW" ? `${Math.round(v).toLocaleString("ko-KR")}원` : `$${v.toFixed(2)}`;
 }
 
-function ChangeText({ v }: { v: number | null }) {
+function Chg({ v }: { v: number | null }) {
   if (v === null) return <span className="text-ink-48">—</span>;
   const up = v > 0;
   return (
-    <span className={`inline-flex items-center gap-0.5 tabular-nums ${up ? "text-emerald-600" : v < 0 ? "text-rose-600" : "text-ink-48"}`}>
+    <span className={`inline-flex items-center gap-0.5 tabular-nums ${colorOf(v)}`}>
       {up ? <TrendingUp size={13} /> : v < 0 ? <TrendingDown size={13} /> : null}
       {fmtPct(v)}
     </span>
   );
 }
 
+// 장세 단계 풀이
+function stageMeaning(stage: string): string {
+  if (stage.startsWith("상승장"))
+    return "전반적으로 위험이 낮고 상승에 우호적인 국면입니다. 숫자가 낮은 단계일수록 더 안정적입니다.";
+  if (stage.startsWith("변동장"))
+    return "방향성이 뚜렷하지 않고 위아래로 흔들리는 국면입니다. 단계가 높을수록 변동성이 큽니다.";
+  return "하방 압력이 우세한 국면입니다. 단계가 높을수록 위험이 큽니다.";
+}
+
 export default function IntradayClient({
-  market,
-  composite,
-  stage,
-  holdings,
-  news,
+  market, composite, stage, posture, session, bondHistory, holdings, news,
 }: {
-  market: MarketChanges;
-  composite: number;
-  stage: string;
-  holdings: Holding[];
-  news: NewsItem[];
+  market: MarketBlock; composite: number; stage: string; posture: Posture;
+  session: Session; bondHistory: BondPoint[]; holdings: Holding[]; news: NewsItem[];
 }) {
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchedTime = new Date(market.fetchedAt).toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
+    hour: "2-digit", minute: "2-digit",
   });
 
-  // 주의/취약 종목 추출
+  function refresh() {
+    setRefreshing(true);
+    startTransition(() => {
+      router.refresh();
+      setTimeout(() => setRefreshing(false), 1200);
+    });
+  }
+
   const watchTickers = holdings
     .filter((h) => h.risk_level === "주의" || h.risk_level === "취약")
     .map((h) => h.ticker);
 
+  const indicators: { label: string; ind: Ind; unit?: string; digits?: number }[] = [
+    { label: "나스닥100", ind: market.nasdaq, digits: 2 },
+    { label: "반도체(SOX)", ind: market.sox, digits: 2 },
+    { label: "코스피", ind: market.kospi, digits: 2 },
+    { label: "달러/원", ind: market.usdkrw, unit: "원", digits: 1 },
+    { label: "WTI 유가", ind: market.oil, unit: "$", digits: 2 },
+    { label: "미국채 10Y 금리", ind: market.treasury10y, unit: "%", digits: 2 },
+  ];
+
   return (
-    <PageShell title="장중 시황 요약" width="narrow">
+    <PageShell title="장중 시황 요약" width="default">
+      {/* 헤더 + 새로고침 */}
       <Card>
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-[21px] font-semibold tracking-[0.231px]">
-            {fetchedTime} 기준 시황
-          </h2>
-          <span className="text-[13px] text-ink-48">실시간 시세</span>
-        </div>
-
-        <div className="mt-4 border-t border-divider pt-3">
-          <MetaRow label="시장 단계" value={stage} />
-          <MetaRow label="종합 리스크 점수" value={`${composite} / 100`} />
-          {watchTickers.length > 0 ? (
-            <div className="flex items-center justify-between py-1.5">
-              <span className="text-[14px] text-ink-48">내 종목 주의</span>
-              <span className="flex items-center gap-1.5">
-                <RiskBadge level="주의" />
-                <span className="text-[15px]">{watchTickers.join(" · ")}</span>
-              </span>
-            </div>
-          ) : null}
-        </div>
-
-        {/* 주요 지수 변화 */}
-        <div className="mt-4 rounded-[11px] border border-hairline bg-pearl p-4">
-          <SectionLabel>주요 지표</SectionLabel>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[15px]">
-            <Row label="나스닥100" v={market.nasdaq} />
-            <Row label="반도체(SOX)" v={market.sox} />
-            <Row label="코스피" v={market.kospi} />
-            <Row label="달러/원" v={market.usdkrw} />
-            <Row label="WTI 유가" v={market.oil} />
-            <Row label="미국채 10Y" v={market.treasury10y} />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-[21px] font-semibold tracking-[0.231px]">
+              {fetchedTime} 기준 실시간 시황
+            </h2>
+            <p className="mt-0.5 text-[13px] text-ink-48">
+              {session.label}
+            </p>
           </div>
+          <Button variant="secondary" onClick={refresh} disabled={isPending} className="!px-4 !py-2 !text-[14px] shrink-0">
+            <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "갱신 중…" : "실시간 새로고침"}
+          </Button>
         </div>
+
+        {/* 장세 단계 + 풀이 */}
+        <div className="mt-4 rounded-[12px] border border-hairline bg-pearl p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[18px] font-semibold">{stage}</span>
+            <span className="rounded-full bg-guard/15 px-2.5 py-0.5 text-[13px] font-medium text-guard">
+              권장 자세: {posture.stance} · 공격성 {posture.aggressiveness}/100
+            </span>
+            <span className="text-[13px] text-ink-48">종합 리스크 {composite}/100</span>
+          </div>
+          <p className="mt-2 text-[14px] leading-snug text-ink-80">{stageMeaning(stage)}</p>
+          <p className="mt-1 text-[14px] leading-snug text-ink-80">{posture.guidance}</p>
+        </div>
+
+        {watchTickers.length > 0 && (
+          <div className="mt-3 flex items-center gap-2">
+            <RiskBadge level="주의" />
+            <span className="text-[14px] text-ink-80">주의 종목: {watchTickers.join(" · ")}</span>
+          </div>
+        )}
       </Card>
 
-      {/* 보유 종목 실시간 시세 */}
-      {holdings.length > 0 ? (
-        <Card className="mt-5">
+      {/* 세션별 컨설팅 */}
+      <Card className="mt-4">
+        <SectionLabel>지금 ({session.label}) 무엇을 봐야 하나</SectionLabel>
+        <p className="text-[15px] leading-relaxed text-ink-80">{session.focus}</p>
+      </Card>
+
+      {/* 주요 지표 — 값 + 등락률 */}
+      <Card className="mt-4">
+        <SectionLabel>주요 지표</SectionLabel>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          {indicators.map(({ label, ind, unit, digits }) => (
+            <div key={label} className="flex items-baseline justify-between border-b border-divider pb-2">
+              <span className="text-[14px] text-ink-48">{label}</span>
+              <span className="flex items-baseline gap-2">
+                <span className="text-[16px] font-medium tabular-nums">
+                  {unit === "$" ? "$" : ""}{fmtNum(ind.price, digits)}{unit && unit !== "$" ? unit : ""}
+                </span>
+                <span className="w-20 text-right"><Chg v={ind.changePercent} /></span>
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[12px] text-ink-48">색상: 상승=빨강, 하락=파랑 (한국식 표기)</p>
+      </Card>
+
+      {/* 채권(미국채 10Y) 흐름 */}
+      <BondCard ind={market.treasury10y} history={bondHistory} />
+
+      {/* 보유 종목 시세 */}
+      {holdings.length > 0 && (
+        <Card className="mt-4">
           <SectionLabel>보유 종목 시세</SectionLabel>
           <div className="space-y-1">
             {holdings.map((h) => (
-              <div
-                key={h.ticker}
-                className="flex items-center justify-between gap-3 border-b border-divider py-2 last:border-0"
-              >
+              <div key={h.ticker} className="flex items-center justify-between gap-3 border-b border-divider py-2 last:border-0">
                 <div className="flex items-center gap-2">
                   <span className="text-[15px] font-medium">{h.ticker}</span>
-                  {h.is_leverage ? (
-                    <span className="rounded bg-ink/10 px-1.5 py-0.5 text-[11px] text-ink-80">
-                      레버리지
-                    </span>
-                  ) : null}
+                  {h.is_leverage && (
+                    <span className="rounded bg-ink/10 px-1.5 py-0.5 text-[11px] text-ink-80">레버리지</span>
+                  )}
                   <span className="text-[13px] text-ink-48">비중 {h.weight}%</span>
                 </div>
                 <div className="flex items-center gap-3 text-[15px]">
-                  <span className="tabular-nums text-ink-80">
-                    {fmtPrice(h.price, h.currency)}
-                  </span>
-                  <span className="w-20 text-right">
-                    <ChangeText v={h.changePercent} />
-                  </span>
+                  <span className="tabular-nums text-ink-80">{fmtPrice(h.price, h.currency)}</span>
+                  <span className="w-20 text-right"><Chg v={h.changePercent} /></span>
                 </div>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[12px] text-ink-48">
-            한국 종목은 약 15분 지연 시세일 수 있습니다 (Yahoo Finance).
-          </p>
+          <p className="mt-3 text-[12px] text-ink-48">한국 종목은 약 15분 지연 시세일 수 있습니다 (Yahoo Finance).</p>
         </Card>
-      ) : null}
+      )}
 
       {/* 관련 뉴스 */}
-      {news.length > 0 ? (
-        <Card className="mt-5">
+      {news.length > 0 && (
+        <Card className="mt-4">
           <SectionLabel>관련 뉴스</SectionLabel>
           <ul className="space-y-3">
             {news.map((n, i) => (
               <li key={i}>
-                <a
-                  href={n.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group flex items-start gap-2"
-                >
+                <a href={n.link} target="_blank" rel="noopener noreferrer" className="group flex items-start gap-2">
                   <ExternalLink size={14} className="mt-1 shrink-0 text-ink-48" />
                   <span>
-                    <span className="text-[15px] leading-snug group-hover:text-guard group-hover:underline">
-                      {n.title}
-                    </span>
+                    <span className="text-[15px] leading-snug group-hover:text-guard group-hover:underline">{n.title}</span>
                     <span className="mt-0.5 block text-[12px] text-ink-48">
-                      {n.source}
-                      {n.pubDate
-                        ? ` · ${new Date(n.pubDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}`
-                        : ""}
+                      {n.source}{n.pubDate ? ` · ${new Date(n.pubDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}` : ""}
                     </span>
                   </span>
                 </a>
@@ -181,11 +207,11 @@ export default function IntradayClient({
             ))}
           </ul>
         </Card>
-      ) : null}
+      )}
 
       <div className="mt-6">
         <Button variant="primary" size="lg" onClick={() => router.push("/briefing/preclose")}>
-          자세히 보기
+          종목별 매수·매도 판단 보기
         </Button>
       </div>
 
@@ -194,11 +220,73 @@ export default function IntradayClient({
   );
 }
 
-function Row({ label, v }: { label: string; v: number | null }) {
+function BondCard({ ind, history }: { ind: Ind; history: BondPoint[] }) {
+  const yieldChange = ind.changePercent;
+  // 금리 하락 = 채권 가격 상승 (역의 관계)
+  const bondPriceDir =
+    yieldChange === null ? null : yieldChange < 0 ? "상승" : yieldChange > 0 ? "하락" : "보합";
+
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-ink-48">{label}</span>
-      <ChangeText v={v} />
+    <Card className="mt-4">
+      <SectionLabel>채권 동향 (미국채 10년물)</SectionLabel>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span className="text-[20px] font-semibold tabular-nums">{ind.price !== null ? `${ind.price.toFixed(2)}%` : "—"}</span>
+        <span className="text-[14px]"><Chg v={yieldChange} /> <span className="text-ink-48">(금리)</span></span>
+      </div>
+
+      {bondPriceDir && (
+        <p className="mt-2 text-[14px] text-ink-80">
+          금리가 {bondPriceDir === "상승" ? "내려" : bondPriceDir === "하락" ? "올라" : "거의 변동 없어"}{" "}
+          <b className={bondPriceDir === "상승" ? "text-red-600" : bondPriceDir === "하락" ? "text-blue-600" : ""}>
+            채권 가격은 {bondPriceDir}
+          </b>{" "}
+          압력입니다. (금리와 채권 가격은 반대로 움직입니다)
+        </p>
+      )}
+
+      {history.length >= 2 && <BondSparkline points={history} />}
+
+      <p className="mt-2 text-[12px] text-ink-48">
+        금리 하락(채권 가격 상승)은 보통 위험회피·금리인하 기대 신호, 금리 상승은 인플레·긴축 신호로 해석됩니다.
+      </p>
+    </Card>
+  );
+}
+
+function BondSparkline({ points }: { points: BondPoint[] }) {
+  const W = 320, H = 64, P = 4;
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const stepX = (W - P * 2) / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = P + i * stepX;
+    const y = P + (1 - (p.value - min) / range) * (H - P * 2);
+    return [x, y] as const;
+  });
+  const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const last = points[points.length - 1].value;
+  const first = points[0].value;
+  const rising = last >= first;
+
+  return (
+    <div className="mt-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 64 }}>
+        <polyline
+          points={coords.map(([x, y]) => `${x},${y}`).join(" ")}
+          fill="none"
+          stroke={rising ? "#dc2626" : "#2563eb"}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        <path d={`${path} L${coords[coords.length - 1][0]},${H - P} L${coords[0][0]},${H - P} Z`} fill={rising ? "#dc262611" : "#2563eb11"} />
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] text-ink-48">
+        <span>{points[0].date} · {first.toFixed(2)}%</span>
+        <span>최근 {points.length}거래일</span>
+        <span>{points[points.length - 1].date} · {last.toFixed(2)}%</span>
+      </div>
     </div>
   );
 }
