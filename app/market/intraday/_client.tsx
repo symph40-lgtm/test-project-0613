@@ -72,12 +72,14 @@ function stageMeaning(stage: string): string {
   return "하방 압력이 우세한 국면입니다. 단계가 높을수록 위험이 큽니다.";
 }
 
+type SemiCmp = { ticker: string; price: number | null; changePercent: number | null; currency: string | null };
+
 export default function IntradayClient({
-  market, composite, stage, posture, session, bondHistory, bondEtf, earnings, holdings, news,
+  market, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, news,
 }: {
   market: MarketBlock; composite: number; stage: string; posture: Posture;
-  session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; earnings: EarningsEvent[];
-  holdings: Holding[]; news: NewsItem[];
+  session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
+  earnings: EarningsEvent[]; holdings: Holding[]; news: NewsItem[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -238,6 +240,28 @@ export default function IntradayClient({
       {/* 채권(미국채 10Y) 흐름 */}
       <BondCard ind={market.treasury10y} history={bondHistory} etf={bondEtf} />
 
+      {/* 글로벌 반도체 비교 (한국 ↔ 미국 메모리/스토리지) */}
+      {semiCompare.length > 0 && (
+        <Card className="mt-4">
+          <SectionLabel>글로벌 반도체 비교 (실시간)</SectionLabel>
+          <div className="space-y-1">
+            {semiCompare.map((s) => (
+              <div key={s.ticker} className="flex items-center justify-between gap-3 border-b border-divider py-2 last:border-0">
+                <span className="text-[15px] font-medium">{s.ticker}</span>
+                <div className="flex items-center gap-3 text-[15px]">
+                  <span className="tabular-nums text-ink-80">{fmtPrice(s.price, s.currency)}</span>
+                  <span className="w-20 text-right"><Chg v={s.changePercent} /></span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[12px] leading-snug text-ink-48">
+            마이크론·씨게이트·WD는 메모리·스토리지에서 삼성전자·SK하이닉스와 직접 경쟁·동조합니다.
+            이들 미국 종목의 야간 등락은 다음날 한국 반도체주 시초가에 선행 지표가 되는 경우가 많습니다.
+          </p>
+        </Card>
+      )}
+
       {/* 미국 반도체·AI 실적 일정 */}
       {earnings.length > 0 && (
         <Card className="mt-4">
@@ -362,6 +386,27 @@ function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: 
           </b>{" "}
           압력입니다. (금리와 채권 가격은 반대로 움직입니다)
         </p>
+      )}
+
+      {/* 증시 영향 인사이트 */}
+      {bondPriceDir && bondPriceDir !== "보합" && (
+        <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
+          <p className="text-[13px] font-semibold text-ink-48">증시 영향</p>
+          {bondPriceDir === "상승" ? (
+            <p className="mt-1 text-[14px] leading-snug text-ink-80">
+              채권 가격 상승(금리 하락)은 <b>주식 밸류에이션에 우호적</b>입니다. 할인율이
+              낮아져 성장주·기술주·반도체에 특히 긍정적이며, 위험자산 선호가 살아날 수 있습니다.
+              다만 <b>급격한 채권 강세</b>는 경기 침체·안전자산 도피 신호일 수 있어, 동반되는
+              주가 약세 여부를 함께 봐야 합니다.
+            </p>
+          ) : (
+            <p className="mt-1 text-[14px] leading-snug text-ink-80">
+              채권 가격 하락(금리 상승)은 <b>주식, 특히 기술주·레버리지·고성장주에 부담</b>입니다.
+              할인율이 높아져 밸류에이션 압박이 커지고, 차입 비용 상승으로 위험자산 선호가 약해질
+              수 있습니다. 금리 상승이 가파를수록 반도체·성장주 변동성에 유의하세요.
+            </p>
+          )}
+        </div>
       )}
 
       <p className="mt-2 text-[12px] text-ink-48">

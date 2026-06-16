@@ -43,14 +43,34 @@ export default async function IntradaySummaryPage() {
     symbol: p.name as string | null,
   }));
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf] = await Promise.all([
+  // 글로벌 반도체 비교군 (한국 ↔ 미국 메모리/스토리지)
+  const SEMI_COMPARE = [
+    { ticker: "삼성전자", symbol: "005930.KS" },
+    { ticker: "SK하이닉스", symbol: "000660.KS" },
+    { ticker: "마이크론 (MU)", symbol: "MU" },
+    { ticker: "씨게이트 (STX)", symbol: "STX" },
+    { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
+  ];
+
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
     fetchTreasuryHistory(20),
     fetchSemiAiEarnings(),
     fetchBondEtf("TLT"),
+    fetchPositionQuotes(SEMI_COMPARE),
   ]);
+
+  const semiCompare = SEMI_COMPARE.map((s) => {
+    const q = semiQuotes.find((x) => x.ticker === s.ticker);
+    return {
+      ticker: s.ticker,
+      price: q?.price ?? null,
+      changePercent: q?.changePercent ?? null,
+      currency: q?.currency ?? null,
+    };
+  });
 
   const riskScores = calculateRiskScores(market);
   const composite = calculateCompositeScore(riskScores);
@@ -90,6 +110,7 @@ export default async function IntradaySummaryPage() {
       session={session}
       bondHistory={bondHistory}
       bondEtf={bondEtf}
+      semiCompare={semiCompare}
       earnings={earnings}
       holdings={holdings}
       news={news}
