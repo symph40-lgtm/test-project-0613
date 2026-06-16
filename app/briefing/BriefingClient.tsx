@@ -86,6 +86,9 @@ export default function BriefingClient({
                       <p className="mt-2 text-[15px] leading-snug text-body-muted">
                         {posture.guidance}
                       </p>
+                      <p className="mt-2 text-[12px] leading-snug text-body-muted/70">
+                        ※ 단계 숫자는 상승의 크기가 아니라 위험 수준입니다. 상승장은 1단계가 가장 안정적(공격성 최고)이고, 3단계로 갈수록 후기·과열로 신중해집니다.
+                      </p>
                     </div>
                   );
                 })()}

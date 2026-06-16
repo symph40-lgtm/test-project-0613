@@ -38,27 +38,60 @@ function makeFallbackBriefing(scores: RiskScores, composite: number): AiBriefing
   };
 }
 
+// 시세 기반 오늘 장 한 줄 요약
+function buildTodayLine(m: MarketData, composite: number): string {
+  const parts: string[] = [];
+  const add = (label: string, v: number | null) => {
+    if (v !== null) parts.push(`${label} ${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
+  };
+  add("나스닥", m.nasdaq.changePercent);
+  add("SOX", m.sox.changePercent);
+  add("코스피", m.kospi.changePercent);
+  return `${parts.join(", ")} · 종합 리스크 ${composite}/100`;
+}
+
 function makeFallbackPreclose(
-  positions: { ticker: string; weight?: number; is_leverage?: boolean }[],
+  positions: { ticker: string; weight?: number; is_leverage?: boolean; sector?: string | null }[],
+  market?: MarketData,
+  composite?: number,
 ): AiPrecloseOutput {
+  const soxChg = market?.sox.changePercent ?? null;
+  const comp = composite ?? 50;
+  const highRisk = comp >= 54; // 하락 구간
+  const lowRisk = comp <= 26; // 상승 구간
+
+  // 실시간 데이터(SOX·장세) + 종목 특성으로 종목별 판단 산출
+  const callFor = (p: { weight?: number; is_leverage?: boolean; sector?: string | null }): string => {
+    const w = p.weight ?? 0;
+    const lev = !!p.is_leverage;
+    const isSemi = (p.sector ?? "").includes("반도체");
+    const semiWeak = isSemi && soxChg !== null && soxChg < -2;
+    const semiStrong = isSemi && soxChg !== null && soxChg > 1;
+
+    if (highRisk || semiWeak) {
+      if (lev) return `축소·현금화 검토${semiWeak ? ` (반도체 약세 SOX ${soxChg?.toFixed(1)}%)` : " (위험 구간)"}`;
+      return `비중 축소 검토${semiWeak ? ` (SOX ${soxChg?.toFixed(1)}%)` : ""}`;
+    }
+    if (lowRisk && (!isSemi || semiStrong || soxChg === null)) {
+      if (lev && w >= 15) return "유지 (레버리지 비중 관리)";
+      return semiStrong ? `분할 비중 확대 검토 (반도체 강세 SOX +${soxChg?.toFixed(1)}%)` : "유지 가능";
+    }
+    if (lev) return "변동성 주의·비중 관리";
+    if (w >= 30) return "비중 점검 (고비중)";
+    return "현황 유지 가능";
+  };
+
   return {
-    todaySummary:
-      "AI 분석을 사용할 수 없어 일반 가이드를 표시합니다. (ANTHROPIC_API_KEY 설정 및 서버 재시작 필요)",
+    todaySummary: market
+      ? buildTodayLine(market, comp)
+      : "시장 데이터를 분석하지 못했습니다.",
     nightEvents: [
       { event: "미국 CPI·고용지표·FOMC 등 주요 경제지표 발표 여부 확인 권장", expectedTime: "22:30 전후" },
       { event: "연준 위원 발언·국채 입찰 모니터링 권장", expectedTime: "야간" },
     ],
     perStockCalls: positions.map((p) => ({
       ticker: p.ticker,
-      // 위험도 기반 기본 판단 (AI 미사용 시)
-      call:
-        p.is_leverage && (p.weight ?? 0) >= 15
-          ? "비중 관리 검토 (레버리지·고비중)"
-          : p.is_leverage
-            ? "변동성 주의 (레버리지)"
-            : (p.weight ?? 0) >= 30
-              ? "비중 점검 (고비중)"
-              : "현황 유지 가능",
+      call: callFor(p),
     })),
     scenarios: [
       { result: "야간 미국 지표(CPI/고용 등) 예상 상회", impact: "금리 상승 → 기술주·레버리지 부담 확대 가능" },
@@ -152,7 +185,7 @@ export async function generatePreclose(
   positions: { ticker: string; weight: number; is_leverage: boolean; sector: string | null }[]
 ): Promise<AiPrecloseOutput> {
   if (!hasAiKey()) {
-    return makeFallbackPreclose(positions);
+    return makeFallbackPreclose(positions, market, composite);
   }
 
   const stage = classifyStage(composite);
@@ -192,6 +225,6 @@ ${positions.map((p) => `- ${p.ticker} 비중${p.weight}% ${p.is_leverage ? "[레
     const parsed = parseJsonLoose<AiPrecloseOutput>(text);
     return parsed;
   } catch {
-    return makeFallbackPreclose(positions);
+    return makeFallbackPreclose(positions, market, composite);
   }
 }
