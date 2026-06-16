@@ -10,12 +10,19 @@ export type StockFlow = {
   foreign: number | null;     // 외국인 순매매량(주)
 };
 
-// Yahoo 심볼/티커 → 6자리 한국 종목코드
+import { getYahooSymbol } from "../positions";
+
+// Yahoo 심볼/티커/한글명 → 6자리 한국 종목코드
 export function toKrCode(symbol: string | null, ticker: string): string | null {
-  const s = (symbol ?? "").trim();
-  const m = s.match(/^(\d{6})\.(KS|KQ)$/);
+  // 1) 저장된 심볼 (005930.KS)
+  const m = (symbol ?? "").trim().match(/^(\d{6})\.(KS|KQ)$/);
   if (m) return m[1];
+  // 2) 티커가 6자리 코드
   if (/^\d{6}$/.test(ticker.trim())) return ticker.trim();
+  // 3) 한글 종목명 → 매핑 테이블로 심볼 해석 (예: 삼성전자 → 005930.KS)
+  const resolved = getYahooSymbol(ticker);
+  const m2 = (resolved ?? "").match(/^(\d{6})\.(KS|KQ)$/);
+  if (m2) return m2[1];
   return null;
 }
 
