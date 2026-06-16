@@ -5,6 +5,15 @@ import { PageShell, Disclaimer } from "../../_components/Shell";
 import { Button } from "../../_components/Button";
 import { Card, ScoreBar, SectionLabel } from "../../_components/primitives";
 import type { BriefingSnapshot, RiskScores } from "@/lib/market/types";
+import type { StockFlow } from "@/lib/market/naver-flow";
+
+// 순매매량(주) 표기: 천 단위 + 매수(빨강)/매도(파랑)
+function flowText(v: number | null): { text: string; cls: string } {
+  if (v === null) return { text: "—", cls: "text-ink-48" };
+  const sign = v > 0 ? "+" : "";
+  const cls = v > 0 ? "text-red-600" : v < 0 ? "text-blue-600" : "text-ink-48";
+  return { text: `${sign}${v.toLocaleString("ko-KR")}주`, cls };
+}
 
 function scoreNote(score: number): string {
   if (score <= 30) return "안정";
@@ -41,7 +50,13 @@ function deriveSituationLevel(snapshot: BriefingSnapshot): number | null {
   return Math.max(0, Math.min(1, 0.5 - avg / 6));
 }
 
-export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapshot | null }) {
+export default function EvidenceClient({
+  snapshot,
+  supplyFlows = [],
+}: {
+  snapshot: BriefingSnapshot | null;
+  supplyFlows?: StockFlow[];
+}) {
   const router = useRouter();
   const ai = snapshot?.ai_output;
   const riskScores = snapshot?.risk_scores;
@@ -108,18 +123,39 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
             </ul>
           </Card>
 
-          {/* 수급 */}
+          {/* 수급 — 네이버 금융 종목별 외국인·기관 순매매 실데이터 */}
           <Card className="mt-4">
-            <SectionLabel>수급</SectionLabel>
-            {supplyNotes.length > 0 ? (
-              <ul className="space-y-1.5">
-                {supplyNotes.map((s) => (
-                  <li key={s} className="flex gap-2 text-[16px]">
-                    <span className="text-ink-48">·</span>
-                    {s}
-                  </li>
-                ))}
-              </ul>
+            <SectionLabel>수급 (외국인·기관 순매매)</SectionLabel>
+            {supplyFlows.length > 0 ? (
+              <>
+                <div className="overflow-hidden rounded-[10px] border border-hairline">
+                  <table className="w-full text-[14px]">
+                    <thead className="bg-pearl text-[12px] text-ink-48">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">종목</th>
+                        <th className="px-3 py-2 text-right font-medium">외국인</th>
+                        <th className="px-3 py-2 text-right font-medium">기관</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-divider">
+                      {supplyFlows.map((f) => {
+                        const fo = flowText(f.foreign);
+                        const inst = flowText(f.institution);
+                        return (
+                          <tr key={f.code}>
+                            <td className="px-3 py-2">{f.ticker}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${fo.cls}`}>{fo.text}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${inst.cls}`}>{inst.text}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[12px] text-ink-48">
+                  {supplyFlows[0]?.date} 기준 · 순매매량(주) · 매수=빨강, 매도=파랑 · 출처: 네이버 금융
+                </p>
+              </>
             ) : (
               <div className="text-[15px] text-ink-80">
                 <p>
@@ -130,8 +166,8 @@ export default function EvidenceClient({ snapshot }: { snapshot: BriefingSnapsho
                   ({riskScores ? scoreNote(riskScores.supply) : "—"})
                 </p>
                 <p className="mt-1 text-[13px] text-ink-48">
-                  외국인·기관 실시간 매매 수급 데이터는 현재 연동돼 있지 않아, 주요 지수
-                  등락으로 추정한 수급 위험만 표시합니다.
+                  보유 한국 종목이 없거나 수급 데이터를 불러오지 못했습니다. 지수 등락 기반
+                  추정 수급만 표시합니다.
                 </p>
               </div>
             )}
