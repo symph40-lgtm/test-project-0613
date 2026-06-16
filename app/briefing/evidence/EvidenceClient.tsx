@@ -22,6 +22,16 @@ function scoreNote(score: number): string {
   return "취약";
 }
 
+// 각 지표 산출 근거 설명
+const RISK_DESC: Record<string, string> = {
+  "금리 위험": "미국 10년물 금리의 당일 상승폭 기준. 금리가 오를수록 기술주·성장주 밸류에이션 부담이 커집니다.",
+  "환율 위험": "달러/원 상승(원화 약세)폭 기준. 원화가 약해지면 외국인 자금 이탈 부담이 커집니다.",
+  "유가 위험": "유가 급등은 인플레이션 압력(위험↑), 완만한 하락은 위험으로 보지 않고 급락만 경기둔화 신호로 반영합니다.",
+  "반도체 섹터": "필라델피아 반도체지수(SOX)의 당일 하락폭 기준. 삼성전자·SK하이닉스 등 한국 반도체에 직접 영향을 줍니다.",
+  "수급 위험": "S&P500·코스피 평균 하락폭 기준. 시장 전반의 매도 압력(수급 악화)을 나타냅니다.",
+  "채권 이동": "나스닥 하락 + 미국 금리 상승이 겹치면 점수가 오릅니다. 자금이 주식에서 안전자산(채권)으로 옮겨가려는 위험회피 압력을 뜻합니다.",
+};
+
 function riskScoresToEvidence(scores: RiskScores) {
   return [
     { label: "금리 위험", score: Math.round(scores.rate), note: scoreNote(scores.rate) },
@@ -30,7 +40,7 @@ function riskScoresToEvidence(scores: RiskScores) {
     { label: "반도체 섹터", score: Math.round(scores.semiconductor), note: scoreNote(scores.semiconductor) },
     { label: "수급 위험", score: Math.round(scores.supply), note: scoreNote(scores.supply) },
     { label: "채권 이동", score: Math.round(scores.bond), note: scoreNote(scores.bond) },
-  ];
+  ].map((s) => ({ ...s, desc: RISK_DESC[s.label] ?? "" }));
 }
 
 // 세로축(오늘 상황)을 실제 지수 등락률로 산출 — 0=완화(개선), 1=악화
@@ -86,9 +96,17 @@ export default function EvidenceClient({
             <SectionLabel>위험 점수</SectionLabel>
             <div className="divide-y divide-divider">
               {evidenceScores.map((s) => (
-                <ScoreBar key={s.label} label={s.label} score={s.score} note={s.note} />
+                <div key={s.label} className="py-1">
+                  <ScoreBar label={s.label} score={s.score} note={s.note} />
+                  {s.desc && (
+                    <p className="pl-[3px] text-[12px] leading-snug text-ink-48">{s.desc}</p>
+                  )}
+                </div>
               ))}
             </div>
+            <p className="mt-3 text-[12px] text-ink-48">
+              점수 구간: 0~30 안정 · 31~60 주의 · 61~80 높음 · 81~100 취약
+            </p>
             {issuesDuration.length > 0 && (
               <p className="mt-3 text-[14px] text-ink-48">
                 이슈 지속성:{" "}
