@@ -7,6 +7,7 @@ import {
   stagePosture,
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
+import { fetchSemiAiEarnings } from "@/lib/market/earnings";
 import { fetchPositionNews } from "@/lib/news/fetch";
 import IntradayClient from "./_client";
 
@@ -37,11 +38,12 @@ export default async function IntradaySummaryPage() {
     symbol: p.name as string | null,
   }));
 
-  const [market, quotes, news, bondHistory] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
     fetchTreasuryHistory(20),
+    fetchSemiAiEarnings(),
   ]);
 
   const riskScores = calculateRiskScores(market);
@@ -81,6 +83,7 @@ export default async function IntradaySummaryPage() {
       posture={posture}
       session={session}
       bondHistory={bondHistory}
+      earnings={earnings}
       holdings={holdings}
       news={news}
     />

@@ -7,6 +7,7 @@ import { PageShell, Disclaimer } from "../../_components/Shell";
 import { Button } from "../../_components/Button";
 import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
+import type { EarningsEvent } from "@/lib/market/earnings";
 
 type Ind = { price: number | null; changePercent: number | null };
 type MarketBlock = {
@@ -60,10 +61,11 @@ function stageMeaning(stage: string): string {
 }
 
 export default function IntradayClient({
-  market, composite, stage, posture, session, bondHistory, holdings, news,
+  market, composite, stage, posture, session, bondHistory, earnings, holdings, news,
 }: {
   market: MarketBlock; composite: number; stage: string; posture: Posture;
-  session: Session; bondHistory: BondPoint[]; holdings: Holding[]; news: NewsItem[];
+  session: Session; bondHistory: BondPoint[]; earnings: EarningsEvent[];
+  holdings: Holding[]; news: NewsItem[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -161,6 +163,32 @@ export default function IntradayClient({
 
       {/* 채권(미국채 10Y) 흐름 */}
       <BondCard ind={market.treasury10y} history={bondHistory} />
+
+      {/* 미국 반도체·AI 실적 일정 */}
+      {earnings.length > 0 && (
+        <Card className="mt-4">
+          <SectionLabel>미국 반도체·AI 실적 발표 일정</SectionLabel>
+          <ul className="divide-y divide-divider">
+            {earnings.map((e) => (
+              <li key={e.symbol} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[15px] font-medium">{e.name}</span>
+                  <span className="text-[12px] text-ink-48">{e.symbol}</span>
+                </div>
+                <div className="flex items-center gap-3 text-right">
+                  {e.epsForward !== null && (
+                    <span className="text-[12px] text-ink-48">예상 EPS {e.epsForward.toFixed(2)}</span>
+                  )}
+                  <span className="text-[14px] tabular-nums">{e.dateKst} (한국시간)</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[12px] text-ink-48">
+            반도체·AI 대형주 실적은 한국 반도체주(삼성전자·SK하이닉스 등)에 직접 영향을 줍니다. 발표일 전후 변동성에 유의하세요.
+          </p>
+        </Card>
+      )}
 
       {/* 보유 종목 시세 */}
       {holdings.length > 0 && (
