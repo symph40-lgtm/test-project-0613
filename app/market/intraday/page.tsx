@@ -1,5 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { fetchMarketData, fetchPositionQuotes, fetchTreasuryHistory } from "@/lib/market/fetch";
+import {
+  fetchMarketData,
+  fetchPositionQuotes,
+  fetchTreasuryHistory,
+  fetchBondEtf,
+} from "@/lib/market/fetch";
 import {
   calculateRiskScores,
   calculateCompositeScore,
@@ -38,12 +43,13 @@ export default async function IntradaySummaryPage() {
     symbol: p.name as string | null,
   }));
 
-  const [market, quotes, news, bondHistory, earnings] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
     fetchTreasuryHistory(20),
     fetchSemiAiEarnings(),
+    fetchBondEtf("TLT"),
   ]);
 
   const riskScores = calculateRiskScores(market);
@@ -83,6 +89,7 @@ export default async function IntradaySummaryPage() {
       posture={posture}
       session={session}
       bondHistory={bondHistory}
+      bondEtf={bondEtf}
       earnings={earnings}
       holdings={holdings}
       news={news}

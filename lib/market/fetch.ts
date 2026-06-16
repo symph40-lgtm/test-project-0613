@@ -142,6 +142,43 @@ async function fetchFredRate(): Promise<number | null> {
   }
 }
 
+export type BondEtf = {
+  symbol: string;
+  name: string;
+  price: number | null;
+  changePercent: number | null;
+  history: { date: string; value: number }[]; // 가격 추이
+};
+
+// 채권 ETF 현재가 + 최근 가격 추이 (TLT = 미 20년+ 국채 ETF, 가격은 금리와 역방향)
+export async function fetchBondEtf(symbol = "TLT"): Promise<BondEtf | null> {
+  try {
+    const q = await yf.quote(symbol);
+    const period1 = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    let history: { date: string; value: number }[] = [];
+    try {
+      const c = await yf.chart(symbol, { period1, interval: "1d" });
+      history = (c.quotes ?? [])
+        .filter((x): x is typeof x & { close: number } => x.close != null)
+        .map((x) => ({
+          date: (x.date instanceof Date ? x.date : new Date(x.date)).toISOString().slice(0, 10),
+          value: Number(x.close.toFixed(2)),
+        }));
+    } catch {
+      history = [];
+    }
+    return {
+      symbol,
+      name: "미국 20년+ 국채 ETF (TLT)",
+      price: q.regularMarketPrice ?? null,
+      changePercent: q.regularMarketChangePercent ?? null,
+      history,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export type TreasuryPoint = { date: string; value: number };
 
 // 미국 10년물 국채 금리 최근 이력 (FRED DGS10) — 채권 흐름 그래프용

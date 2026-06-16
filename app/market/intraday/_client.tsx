@@ -18,6 +18,10 @@ type MarketBlock = {
 type Posture = { stance: string; aggressiveness: number; guidance: string };
 type Session = { key: string; label: string; focus: string };
 type BondPoint = { date: string; value: number };
+type BondEtf = {
+  symbol: string; name: string; price: number | null; changePercent: number | null;
+  history: { date: string; value: number }[];
+} | null;
 type Holding = {
   ticker: string; weight: number; is_leverage: boolean; sector: string | null;
   risk_level: string | null; price: number | null; changePercent: number | null; currency: string | null;
@@ -69,10 +73,10 @@ function stageMeaning(stage: string): string {
 }
 
 export default function IntradayClient({
-  market, composite, stage, posture, session, bondHistory, earnings, holdings, news,
+  market, composite, stage, posture, session, bondHistory, bondEtf, earnings, holdings, news,
 }: {
   market: MarketBlock; composite: number; stage: string; posture: Posture;
-  session: Session; bondHistory: BondPoint[]; earnings: EarningsEvent[];
+  session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; earnings: EarningsEvent[];
   holdings: Holding[]; news: NewsItem[];
 }) {
   const router = useRouter();
@@ -232,7 +236,7 @@ export default function IntradayClient({
       </Card>
 
       {/* 채권(미국채 10Y) 흐름 */}
-      <BondCard ind={market.treasury10y} history={bondHistory} />
+      <BondCard ind={market.treasury10y} history={bondHistory} etf={bondEtf} />
 
       {/* 미국 반도체·AI 실적 일정 */}
       {earnings.length > 0 && (
@@ -318,7 +322,7 @@ export default function IntradayClient({
   );
 }
 
-function BondCard({ ind, history }: { ind: Ind; history: BondPoint[] }) {
+function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: BondEtf }) {
   const yieldChange = ind.changePercent;
   // 금리 하락 = 채권 가격 상승 (역의 관계)
   const bondPriceDir =
@@ -326,11 +330,29 @@ function BondCard({ ind, history }: { ind: Ind; history: BondPoint[] }) {
 
   return (
     <Card className="mt-4">
-      <SectionLabel>채권 동향 (미국채 10년물)</SectionLabel>
+      <SectionLabel>채권 동향</SectionLabel>
+
+      {/* 채권 가격 (ETF) — 실제 가격 */}
+      {etf && (
+        <div className="mb-4 rounded-[10px] border border-hairline bg-pearl p-3">
+          <p className="text-[13px] text-ink-48">{etf.name} · 채권 가격</p>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3">
+            <span className="text-[22px] font-semibold tabular-nums">
+              {etf.price !== null ? `$${etf.price.toFixed(2)}` : "—"}
+            </span>
+            <span className="text-[14px]"><Chg v={etf.changePercent} /></span>
+          </div>
+          {etf.history.length >= 2 && <PriceSparkline points={etf.history} unit="$" />}
+        </div>
+      )}
+
+      {/* 금리 (참고) */}
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="text-[20px] font-semibold tabular-nums">{ind.price !== null ? `${ind.price.toFixed(2)}%` : "—"}</span>
-        <span className="text-[14px]"><Chg v={yieldChange} /> <span className="text-ink-48">(금리)</span></span>
+        <span className="text-[14px] text-ink-48">미국채 10년물 금리</span>
+        <span className="text-[16px] font-semibold tabular-nums">{ind.price !== null ? `${ind.price.toFixed(2)}%` : "—"}</span>
+        <span className="text-[14px]"><Chg v={yieldChange} /></span>
       </div>
+      {history.length >= 2 && <BondSparkline points={history} />}
 
       {bondPriceDir && (
         <p className="mt-2 text-[14px] text-ink-80">
@@ -342,12 +364,38 @@ function BondCard({ ind, history }: { ind: Ind; history: BondPoint[] }) {
         </p>
       )}
 
-      {history.length >= 2 && <BondSparkline points={history} />}
-
       <p className="mt-2 text-[12px] text-ink-48">
-        금리 하락(채권 가격 상승)은 보통 위험회피·금리인하 기대 신호, 금리 상승은 인플레·긴축 신호로 해석됩니다.
+        채권 가격 상승(금리 하락)은 보통 위험회피·금리인하 기대 신호, 가격 하락(금리 상승)은 인플레·긴축 신호로 해석됩니다.
       </p>
     </Card>
+  );
+}
+
+// 가격 추이 스파크라인 (상승=빨강/하락=파랑)
+function PriceSparkline({ points, unit = "" }: { points: BondPoint[]; unit?: string }) {
+  const W = 320, H = 56, P = 4;
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const stepX = (W - P * 2) / (points.length - 1);
+  const coords = points.map((p, i) => [P + i * stepX, P + (1 - (p.value - min) / range) * (H - P * 2)] as const);
+  const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const first = points[0].value, last = points[points.length - 1].value;
+  const rising = last >= first;
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 56 }}>
+        <polyline points={coords.map(([x, y]) => `${x},${y}`).join(" ")} fill="none"
+          stroke={rising ? "#dc2626" : "#2563eb"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={`${path} L${coords[coords.length - 1][0]},${H - P} L${coords[0][0]},${H - P} Z`}
+          fill={rising ? "#dc262611" : "#2563eb11"} />
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] text-ink-48">
+        <span>{points[0].date} · {unit}{first.toFixed(2)}</span>
+        <span>최근 {points.length}거래일</span>
+        <span>{points[points.length - 1].date} · {unit}{last.toFixed(2)}</span>
+      </div>
+    </div>
   );
 }
 
