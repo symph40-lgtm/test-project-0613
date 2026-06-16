@@ -27,6 +27,44 @@ const features = [
   },
 ];
 
+// 로그인 사용자용 전체 바로가기
+const menuGroups = [
+  {
+    title: "브리핑",
+    items: [
+      { name: "아침 브리핑", href: "/briefing" },
+      { name: "판단 근거", href: "/briefing/evidence" },
+      { name: "마감 전 판단", href: "/briefing/preclose" },
+    ],
+  },
+  {
+    title: "시장 · 알림",
+    items: [
+      { name: "장중 시황 요약", href: "/market/intraday" },
+      { name: "장중 알림", href: "/alerts/intraday" },
+    ],
+  },
+  {
+    title: "포지션 · 원칙",
+    items: [
+      { name: "포트폴리오", href: "/positions" },
+      { name: "장중 포지션 변경", href: "/positions/intraday" },
+      { name: "위험선 / 알림 설정", href: "/positions/risk-line" },
+      { name: "매매 원칙", href: "/principles" },
+    ],
+  },
+  {
+    title: "행동 기록 · 인사이트",
+    items: [
+      { name: "행동 기록", href: "/journal" },
+      { name: "판단 갭 리포트", href: "/journal/gap-report" },
+      { name: "유사 상황 회상", href: "/journal/similar" },
+      { name: "개인화 인사이트", href: "/journal/insights" },
+      { name: "오판 분석", href: "/journal/misjudgment" },
+    ],
+  },
+];
+
 export default async function Home() {
   const supabase = await createClient();
   const {
@@ -67,15 +105,44 @@ export default async function Home() {
           )}
         </div>
 
-        <div className="mt-16 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {features.map((f) => (
-            <div key={f.title} className="rounded-[18px] border border-hairline bg-canvas p-6">
-              <f.icon size={22} className="text-guard" />
-              <h3 className="mt-3 text-[18px] font-semibold">{f.title}</h3>
-              <p className="mt-1.5 text-[15px] leading-snug text-ink-80">{f.desc}</p>
+        {user ? (
+          /* 로그인 사용자: 전체 바로가기 */
+          <div className="mt-14">
+            <h2 className="text-[14px] font-semibold uppercase tracking-[0.04em] text-ink-48">
+              전체 메뉴
+            </h2>
+            <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+              {menuGroups.map((g) => (
+                <section key={g.title} className="rounded-[18px] border border-hairline bg-canvas p-5">
+                  <h3 className="text-[13px] font-semibold text-ink-48">{g.title}</h3>
+                  <ul className="mt-2 space-y-1">
+                    {g.items.map((it) => (
+                      <li key={it.href}>
+                        <Link
+                          href={it.href}
+                          className="block rounded-[8px] px-2 py-2 text-[16px] hover:bg-pearl hover:text-guard"
+                        >
+                          {it.name}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          /* 비로그인: 기능 소개 */
+          <div className="mt-16 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {features.map((f) => (
+              <div key={f.title} className="rounded-[18px] border border-hairline bg-canvas p-6">
+                <f.icon size={22} className="text-guard" />
+                <h3 className="mt-3 text-[18px] font-semibold">{f.title}</h3>
+                <p className="mt-1.5 text-[15px] leading-snug text-ink-80">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         <p className="mt-12 text-[13px] leading-relaxed text-ink-48">
           스탁가드는 저장한 원칙과 현재 위험 조건에 근거한 리스크 코칭을 제공하며, 투자 권유나
