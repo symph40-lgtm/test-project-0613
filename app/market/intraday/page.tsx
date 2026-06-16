@@ -4,7 +4,9 @@ import {
   fetchPositionQuotes,
   fetchTreasuryHistory,
   fetchBondEtf,
+  effectiveQuote,
 } from "@/lib/market/fetch";
+import type { QuoteData } from "@/lib/market/types";
 import {
   calculateRiskScores,
   calculateCompositeScore,
@@ -19,8 +21,9 @@ import IntradayClient from "./_client";
 // 클릭(새로고침) 시 항상 그 시점 실시간 데이터를 가져오도록 동적 렌더링
 export const dynamic = "force-dynamic";
 
-function indicator(q: { price: number | null; changePercent: number | null }) {
-  return { price: q.price, changePercent: q.changePercent };
+function indicator(q: QuoteData) {
+  const eff = effectiveQuote(q);
+  return { price: eff.price, changePercent: eff.changePercent, session: eff.session };
 }
 
 export default async function IntradaySummaryPage() {
@@ -69,6 +72,7 @@ export default async function IntradaySummaryPage() {
       price: q?.price ?? null,
       changePercent: q?.changePercent ?? null,
       currency: q?.currency ?? null,
+      session: q?.session ?? null,
     };
   });
 
@@ -90,6 +94,7 @@ export default async function IntradaySummaryPage() {
       price: q?.price ?? null,
       changePercent: q?.changePercent ?? null,
       currency: q?.currency ?? null,
+      session: q?.session ?? null,
     };
   });
 

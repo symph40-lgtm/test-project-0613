@@ -10,7 +10,8 @@ import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
 import { getIntradayConsult, type IntradayConsult } from "./actions";
 
-type Ind = { price: number | null; changePercent: number | null };
+type Sess = "프리장" | "애프터장" | null;
+type Ind = { price: number | null; changePercent: number | null; session?: Sess };
 type MarketBlock = {
   nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind;
   fetchedAt: string;
@@ -24,7 +25,7 @@ type BondEtf = {
 } | null;
 type Holding = {
   ticker: string; weight: number; is_leverage: boolean; sector: string | null;
-  risk_level: string | null; price: number | null; changePercent: number | null; currency: string | null;
+  risk_level: string | null; price: number | null; changePercent: number | null; currency: string | null; session?: Sess;
 };
 
 // 한국식 색상: 상승=빨강, 하락=파랑
@@ -72,7 +73,17 @@ function stageMeaning(stage: string): string {
   return "하방 압력이 우세한 국면입니다. 단계가 높을수록 위험이 큽니다.";
 }
 
-type SemiCmp = { ticker: string; price: number | null; changePercent: number | null; currency: string | null };
+type SemiCmp = { ticker: string; price: number | null; changePercent: number | null; currency: string | null; session?: Sess };
+
+// 세션 배지
+function SessionTag({ session }: { session?: Sess }) {
+  if (!session) return null;
+  return (
+    <span className="rounded bg-guard/15 px-1.5 py-0.5 text-[11px] font-medium text-guard">
+      {session}
+    </span>
+  );
+}
 
 export default function IntradayClient({
   market, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, news,
@@ -226,6 +237,7 @@ export default function IntradayClient({
             <div key={label} className="flex items-baseline justify-between border-b border-divider pb-2">
               <span className="text-[14px] text-ink-48">{label}</span>
               <span className="flex items-baseline gap-2">
+                <SessionTag session={ind.session} />
                 <span className="text-[16px] font-medium tabular-nums">
                   {unit === "$" ? "$" : ""}{fmtNum(ind.price, digits)}{unit && unit !== "$" ? unit : ""}
                 </span>
@@ -248,7 +260,8 @@ export default function IntradayClient({
             {semiCompare.map((s) => (
               <div key={s.ticker} className="flex items-center justify-between gap-3 border-b border-divider py-2 last:border-0">
                 <span className="text-[15px] font-medium">{s.ticker}</span>
-                <div className="flex items-center gap-3 text-[15px]">
+                <div className="flex items-center gap-2 text-[15px]">
+                  <SessionTag session={s.session} />
                   <span className="tabular-nums text-ink-80">{fmtPrice(s.price, s.currency)}</span>
                   <span className="w-20 text-right"><Chg v={s.changePercent} /></span>
                 </div>
@@ -302,7 +315,8 @@ export default function IntradayClient({
                   )}
                   <span className="text-[13px] text-ink-48">비중 {h.weight}%</span>
                 </div>
-                <div className="flex items-center gap-3 text-[15px]">
+                <div className="flex items-center gap-2 text-[15px]">
+                  <SessionTag session={h.session} />
                   <span className="tabular-nums text-ink-80">{fmtPrice(h.price, h.currency)}</span>
                   <span className="w-20 text-right"><Chg v={h.changePercent} /></span>
                 </div>

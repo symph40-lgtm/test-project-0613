@@ -11,6 +11,7 @@ export type PositionQuote = {
   price: number | null;
   changePercent: number | null;
   currency: string | null;
+  session?: "프리장" | "애프터장" | null; // 현재 표시 시세의 세션
 };
 
 // 한국 거래소 코드 (KOSPI=KSC, KOSDAQ=KOE/KOQ)
@@ -67,12 +68,22 @@ async function fetchOneQuote(
     if (!symbol) return empty;
 
     const r = await yf.quote(symbol);
+    const eff = effectiveQuote({
+      price: r.regularMarketPrice ?? null,
+      changePercent: r.regularMarketChangePercent ?? null,
+      marketState: r.marketState ?? null,
+      preMarketPrice: r.preMarketPrice ?? null,
+      preMarketChangePercent: r.preMarketChangePercent ?? null,
+      postMarketPrice: r.postMarketPrice ?? null,
+      postMarketChangePercent: r.postMarketChangePercent ?? null,
+    });
     return {
       ticker,
       symbol,
-      price: r.regularMarketPrice ?? null,
-      changePercent: r.regularMarketChangePercent ?? null,
+      price: eff.price,
+      changePercent: eff.changePercent,
       currency: r.currency ?? null,
+      session: eff.session,
     };
   } catch {
     return empty;
@@ -118,10 +129,35 @@ async function fetchQuote(symbol: string): Promise<QuoteData> {
       price: result.regularMarketPrice ?? null,
       previousClose: result.regularMarketPreviousClose ?? null,
       changePercent: result.regularMarketChangePercent ?? null,
+      marketState: result.marketState ?? null,
+      preMarketPrice: result.preMarketPrice ?? null,
+      preMarketChangePercent: result.preMarketChangePercent ?? null,
+      postMarketPrice: result.postMarketPrice ?? null,
+      postMarketChangePercent: result.postMarketChangePercent ?? null,
     };
   } catch {
     return { symbol, price: null, previousClose: null, changePercent: null };
   }
+}
+
+// 현재 세션(프리장/애프터장/정규장)에 맞는 유효 시세 선택
+export function effectiveQuote(q: {
+  price: number | null;
+  changePercent: number | null;
+  marketState?: string | null;
+  preMarketPrice?: number | null;
+  preMarketChangePercent?: number | null;
+  postMarketPrice?: number | null;
+  postMarketChangePercent?: number | null;
+}): { price: number | null; changePercent: number | null; session: "프리장" | "애프터장" | null } {
+  const st = q.marketState ?? "";
+  if (st === "PRE" && q.preMarketPrice != null) {
+    return { price: q.preMarketPrice, changePercent: q.preMarketChangePercent ?? null, session: "프리장" };
+  }
+  if ((st === "POST" || st === "POSTPOST" || st === "CLOSED") && q.postMarketPrice != null) {
+    return { price: q.postMarketPrice, changePercent: q.postMarketChangePercent ?? null, session: "애프터장" };
+  }
+  return { price: q.price, changePercent: q.changePercent, session: null };
 }
 
 async function fetchFredRate(): Promise<number | null> {

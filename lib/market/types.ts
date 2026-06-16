@@ -3,6 +3,11 @@ export type QuoteData = {
   price: number | null;
   previousClose: number | null;
   changePercent: number | null; // % change from previous close
+  marketState?: string | null;  // PRE | REGULAR | POST | CLOSED 등
+  preMarketPrice?: number | null;
+  preMarketChangePercent?: number | null;
+  postMarketPrice?: number | null;
+  postMarketChangePercent?: number | null;
 };
 
 export type MarketData = {
