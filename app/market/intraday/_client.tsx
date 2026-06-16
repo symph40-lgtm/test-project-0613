@@ -8,7 +8,7 @@ import { Button } from "../../_components/Button";
 import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
-import { getIntradayConsult, type IntradayConsult } from "./actions";
+import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain } from "./actions";
 
 type Sess = "프리장" | "애프터장" | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
@@ -99,6 +99,27 @@ export default function IntradayClient({
   const [refreshing, setRefreshing] = useState(false);
   const [consult, setConsult] = useState<IntradayConsult | null>(null);
   const [consulting, setConsulting] = useState(false);
+  const [explain, setExplain] = useState<MarketExplain | null>(null);
+  const [explaining, setExplaining] = useState(false);
+
+  function runExplain() {
+    setExplaining(true);
+    startTransition(async () => {
+      try {
+        setExplain(await getMarketExplain());
+      } finally {
+        setExplaining(false);
+      }
+    });
+  }
+
+  // 급변 감지 (지수 ±1.5% 또는 VIX 급등)
+  const maxMove = Math.max(
+    Math.abs(market.nasdaq.changePercent ?? 0),
+    Math.abs(market.sox.changePercent ?? 0),
+    Math.abs(market.kospi.changePercent ?? 0),
+  );
+  const sharpMove = maxMove >= 1.5 || (market.vix.changePercent ?? 0) > 8;
 
   function runConsult() {
     setConsulting(true);
@@ -173,6 +194,74 @@ export default function IntradayClient({
           <div className="mt-3 flex items-center gap-2">
             <RiskBadge level="주의" />
             <span className="text-[14px] text-ink-80">주의 종목: {watchTickers.join(" · ")}</span>
+          </div>
+        )}
+      </Card>
+
+      {/* 시황 급변 해설 */}
+      <Card className={`mt-4 ${sharpMove ? "border-guard" : ""}`}>
+        <div className="flex items-center justify-between gap-3">
+          <SectionLabel>
+            {sharpMove ? "⚠ 시황 급변 감지 — 왜 움직였나" : "시황 해설 (왜 움직였나)"}
+          </SectionLabel>
+          <Button variant={sharpMove ? "primary" : "secondary"} onClick={runExplain} disabled={isPending} className="!px-4 !py-2 !text-[14px] shrink-0">
+            {explaining ? "분석 중…" : explain ? "다시 해설" : "원인 해설 받기"}
+          </Button>
+        </div>
+
+        {!explain && !explaining && (
+          <p className="text-[14px] text-ink-48">
+            {sharpMove
+              ? "지수가 급하게 움직였습니다. 지표·뉴스를 종합해 원인(수급인지 매크로·이벤트인지)과 대응을 분석합니다."
+              : "현재 지표·뉴스를 종합해 시황 원인과 앞으로 볼 점을 해설합니다."}
+          </p>
+        )}
+
+        {explain && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${
+                explain.magnitude === "급변" ? "bg-ink text-white" : "bg-ink/10 text-ink-80"
+              }`}>{explain.magnitude}</span>
+              <span className="rounded-full bg-guard/15 px-2.5 py-0.5 text-[13px] font-medium text-guard">
+                {explain.nature}
+              </span>
+              <span className="text-[13px] text-ink-48">{explain.moves}</span>
+            </div>
+
+            <div>
+              <p className="text-[13px] font-semibold text-ink-48">원인 추정</p>
+              <p className="text-[15px] leading-snug text-ink-80">{explain.driver}</p>
+              {explain.natureReason && (
+                <p className="mt-0.5 text-[13px] text-ink-48">{explain.natureReason}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-[13px] font-semibold text-ink-48">앞으로 볼 것</p>
+              <p className="text-[15px] leading-snug text-ink-80">{explain.whatNext}</p>
+            </div>
+            <div>
+              <p className="text-[13px] font-semibold text-ink-48">대응</p>
+              <p className="text-[15px] leading-snug text-ink-80">{explain.action}</p>
+            </div>
+
+            {explain.headlines.length > 0 && (
+              <div>
+                <p className="text-[13px] font-semibold text-ink-48">근거 뉴스</p>
+                <ul className="mt-1 space-y-1">
+                  {explain.headlines.slice(0, 4).map((h, i) => (
+                    <li key={i}>
+                      <a href={h.link} target="_blank" rel="noopener noreferrer" className="text-[13px] text-ink-80 hover:text-guard hover:underline">
+                        · {h.title} <span className="text-ink-48">({h.source})</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-[12px] text-ink-48">
+              {explain.isFallback ? "AI 미사용 — 신호 기반 추정. " : ""}추정 해설이며 투자 권유가 아닙니다.
+            </p>
           </div>
         )}
       </Card>
