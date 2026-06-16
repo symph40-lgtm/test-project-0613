@@ -362,51 +362,69 @@ export default function IntradayClient({
 
 function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: BondEtf }) {
   const yieldChange = ind.changePercent;
-  // 금리 하락 = 채권 가격 상승 (역의 관계)
-  const bondPriceDir =
-    yieldChange === null ? null : yieldChange < 0 ? "상승" : yieldChange > 0 ? "하락" : "보합";
+
+  // 채권 가격 방향: 실제 TLT 가격 추세(기간 시작 vs 끝) 기준 — 차트와 일치
+  let trendDir: "상승" | "하락" | "보합" | null = null;
+  let trendPct: number | null = null;
+  if (etf && etf.history.length >= 2) {
+    const first = etf.history[0].value;
+    const last = etf.history[etf.history.length - 1].value;
+    trendPct = first !== 0 ? ((last - first) / first) * 100 : 0;
+    trendDir = trendPct > 0.3 ? "상승" : trendPct < -0.3 ? "하락" : "보합";
+  } else if (etf?.changePercent != null) {
+    trendDir = etf.changePercent > 0 ? "상승" : etf.changePercent < 0 ? "하락" : "보합";
+  }
 
   return (
     <Card className="mt-4">
       <SectionLabel>채권 동향</SectionLabel>
 
-      {/* 채권 가격 (ETF) — 실제 가격 */}
-      {etf && (
-        <div className="mb-4 rounded-[10px] border border-hairline bg-pearl p-3">
-          <p className="text-[13px] text-ink-48">{etf.name} · 채권 가격</p>
-          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3">
-            <span className="text-[22px] font-semibold tabular-nums">
-              {etf.price !== null ? `$${etf.price.toFixed(2)}` : "—"}
-            </span>
-            <span className="text-[14px]"><Chg v={etf.changePercent} /></span>
+      {/* 채권 가격 + 금리 — 좌우 배치 */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* 채권 가격 (ETF) */}
+        {etf && (
+          <div className="rounded-[10px] border border-hairline bg-pearl p-3">
+            <p className="text-[12px] text-ink-48">채권 가격 · {etf.name}</p>
+            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+              <span className="text-[20px] font-semibold tabular-nums">
+                {etf.price !== null ? `$${etf.price.toFixed(2)}` : "—"}
+              </span>
+              <span className="text-[13px]"><Chg v={etf.changePercent} /></span>
+            </div>
+            {etf.history.length >= 2 && <PriceSparkline points={etf.history} unit="$" />}
           </div>
-          {etf.history.length >= 2 && <PriceSparkline points={etf.history} unit="$" />}
+        )}
+
+        {/* 금리 */}
+        <div className="rounded-[10px] border border-hairline bg-pearl p-3">
+          <p className="text-[12px] text-ink-48">금리 · 미국채 10년물</p>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+            <span className="text-[20px] font-semibold tabular-nums">
+              {ind.price !== null ? `${ind.price.toFixed(2)}%` : "—"}
+            </span>
+            <span className="text-[13px]"><Chg v={yieldChange} /></span>
+          </div>
+          {history.length >= 2 && <BondSparkline points={history} />}
         </div>
-      )}
-
-      {/* 금리 (참고) */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="text-[14px] text-ink-48">미국채 10년물 금리</span>
-        <span className="text-[16px] font-semibold tabular-nums">{ind.price !== null ? `${ind.price.toFixed(2)}%` : "—"}</span>
-        <span className="text-[14px]"><Chg v={yieldChange} /></span>
       </div>
-      {history.length >= 2 && <BondSparkline points={history} />}
 
-      {bondPriceDir && (
-        <p className="mt-2 text-[14px] text-ink-80">
-          금리가 {bondPriceDir === "상승" ? "내려" : bondPriceDir === "하락" ? "올라" : "거의 변동 없어"}{" "}
-          <b className={bondPriceDir === "상승" ? "text-red-600" : bondPriceDir === "하락" ? "text-blue-600" : ""}>
-            채권 가격은 {bondPriceDir}
+      {/* 추세 요약 — 실제 가격 기준 */}
+      {trendDir && trendDir !== "보합" && (
+        <p className="mt-3 text-[14px] text-ink-80">
+          최근 {etf?.history.length ?? 0}거래일 동안{" "}
+          <b className={trendDir === "상승" ? "text-red-600" : "text-blue-600"}>
+            채권 가격이 {trendDir}
           </b>{" "}
-          압력입니다. (금리와 채권 가격은 반대로 움직입니다)
+          {trendPct !== null ? `(${trendPct > 0 ? "+" : ""}${trendPct.toFixed(1)}%)` : ""} 추세입니다.
+          {trendDir === "상승" ? " 금리가 하락하는 흐름입니다." : " 금리가 상승하는 흐름입니다."}
         </p>
       )}
 
-      {/* 증시 영향 인사이트 */}
-      {bondPriceDir && bondPriceDir !== "보합" && (
+      {/* 증시 영향 인사이트 — 추세 방향 기준 */}
+      {trendDir && trendDir !== "보합" && (
         <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
           <p className="text-[13px] font-semibold text-ink-48">증시 영향</p>
-          {bondPriceDir === "상승" ? (
+          {trendDir === "상승" ? (
             <p className="mt-1 text-[14px] leading-snug text-ink-80">
               채권 가격 상승(금리 하락)은 <b>주식 밸류에이션에 우호적</b>입니다. 할인율이
               낮아져 성장주·기술주·반도체에 특히 긍정적이며, 위험자산 선호가 살아날 수 있습니다.
@@ -424,7 +442,7 @@ function BondCard({ ind, history, etf }: { ind: Ind; history: BondPoint[]; etf: 
       )}
 
       <p className="mt-2 text-[12px] text-ink-48">
-        채권 가격 상승(금리 하락)은 보통 위험회피·금리인하 기대 신호, 가격 하락(금리 상승)은 인플레·긴축 신호로 해석됩니다.
+        금리와 채권 가격은 반대로 움직입니다. 위 판단은 최근 가격 추세 기준이며, 당일 등락은 다를 수 있습니다.
       </p>
     </Card>
   );
