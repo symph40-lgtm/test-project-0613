@@ -26,15 +26,19 @@ export function calculateRiskScores(market: MarketData): RiskScores {
   // 환율: 달러/원 상승 클수록 위험 (2% 상승 → 100점)
   const forex = pctToRisk(market.usdkrw.changePercent, 2, "up") ?? 50;
 
-  // 유가: 급등은 인플레이션 압력으로 위험 크게, 급락은 완만하게 반영
-  // 급등 +6% → 100점, 급락 -12% → 100점 (비대칭)
+  // 유가:
+  // - 급등 = 인플레이션 압력 → 위험 (+6% → 100점)
+  // - 완만한 하락 = 인플레이션 완화 → 위험 아님 (~6% 하락까지 0점)
+  // - 급락(-6% 초과) = 수요 둔화·경기 침체 신호 → 위험 가산 (-12% → 100점)
   const oilPct = market.oil.changePercent;
   let oil = 50;
   if (oilPct !== null) {
-    oil =
-      oilPct >= 0
-        ? Math.min(100, (oilPct / 6) * 100)
-        : Math.min(100, (Math.abs(oilPct) / 12) * 100);
+    if (oilPct >= 0) {
+      oil = Math.min(100, (oilPct / 6) * 100);
+    } else {
+      const drop = Math.abs(oilPct);
+      oil = drop <= 6 ? 0 : Math.min(100, ((drop - 6) / 6) * 100);
+    }
   }
 
   // 반도체(SOX): 하락폭 클수록 위험 (3% 하락 → 100점)
