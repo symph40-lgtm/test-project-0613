@@ -78,9 +78,11 @@ export default function PrecloseClient({
       <Card className="mt-4">
         <SectionLabel>오늘 장 요약</SectionLabel>
         <p className="text-[15px] text-ink-80">{marketSummary}</p>
-        {preclose?.todaySummary && !preclose.todaySummary.includes("AI 분석을 사용할 수 없") && (
-          <p className="mt-2 text-[14px] text-ink-48">{preclose.todaySummary}</p>
-        )}
+        {preclose?.todaySummary &&
+          !preclose.todaySummary.includes("AI 분석을 사용할 수 없") &&
+          !preclose.todaySummary.startsWith("나스닥") && (
+            <p className="mt-2 text-[14px] text-ink-48">{preclose.todaySummary}</p>
+          )}
       </Card>
 
       {/* 주요 경제지표 일정 — 실제 캘린더(FRED) 우선, 없으면 AI 예측 */}
