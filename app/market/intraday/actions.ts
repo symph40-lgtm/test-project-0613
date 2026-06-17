@@ -174,7 +174,7 @@ export async function getIntradayConsult(): Promise<IntradayConsult> {
   const riskScores = calculateRiskScores(market);
   const composite = calculateCompositeScore(riskScores);
   const stage = classifyStage(composite);
-  const posture = stagePosture(stage);
+  const posture = stagePosture(stage, composite);
   const holdings = positions ?? [];
 
   // 폴백 (AI 키 없음)

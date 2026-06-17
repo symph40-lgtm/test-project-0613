@@ -76,7 +76,7 @@ export default function BriefingClient({
                   현재 장세 {snapshot.stage ?? ai.stage} · 하락 리스크 {snapshot.risk_score ?? 0}점
                 </p>
                 {(() => {
-                  const posture = stagePosture(snapshot.stage ?? ai.stage);
+                  const posture = stagePosture(snapshot.stage ?? ai.stage, snapshot.risk_score ?? undefined);
                   return (
                     <div className="mt-4 rounded-[12px] border border-white/15 bg-white/5 p-4">
                       <div className="flex items-center gap-2">

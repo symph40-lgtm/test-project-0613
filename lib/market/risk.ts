@@ -115,12 +115,17 @@ const STAGE_POSTURE: Record<string, StagePosture> = {
   "하락장 3단계": { stance: "최대 방어", aggressiveness: 5, guidance: "위험이 매우 높은 구간입니다. 신규 진입 자제와 방어적 포지션 유지가 권장될 수 있습니다." },
 };
 
-export function stagePosture(stage: string): StagePosture {
-  return (
+export function stagePosture(stage: string, composite?: number): StagePosture {
+  const base =
     STAGE_POSTURE[stage] ?? {
       stance: "중립",
       aggressiveness: 50,
       guidance: "현재 조건을 점검하며 원칙 기반으로 대응하는 것이 도움이 될 수 있습니다.",
-    }
-  );
+    };
+  // composite가 주어지면 공격성을 연속값으로 산출(리스크가 오르면 공격성↓) — 새로고침 시 반영
+  if (typeof composite === "number") {
+    const aggressiveness = Math.max(0, Math.min(100, Math.round(100 - composite)));
+    return { ...base, aggressiveness };
+  }
+  return base;
 }

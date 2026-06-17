@@ -82,7 +82,7 @@ export default async function IntradaySummaryPage() {
   const riskScores = calculateRiskScores(market);
   const composite = calculateCompositeScore(riskScores);
   const stage = classifyStage(composite);
-  const posture = stagePosture(stage);
+  const posture = stagePosture(stage, composite);
   const session = getMarketSession();
 
   const quoteMap = new Map(quotes.map((q) => [q.ticker, q]));
