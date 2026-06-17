@@ -41,9 +41,10 @@ const menuGroups = [
     ],
   },
   {
-    title: "시장 · 알림",
+    title: "시장 · 알림 · 분석",
     items: [
       { name: "장중 시황 요약", href: "/market/intraday" },
+      { name: "종목 단기 분석", href: "/analyze" },
       { name: "장중 알림", href: "/alerts/intraday" },
     ],
   },

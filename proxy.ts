@@ -10,6 +10,7 @@ const PROTECTED_PREFIXES = [
   "/alerts",
   "/market",
   "/principles",
+  "/analyze",
 ];
 
 const ADMIN_PREFIX = "/admin";
