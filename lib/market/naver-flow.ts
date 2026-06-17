@@ -109,13 +109,20 @@ export async function fetchKoreanQuote(code: string): Promise<KoreanQuote | null
     const regRatio = signedRatio(j.fluctuationsRatio, j.compareToPreviousPrice);
     const delayName = typeof j.delayTimeName === "string" ? j.delayTimeName : null;
 
-    // 시간외 단일가 진행 중이면 그 값을 우선 표시
+    // 정규장(평일 09:00~15:30) 시간이 아니면, 시간외 거래가를 우선 표시
     const over = j.overMarketPriceInfo as Record<string, unknown> | undefined;
-    if (over && (over.overMarketStatus === "OPEN" || over.overMarketStatus === "CLOSE")) {
-      const oPrice = toNumKR(over.overPrice);
-      const oRatio = signedRatio(over.fluctuationsRatio, over.compareToPreviousPrice);
-      const isBefore = over.tradingSessionType === "BEFORE_MARKET";
-      if (oPrice !== null && over.overMarketStatus === "OPEN") {
+    const oPrice = over ? toNumKR(over.overPrice) : null;
+    if (over && oPrice !== null) {
+      const kst = new Date(Date.now() + 9 * 3600 * 1000);
+      const day = kst.getUTCDay(); // 0일~6토
+      const t = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+      const regularNow = day >= 1 && day <= 5 && t >= 9 * 60 && t <= 15 * 60 + 30;
+      const statusOpen = over.overMarketStatus === "OPEN";
+
+      // 정규장 시간이 아니거나 시간외 세션이 열려 있으면 시간외가 표시
+      if (!regularNow || statusOpen) {
+        const oRatio = signedRatio(over.fluctuationsRatio, over.compareToPreviousPrice);
+        const isBefore = over.tradingSessionType === "BEFORE_MARKET" || t < 9 * 60;
         return {
           code,
           price: oPrice,
