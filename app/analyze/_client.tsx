@@ -160,15 +160,23 @@ export default function AnalyzeClient() {
           <Card>
             <SectionLabel>거래량</SectionLabel>
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[14px] text-ink-80">
-              <span>당일 <b>{result.volume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
-              <span>20일 평균 <b>{result.avgVolume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
+              <span>당일{result.volumeProjected ? "(장중 누적)" : ""} <b>{result.volume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
+              {result.volumeProjected && (
+                <span>종일 환산 <b>{result.projectedVolume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
+              )}
+              <span>20일 일평균 <b>{result.avgVolume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
               <span>평균 대비 <b className={(result.volumeRatio ?? 1) >= 1.5 ? "text-red-600" : ""}>{result.volumeRatio ?? "N/A"}배</b></span>
             </div>
-            {result.volumeRatio !== null && (
+            {result.volumeProjected ? (
               <p className="mt-2 text-[13px] text-ink-48">
-                {result.volumeRatio >= 2 ? "평소의 2배 이상 — 강한 관심/변동 신호" : result.volumeRatio >= 1.3 ? "거래량 증가 — 관심 유입" : "평소 수준의 거래량"}
+                장 {result.sessionElapsed}% 경과 — 현재 누적 거래량을 종일 기준으로 환산해 20일 평균과 비교했습니다.
+                {result.volumeRatio !== null && (result.volumeRatio >= 1.5 ? " 평소보다 활발한 거래 흐름입니다." : result.volumeRatio <= 0.7 ? " 평소보다 한산한 흐름입니다." : " 평소와 비슷한 흐름입니다.")}
               </p>
-            )}
+            ) : result.volumeRatio !== null ? (
+              <p className="mt-2 text-[13px] text-ink-48">
+                {result.volumeRatio >= 2 ? "평소의 2배 이상 — 강한 관심/변동 신호" : result.volumeRatio >= 1.3 ? "거래량 증가 — 관심 유입" : result.volumeRatio <= 0.7 ? "평소보다 한산" : "평소 수준의 거래량"}
+              </p>
+            ) : null}
           </Card>
 
           <Card>

@@ -31,9 +31,12 @@ export type StockAnalysis = {
   upside: number | null;    // 저항까지 여력 %
   downside: number | null;  // 지지까지 하락 여지 %
   // 거래량
-  volume: number | null;
-  avgVolume: number | null;
-  volumeRatio: number | null; // 평균 대비 배수
+  volume: number | null;        // 당일 거래량 (장중이면 누적)
+  avgVolume: number | null;     // 20일 일평균
+  volumeRatio: number | null;   // 평균 대비 배수 (장중이면 경과 보정 후 종일 환산 기준)
+  volumeProjected: boolean;     // 장중 경과 보정 적용 여부
+  sessionElapsed: number | null; // 장 경과율 % (장중일 때)
+  projectedVolume: number | null; // 종일 환산 예상 거래량
   // 차트 패턴
   patterns: string[];       // 골든크로스 등
   history: { date: string; value: number }[];
@@ -108,6 +111,38 @@ function detectPatterns(
   return out;
 }
 
+// 미 동부 서머타임 여부
+function isUsEasternDst(d: Date): boolean {
+  const y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (m < 2 || m > 10) return false;
+  if (m > 2 && m < 10) return true;
+  const firstSunday = (mon: number) => {
+    const f = new Date(Date.UTC(y, mon, 1));
+    return 1 + ((7 - f.getUTCDay()) % 7);
+  };
+  if (m === 2) return d.getUTCDate() >= firstSunday(2) + 7; // 둘째 일요일
+  return d.getUTCDate() < firstSunday(10); // 11월 첫째 일요일 전
+}
+
+// 장중 경과율(0~1). 장중이 아니면 null. (UTC 기준 거래소 세션)
+function sessionElapsedFraction(symbol: string, marketState: string | null): number | null {
+  if (marketState !== "REGULAR") return null;
+  const now = new Date();
+  const utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  let start: number, end: number;
+  if (/\.(KS|KQ)$/.test(symbol)) {
+    start = 0; end = 6 * 60 + 30; // 09:00~15:30 KST = 00:00~06:30 UTC
+  } else {
+    const dst = isUsEasternDst(now);
+    start = dst ? 13 * 60 + 30 : 14 * 60 + 30; // 09:30 ET
+    end = dst ? 20 * 60 : 21 * 60;             // 16:00 ET
+  }
+  if (end <= start) return null;
+  const f = (utcMin - start) / (end - start);
+  if (f <= 0) return null;
+  return Math.min(1, f);
+}
+
 export async function analyzeStock(query: string, knownSymbol?: string | null): Promise<StockAnalysis | null> {
   const symbol = (knownSymbol?.trim() || getYahooSymbol(query) || query.trim()).toUpperCase();
   if (!symbol) return null;
@@ -136,7 +171,8 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
       trailingPE: null, forwardPE: null, weekRangePos: null,
       ma20: null, ma60: null, ma200: null, rsi14: null, trend1m: null, aligned: null,
       support: null, resistance: null, upside: null, downside: null,
-      volume: null, avgVolume: null, volumeRatio: null, patterns: [], history: [],
+      volume: null, avgVolume: null, volumeRatio: null, volumeProjected: false,
+      sessionElapsed: null, projectedVolume: null, patterns: [], history: [],
       direction: "중립·관망", confidence: "낮음",
       valuationText: "", technicalText: "", macroSectorText: "", summary: "", risks: "",
       isFallback: true, error: "종목 데이터를 불러오지 못했습니다. 종목명을 확인하거나 자동완성에서 선택해 주세요.",
@@ -177,10 +213,19 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
   const upside = price !== null && resistance !== null && price > 0 ? Number((((resistance - price) / price) * 100).toFixed(1)) : null;
   const downside = price !== null && support !== null && price > 0 ? Number((((support - price) / price) * 100).toFixed(1)) : null;
 
-  // 거래량: 당일 vs 20일 평균
+  // 거래량: 당일 vs 20일 평균 (장중이면 경과 보정해 종일 환산 후 비교)
   const volume = volumes.length ? volumes[volumes.length - 1] : null;
-  const avgVolume = volumes.length >= 20 ? Math.round(volumes.slice(-20).reduce((a, b) => a + b, 0) / 20) : null;
-  const volumeRatio = volume !== null && avgVolume ? Number((volume / avgVolume).toFixed(2)) : null;
+  // 20일 평균은 '오늘(진행중)'을 제외한 직전 20영업일 기준
+  const avgVolume =
+    volumes.length >= 21 ? Math.round(volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20) : null;
+  const frac = sessionElapsedFraction(symbol, (q.marketState as string) ?? null);
+  const volumeProjected = frac !== null && frac < 0.97;
+  const sessionElapsed = frac !== null ? Math.round(frac * 100) : null;
+  const projectedVolume =
+    volumeProjected && volume !== null && frac ? Math.round(volume / frac) : null;
+  // 비교 기준: 장중이면 종일 환산치, 아니면 당일 거래량
+  const compareVol = projectedVolume ?? volume;
+  const volumeRatio = compareVol !== null && avgVolume ? Number((compareVol / avgVolume).toFixed(2)) : null;
 
   // 차트 패턴
   const patterns = detectPatterns(closes, price, rsi14, weekRangePos);
@@ -199,7 +244,7 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
     ma200: ma200 !== null ? Number(ma200.toFixed(2)) : null,
     rsi14, trend1m, aligned,
     support, resistance, upside, downside,
-    volume, avgVolume, volumeRatio, patterns,
+    volume, avgVolume, volumeRatio, volumeProjected, sessionElapsed, projectedVolume, patterns,
     history,
   };
 
@@ -253,7 +298,7 @@ ${name} (${symbol}) · 현재가 ${price ?? "N/A"} (${changePercent?.toFixed(2) 
 - 지지선(저점) ${support ?? "N/A"} → 현재가 대비 하락 여지 ${downside ?? "N/A"}%
 
 ## 거래량
-- 당일 거래량 ${volume ?? "N/A"} · 20일 평균 대비 ${volumeRatio ?? "N/A"}배
+- 당일 거래량 ${volume ?? "N/A"}${volumeProjected ? ` (장 ${sessionElapsed}% 경과 → 종일 환산 ${projectedVolume})` : ""} · 20일 평균 대비 ${volumeRatio ?? "N/A"}배
 
 ## 매크로·섹터
 - 시장 장세: ${stage} (종합 리스크 ${composite}/100)
