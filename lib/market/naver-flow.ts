@@ -69,6 +69,54 @@ export async function fetchStockFlow(ticker: string, code: string): Promise<Stoc
   }
 }
 
+export type KoreanOffHours = {
+  code: string;
+  session: "장전" | "시간외" | null; // 장전 시간외 / 장후 시간외 단일가
+  price: number | null;
+  changePercent: number | null;
+};
+
+// 네이버 모바일 API에서 한국 종목 시간외 단일가 조회
+export async function fetchKoreanOffHours(code: string): Promise<KoreanOffHours | null> {
+  try {
+    const res = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`, {
+      headers: { "User-Agent": "Mozilla/5.0", Referer: "https://m.stock.naver.com/" },
+      next: { revalidate: 120 },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as Record<string, unknown>;
+
+    // 시간외 정보 블록 탐색 (overMarketPriceInfo 등 키 변형 대응)
+    const over =
+      (j.overMarketPriceInfo as Record<string, unknown> | undefined) ??
+      (j.overTimePrice as Record<string, unknown> | undefined) ??
+      null;
+    if (!over) return null;
+
+    const num = (v: unknown): number | null => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = parseFloat(v.replace(/,/g, ""));
+        return isNaN(n) ? null : n;
+      }
+      return null;
+    };
+
+    const price = num(over.overPrice ?? over.tradePrice ?? over.closePrice);
+    const ratio = num(over.fluctuationsRatio ?? over.changeRate ?? over.rate);
+    if (price === null && ratio === null) return null;
+
+    // 시간대로 장전/시간외 구분 (KST)
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const t = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    const sess: KoreanOffHours["session"] = t < 9 * 60 ? "장전" : "시간외";
+
+    return { code, session: sess, price, changePercent: ratio };
+  } catch {
+    return null;
+  }
+}
+
 // 여러 종목 수급 병렬 조회 (상위 N개만)
 export async function fetchHoldingsFlow(
   holdings: { ticker: string; code: string }[],
