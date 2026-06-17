@@ -116,7 +116,59 @@ export default function AnalyzeClient() {
               <span>1개월 추세 <b className={(result.trend1m ?? 0) > 0 ? "text-red-600" : (result.trend1m ?? 0) < 0 ? "text-blue-600" : ""}>{result.trend1m ?? "N/A"}%</b></span>
               <span>20/60/200일선 <b>{result.ma20 ?? "-"} / {result.ma60 ?? "-"} / {result.ma200 ?? "-"}</b></span>
             </div>
+            {result.patterns.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {result.patterns.map((p) => (
+                  <span key={p} className={`rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
+                    p.includes("골든") || p.includes("과매도") || p.includes("신고가") ? "bg-red-50 text-red-600"
+                    : p.includes("데드") || p.includes("과매수") || p.includes("신저가") ? "bg-blue-50 text-blue-600"
+                    : "bg-ink/10 text-ink-80"
+                  }`}>{p}</span>
+                ))}
+              </div>
+            )}
             {result.technicalText && <p className="mt-2 text-[14px] leading-snug text-ink-80">{result.technicalText}</p>}
+          </Card>
+
+          {/* 목표가 · 지지/저항 */}
+          <Card>
+            <SectionLabel>지지 · 저항 (목표 구간)</SectionLabel>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[14px] text-red-600">저항선(고점)</span>
+                <span className="text-[15px] tabular-nums">
+                  {fmtPrice(result.resistance, result.currency)}
+                  {result.upside !== null && <span className="ml-2 text-[13px] text-ink-48">상승 여력 +{result.upside}%</span>}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[14px] text-ink-80">현재가</span>
+                <span className="text-[15px] font-semibold tabular-nums">{fmtPrice(result.price, result.currency)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[14px] text-blue-600">지지선(저점)</span>
+                <span className="text-[15px] tabular-nums">
+                  {fmtPrice(result.support, result.currency)}
+                  {result.downside !== null && <span className="ml-2 text-[13px] text-ink-48">하락 여지 {result.downside}%</span>}
+                </span>
+              </div>
+            </div>
+            <p className="mt-2 text-[12px] text-ink-48">최근 60거래일 고점·저점 기준</p>
+          </Card>
+
+          {/* 거래량 */}
+          <Card>
+            <SectionLabel>거래량</SectionLabel>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-[14px] text-ink-80">
+              <span>당일 <b>{result.volume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
+              <span>20일 평균 <b>{result.avgVolume?.toLocaleString("ko-KR") ?? "N/A"}</b></span>
+              <span>평균 대비 <b className={(result.volumeRatio ?? 1) >= 1.5 ? "text-red-600" : ""}>{result.volumeRatio ?? "N/A"}배</b></span>
+            </div>
+            {result.volumeRatio !== null && (
+              <p className="mt-2 text-[13px] text-ink-48">
+                {result.volumeRatio >= 2 ? "평소의 2배 이상 — 강한 관심/변동 신호" : result.volumeRatio >= 1.3 ? "거래량 증가 — 관심 유입" : "평소 수준의 거래량"}
+              </p>
+            )}
           </Card>
 
           <Card>

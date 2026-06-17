@@ -25,6 +25,17 @@ export type StockAnalysis = {
   rsi14: number | null;
   trend1m: number | null;   // 최근 1개월 추세 %
   aligned: "정배열" | "역배열" | "혼조" | null; // 이동평균 배열
+  // 목표가·지지/저항
+  support: number | null;   // 최근 저점(지지선)
+  resistance: number | null; // 최근 고점(저항선)
+  upside: number | null;    // 저항까지 여력 %
+  downside: number | null;  // 지지까지 하락 여지 %
+  // 거래량
+  volume: number | null;
+  avgVolume: number | null;
+  volumeRatio: number | null; // 평균 대비 배수
+  // 차트 패턴
+  patterns: string[];       // 골든크로스 등
   history: { date: string; value: number }[];
   // AI/규칙 판단
   direction: "단기 상승 우세" | "중립·관망" | "단기 하락 우세";
@@ -57,18 +68,64 @@ function rsi(arr: number[], period = 14): number | null {
   return Math.round(100 - 100 / (1 + rs));
 }
 
+// 특정 시점(끝에서 back번째)의 N일 이동평균
+function smaAt(arr: number[], n: number, back = 0): number | null {
+  const end = arr.length - back;
+  if (end < n) return null;
+  const s = arr.slice(end - n, end);
+  return s.reduce((a, b) => a + b, 0) / n;
+}
+
+// 차트 패턴 감지 (골든/데드크로스, 52주 고점·저점 근접, 과매수/과매도)
+function detectPatterns(
+  closes: number[],
+  price: number | null,
+  rsi14: number | null,
+  weekRangePos: number | null,
+): string[] {
+  const out: string[] = [];
+  const ma5now = smaAt(closes, 5, 0), ma20now = smaAt(closes, 20, 0);
+  const ma5prev = smaAt(closes, 5, 3), ma20prev = smaAt(closes, 20, 3);
+  if (ma5now !== null && ma20now !== null && ma5prev !== null && ma20prev !== null) {
+    if (ma5prev <= ma20prev && ma5now > ma20now) out.push("골든크로스(단기 5·20일선 상향 돌파)");
+    if (ma5prev >= ma20prev && ma5now < ma20now) out.push("데드크로스(단기 5·20일선 하향 이탈)");
+  }
+  // 60/120(중기) 크로스
+  const ma60now = smaAt(closes, 60, 0), ma120now = smaAt(closes, 120, 0);
+  const ma60prev = smaAt(closes, 60, 5), ma120prev = smaAt(closes, 120, 5);
+  if (ma60now !== null && ma120now !== null && ma60prev !== null && ma120prev !== null) {
+    if (ma60prev <= ma120prev && ma60now > ma120now) out.push("중기 골든크로스(60·120일선)");
+    if (ma60prev >= ma120prev && ma60now < ma120now) out.push("중기 데드크로스(60·120일선)");
+  }
+  if (rsi14 !== null) {
+    if (rsi14 >= 70) out.push("RSI 과매수(단기 조정 주의)");
+    if (rsi14 <= 30) out.push("RSI 과매도(단기 반등 가능)");
+  }
+  if (weekRangePos !== null) {
+    if (weekRangePos >= 95) out.push("52주 신고가 근접");
+    if (weekRangePos <= 5) out.push("52주 신저가 근접");
+  }
+  return out;
+}
+
 export async function analyzeStock(query: string, knownSymbol?: string | null): Promise<StockAnalysis | null> {
   const symbol = (knownSymbol?.trim() || getYahooSymbol(query) || query.trim()).toUpperCase();
   if (!symbol) return null;
 
   let q: Record<string, unknown>;
   let closes: number[] = [];
+  let highs: number[] = [];
+  let lows: number[] = [];
+  let volumes: number[] = [];
   let history: { date: string; value: number }[] = [];
   try {
     q = (await yf.quote(symbol)) as Record<string, unknown>;
     const c = await yf.chart(symbol, { period1: new Date(Date.now() - 150 * 24 * 3600 * 1000), interval: "1d" });
     const pts = (c.quotes ?? []).filter((x): x is typeof x & { close: number } => x.close != null);
     closes = pts.map((p) => p.close);
+    highs = pts.map((p) => (typeof p.high === "number" ? p.high : p.close));
+    lows = pts.map((p) => (typeof p.low === "number" ? p.low : p.close));
+    volumes = pts.map((p) => (typeof p.volume === "number" ? p.volume : 0));
     history = pts.slice(-40).map((p) => ({
       date: (p.date instanceof Date ? p.date : new Date(p.date)).toISOString().slice(0, 10),
       value: Number(p.close.toFixed(2)),
@@ -77,7 +134,9 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
     return {
       name: query, symbol, price: null, changePercent: null, currency: null,
       trailingPE: null, forwardPE: null, weekRangePos: null,
-      ma20: null, ma60: null, ma200: null, rsi14: null, trend1m: null, aligned: null, history: [],
+      ma20: null, ma60: null, ma200: null, rsi14: null, trend1m: null, aligned: null,
+      support: null, resistance: null, upside: null, downside: null,
+      volume: null, avgVolume: null, volumeRatio: null, patterns: [], history: [],
       direction: "중립·관망", confidence: "낮음",
       valuationText: "", technicalText: "", macroSectorText: "", summary: "", risks: "",
       isFallback: true, error: "종목 데이터를 불러오지 못했습니다. 종목명을 확인하거나 자동완성에서 선택해 주세요.",
@@ -110,6 +169,22 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
     else aligned = "혼조";
   }
 
+  // 지지/저항: 최근 60거래일 고점·저점
+  const recentHigh = highs.length ? Math.max(...highs.slice(-60)) : null;
+  const recentLow = lows.length ? Math.min(...lows.slice(-60)) : null;
+  const resistance = recentHigh !== null ? Number(recentHigh.toFixed(2)) : null;
+  const support = recentLow !== null ? Number(recentLow.toFixed(2)) : null;
+  const upside = price !== null && resistance !== null && price > 0 ? Number((((resistance - price) / price) * 100).toFixed(1)) : null;
+  const downside = price !== null && support !== null && price > 0 ? Number((((support - price) / price) * 100).toFixed(1)) : null;
+
+  // 거래량: 당일 vs 20일 평균
+  const volume = volumes.length ? volumes[volumes.length - 1] : null;
+  const avgVolume = volumes.length >= 20 ? Math.round(volumes.slice(-20).reduce((a, b) => a + b, 0) / 20) : null;
+  const volumeRatio = volume !== null && avgVolume ? Number((volume / avgVolume).toFixed(2)) : null;
+
+  // 차트 패턴
+  const patterns = detectPatterns(closes, price, rsi14, weekRangePos);
+
   // 매크로
   const market = await fetchMarketData();
   const riskScores = calculateRiskScores(market);
@@ -122,7 +197,10 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
     ma20: ma20 !== null ? Number(ma20.toFixed(2)) : null,
     ma60: ma60 !== null ? Number(ma60.toFixed(2)) : null,
     ma200: ma200 !== null ? Number(ma200.toFixed(2)) : null,
-    rsi14, trend1m, aligned, history,
+    rsi14, trend1m, aligned,
+    support, resistance, upside, downside,
+    volume, avgVolume, volumeRatio, patterns,
+    history,
   };
 
   // 규칙 기반 폴백 판단
@@ -135,15 +213,19 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
     if ((trend1m ?? 0) < -5) score -= 1;
     if (composite >= 54) score -= 1; // 하락장
     if (composite <= 26) score += 1; // 상승장
+    if (patterns.some((p) => p.includes("골든크로스"))) score += 1;
+    if (patterns.some((p) => p.includes("데드크로스"))) score -= 1;
+    if ((volumeRatio ?? 0) >= 2 && (changePercent ?? 0) > 0) score += 1; // 대량 거래 + 상승
+    if ((volumeRatio ?? 0) >= 2 && (changePercent ?? 0) < 0) score -= 1; // 대량 거래 + 하락
     const direction: StockAnalysis["direction"] = score >= 1 ? "단기 상승 우세" : score <= -1 ? "단기 하락 우세" : "중립·관망";
     return {
       ...base,
       direction,
       confidence: "낮음",
       valuationText: `PER(후행) ${trailingPE?.toFixed(1) ?? "N/A"} · 선행 ${forwardPE?.toFixed(1) ?? "N/A"} · 52주 내 위치 ${weekRangePos ?? "N/A"}%`,
-      technicalText: `이동평균 ${aligned ?? "N/A"} · RSI ${rsi14 ?? "N/A"} · 1개월 추세 ${trend1m ?? "N/A"}%`,
+      technicalText: `이동평균 ${aligned ?? "N/A"} · RSI ${rsi14 ?? "N/A"} · 추세 ${trend1m ?? "N/A"}% · ${patterns.join(", ") || "특이 패턴 없음"}`,
       macroSectorText: `현재 장세 ${stage}(리스크 ${composite}) · 반도체 SOX ${market.sox.changePercent?.toFixed(1) ?? "N/A"}%`,
-      summary: "AI 분석 미사용 — 기술적·매크로 신호 기반 추정입니다.",
+      summary: `저항 ${resistance ?? "N/A"}(여력 ${upside ?? "N/A"}%) · 지지 ${support ?? "N/A"}(하락여지 ${downside ?? "N/A"}%). AI 분석 미사용 — 신호 기반 추정입니다.`,
       risks: "단기 변동성·뉴스 이벤트에 따라 방향이 바뀔 수 있습니다.",
       isFallback: true,
     };
@@ -164,6 +246,14 @@ ${name} (${symbol}) · 현재가 ${price ?? "N/A"} (${changePercent?.toFixed(2) 
 - 이동평균 배열: ${aligned ?? "N/A"} (현재가 ${price ?? "?"} / 20일 ${base.ma20 ?? "?"} / 60일 ${base.ma60 ?? "?"} / 200일 ${base.ma200 ?? "?"})
 - RSI(14): ${rsi14 ?? "N/A"} (70+ 과매수, 30- 과매도)
 - 최근 1개월 추세: ${trend1m ?? "N/A"}%
+- 감지된 차트 패턴: ${patterns.join(", ") || "특이 패턴 없음"}
+
+## 지지·저항 (최근 60일)
+- 저항선(고점) ${resistance ?? "N/A"} → 현재가 대비 상승 여력 ${upside ?? "N/A"}%
+- 지지선(저점) ${support ?? "N/A"} → 현재가 대비 하락 여지 ${downside ?? "N/A"}%
+
+## 거래량
+- 당일 거래량 ${volume ?? "N/A"} · 20일 평균 대비 ${volumeRatio ?? "N/A"}배
 
 ## 매크로·섹터
 - 시장 장세: ${stage} (종합 리스크 ${composite}/100)
@@ -176,9 +266,9 @@ ${name} (${symbol}) · 현재가 ${price ?? "N/A"} (${changePercent?.toFixed(2) 
   "direction": "단기 상승 우세 | 중립·관망 | 단기 하락 우세",
   "confidence": "높음 | 보통 | 낮음",
   "valuationText": "밸류에이션 해석 1~2문장 (PER·52주 위치 근거)",
-  "technicalText": "기술적 해석 1~2문장 (이평·RSI·추세 근거)",
+  "technicalText": "기술적 해석 1~2문장 (이평·RSI·추세·차트패턴 근거)",
   "macroSectorText": "매크로·섹터 해석 1~2문장",
-  "summary": "단기 방향 종합 결론 1~2문장",
+  "summary": "단기 방향 종합 결론 1~2문장 (지지·저항·거래량 고려)",
   "risks": "주의할 리스크 1~2문장"
 }`;
 
