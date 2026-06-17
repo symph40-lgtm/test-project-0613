@@ -69,6 +69,69 @@ export async function fetchStockFlow(ticker: string, code: string): Promise<Stoc
   }
 }
 
+export type KoreanQuote = {
+  code: string;
+  price: number | null;        // 현재 표시가 (시간외 진행 중이면 시간외가)
+  changePercent: number | null;
+  session: string | null;      // "장전" | "시간외" | null(정규/마감)
+  delayName: string | null;    // "실시간" 등
+};
+
+function signedRatio(ratioStr: unknown, dir: unknown): number | null {
+  const raw = typeof ratioStr === "string" ? parseFloat(ratioStr.replace(/,/g, "")) : typeof ratioStr === "number" ? ratioStr : NaN;
+  if (isNaN(raw)) return null;
+  const name = (dir as { name?: string })?.name ?? "";
+  if (name === "FALLING" || name === "LOWER_LIMIT") return -Math.abs(raw);
+  if (name === "RISING" || name === "UPPER_LIMIT") return Math.abs(raw);
+  return raw; // 보합/알수없음
+}
+
+function toNumKR(v: unknown): number | null {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v.replace(/,/g, ""));
+    return isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+// 네이버 모바일 API로 한국 종목 실시간 시세 (+ 시간외 단일가 자동 반영)
+export async function fetchKoreanQuote(code: string): Promise<KoreanQuote | null> {
+  try {
+    const res = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`, {
+      headers: { "User-Agent": "Mozilla/5.0", Referer: "https://m.stock.naver.com/" },
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as Record<string, unknown>;
+
+    const regPrice = toNumKR(j.closePrice);
+    const regRatio = signedRatio(j.fluctuationsRatio, j.compareToPreviousPrice);
+    const delayName = typeof j.delayTimeName === "string" ? j.delayTimeName : null;
+
+    // 시간외 단일가 진행 중이면 그 값을 우선 표시
+    const over = j.overMarketPriceInfo as Record<string, unknown> | undefined;
+    if (over && (over.overMarketStatus === "OPEN" || over.overMarketStatus === "CLOSE")) {
+      const oPrice = toNumKR(over.overPrice);
+      const oRatio = signedRatio(over.fluctuationsRatio, over.compareToPreviousPrice);
+      const isBefore = over.tradingSessionType === "BEFORE_MARKET";
+      if (oPrice !== null && over.overMarketStatus === "OPEN") {
+        return {
+          code,
+          price: oPrice,
+          changePercent: oRatio,
+          session: isBefore ? "장전" : "시간외",
+          delayName,
+        };
+      }
+    }
+
+    return { code, price: regPrice, changePercent: regRatio, session: null, delayName };
+  } catch {
+    return null;
+  }
+}
+
 export type KoreanOffHours = {
   code: string;
   session: "장전" | "시간외" | null; // 장전 시간외 / 장후 시간외 단일가

@@ -13,7 +13,7 @@ import { HoldingCalls } from "../../_components/HoldingCalls";
 import type { Recommendation } from "@/lib/market/recommend";
 import type { OffHoursQuote } from "@/lib/market/fetch";
 
-type Sess = "프리장" | "애프터장" | null;
+type Sess = string | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
 type MarketBlock = {
   nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind; vix: Ind;
@@ -453,7 +453,7 @@ export default function IntradayClient({
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[12px] text-ink-48">한국 종목은 약 15분 지연 시세일 수 있습니다 (Yahoo Finance).</p>
+          <p className="mt-3 text-[12px] text-ink-48">한국 종목: 네이버 실시간(시간외 단일가 자동 반영) · 미국 종목: 프리/애프터장 반영(Yahoo).</p>
         </Card>
       )}
 

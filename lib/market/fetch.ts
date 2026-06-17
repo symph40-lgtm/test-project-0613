@@ -1,6 +1,7 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketData, QuoteData } from "./types";
 import { getYahooSymbol } from "../positions";
+import { toKrCode, fetchKoreanQuote } from "./naver-flow";
 
 // deprecated static method 대신 인스턴스 사용 (static quote()는 never를 반환)
 const yf = new YahooFinance();
@@ -11,7 +12,7 @@ export type PositionQuote = {
   price: number | null;
   changePercent: number | null;
   currency: string | null;
-  session?: "프리장" | "애프터장" | null; // 현재 표시 시세의 세션
+  session?: string | null; // 현재 표시 시세의 세션 (프리장/애프터장/장전/시간외)
 };
 
 // 한국 거래소 코드 (KOSPI=KSC, KOSDAQ=KOE/KOQ)
@@ -57,6 +58,23 @@ async function fetchOneQuote(
   };
 
   try {
+    // 한국 종목이면 네이버 실시간 시세 우선 (야후 15분 지연 + 시간외 미제공 회피)
+    const krCode = toKrCode(knownSymbol ?? null, ticker);
+    if (krCode) {
+      const kq = await fetchKoreanQuote(krCode);
+      if (kq && kq.price !== null) {
+        return {
+          ticker,
+          symbol: `${krCode}.KS`,
+          price: kq.price,
+          changePercent: kq.changePercent,
+          currency: "KRW",
+          session: kq.session,
+        };
+      }
+      // 네이버 실패 시 야후로 폴백 (아래 계속)
+    }
+
     // 0단계: 자동완성으로 이미 확정된 심볼이 있으면 그대로 사용
     let symbol = knownSymbol?.trim() || getYahooSymbol(ticker);
 
