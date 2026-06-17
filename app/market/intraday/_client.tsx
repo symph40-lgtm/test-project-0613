@@ -11,6 +11,7 @@ import type { EarningsEvent } from "@/lib/market/earnings";
 import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain } from "./actions";
 import { HoldingCalls } from "../../_components/HoldingCalls";
 import type { Recommendation } from "@/lib/market/recommend";
+import type { OffHoursQuote } from "@/lib/market/fetch";
 
 type Sess = "프리장" | "애프터장" | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
@@ -90,9 +91,9 @@ function SessionTag({ session }: { session?: Sess }) {
 }
 
 export default function IntradayClient({
-  market, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
+  market, offHours, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
 }: {
-  market: MarketBlock; composite: number; stage: string; posture: Posture;
+  market: MarketBlock; offHours: OffHoursQuote[]; composite: number; stage: string; posture: Posture;
   session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
   earnings: EarningsEvent[]; holdings: Holding[]; recs: Recommendation[]; news: NewsItem[];
 }) {
@@ -341,6 +342,31 @@ export default function IntradayClient({
         </div>
         <p className="mt-3 text-[12px] text-ink-48">색상: 상승=빨강, 하락=파랑 (한국식 표기)</p>
       </Card>
+
+      {/* 선물 · 시간외 지수 (프리장/애프터장 대용) */}
+      {offHours.length > 0 && (
+        <Card className="mt-4">
+          <SectionLabel>나스닥 선물 · 시간외 지수</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+            {offHours.map((o) => (
+              <div key={o.label} className="flex items-baseline justify-between border-b border-divider pb-2">
+                <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
+                  {o.label}
+                  <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">{o.kind}</span>
+                </span>
+                <span className="flex items-baseline gap-2">
+                  <SessionTag session={o.session} />
+                  <span className="text-[16px] font-medium tabular-nums">{fmtNum(o.price, 2)}</span>
+                  <span className="w-20 text-right"><Chg v={o.changePercent} /></span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[12px] leading-snug text-ink-48">
+            지수(나스닥·SOX)는 시간외 시세가 없어, 24시간 거래되는 선물과 프리/애프터장이 반영되는 ETF로 시간외 흐름을 보여줍니다.
+          </p>
+        </Card>
+      )}
 
       {/* 채권(미국채 10Y) 흐름 */}
       <BondCard

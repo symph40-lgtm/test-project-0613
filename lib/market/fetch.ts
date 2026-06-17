@@ -179,6 +179,33 @@ async function fetchFredRate(): Promise<number | null> {
   }
 }
 
+export type OffHoursQuote = {
+  label: string;
+  kind: "선물" | "ETF";
+  price: number | null;
+  changePercent: number | null;
+  session: "프리장" | "애프터장" | null;
+};
+
+// 시간외 지수 흐름: 선물(24h) + ETF(프리/애프터장)
+// 지수(^NDX 등)는 시간외 시세가 없어 선물·ETF로 대체
+export async function fetchOffHoursIndex(): Promise<OffHoursQuote[]> {
+  const defs: { symbol: string; label: string; kind: "선물" | "ETF" }[] = [
+    { symbol: "NQ=F", label: "나스닥 선물", kind: "선물" },
+    { symbol: "ES=F", label: "S&P500 선물", kind: "선물" },
+    { symbol: "QQQ", label: "나스닥100 ETF (QQQ)", kind: "ETF" },
+    { symbol: "SOXX", label: "반도체 ETF (SOXX)", kind: "ETF" },
+  ];
+  const results = await Promise.all(
+    defs.map(async (d): Promise<OffHoursQuote> => {
+      const q = await fetchQuote(d.symbol);
+      const eff = effectiveQuote(q);
+      return { label: d.label, kind: d.kind, price: eff.price, changePercent: eff.changePercent, session: eff.session };
+    }),
+  );
+  return results;
+}
+
 export type BondEtf = {
   symbol: string;
   name: string;

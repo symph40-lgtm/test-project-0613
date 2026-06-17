@@ -4,6 +4,7 @@ import {
   fetchPositionQuotes,
   fetchTreasuryHistory,
   fetchBondEtf,
+  fetchOffHoursIndex,
   effectiveQuote,
 } from "@/lib/market/fetch";
 import type { QuoteData } from "@/lib/market/types";
@@ -56,7 +57,7 @@ export default async function IntradaySummaryPage() {
     { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
   ];
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
@@ -64,6 +65,7 @@ export default async function IntradaySummaryPage() {
     fetchSemiAiEarnings(),
     fetchBondEtf("TLT"),
     fetchPositionQuotes(SEMI_COMPARE),
+    fetchOffHoursIndex(),
   ]);
 
   const semiCompare = SEMI_COMPARE.map((s) => {
@@ -126,6 +128,7 @@ export default async function IntradaySummaryPage() {
         vix: indicator(market.vix),
         fetchedAt: market.fetchedAt,
       }}
+      offHours={offHours}
       composite={composite}
       stage={stage}
       posture={posture}
