@@ -153,7 +153,7 @@ export default function IntradayClient({
     .map((h) => h.ticker);
 
   const indicators: { label: string; ind: Ind; unit?: string; digits?: number }[] = [
-    { label: "나스닥100", ind: market.nasdaq, digits: 2 },
+    { label: "나스닥100 선물", ind: market.nasdaq, digits: 2 },
     { label: "반도체(SOX)", ind: market.sox, digits: 2 },
     { label: "코스피", ind: market.kospi, digits: 2 },
     { label: "달러/원", ind: market.usdkrw, unit: "원", digits: 1 },

@@ -130,7 +130,9 @@ export async function fetchPositionQuotes(
 
 const SYMBOLS = {
   sp500: "^GSPC",
-  nasdaq: "^NDX",
+  // 나스닥100은 지수(^NDX) 대신 연속 선물(NQ=F)을 사용 — 프리/애프터장 포함 ~24시간 실시간.
+  // 지수는 정규장 외 시간외 시세가 없어 전일 종가로 멈춰 보였음. NQ=F는 야후가 최근월물 자동 롤오버.
+  nasdaq: "NQ=F",
   sox: "^SOX",
   kospi: "^KS11",
   usdkrw: "USDKRW=X",

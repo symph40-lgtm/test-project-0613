@@ -176,7 +176,7 @@ export default function PrecloseClient({
                     );
                   })}
                 </ul>
-                <p className="mt-2 text-[11px] text-ink-48">{supplyFlows[0]?.date} · 출처: 네이버 금융</p>
+                <p className="mt-2 text-[11px] text-ink-48">{supplyFlows[0]?.date} {supplyFlows[0]?.provisional ? "장중 잠정" : "확정"} · 출처: 네이버 금융</p>
               </>
             ) : (
               <p className="text-[15px] text-ink-80">{(ai.supplyNotes ?? []).join(" · ") || "보유 한국 종목 수급 데이터가 없습니다."}</p>

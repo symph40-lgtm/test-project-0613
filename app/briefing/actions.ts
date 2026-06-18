@@ -15,22 +15,37 @@ export async function getBriefing(date?: string): Promise<BriefingSnapshot | nul
 
   const targetDate = date ?? new Date().toISOString().slice(0, 10);
 
-  // 캐시 히트 확인 (1시간 TTL) — 단, 폴백 스냅샷은 재사용하지 않고 재생성
-  const { data: cached } = await supabase
-    .from("briefing_snapshots")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("date", targetDate)
-    .eq("is_fallback", false)
-    .gte("updated_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
-    .maybeSingle();
-
-  if (cached) return cached as BriefingSnapshot;
-
-  // 캐시 미스 — 실데이터 fetch
+  // 시세·위험점수는 항상 최신으로 — 캐시는 (비싼) AI 텍스트에만 적용한다.
+  // 과거에는 스냅샷 전체를 1시간 재사용해 주요 지표가 최대 1시간 stale했음.
   try {
-    const [marketResult, positionsResult, principlesResult] = await Promise.all([
-      fetchMarketData(),
+    const marketResult = await fetchMarketData();
+    const riskScores = calculateRiskScores(marketResult);
+    const composite = calculateCompositeScore(riskScores);
+    const stage = classifyStage(composite);
+
+    // AI 텍스트 캐시 히트 확인 (1시간 TTL) — 폴백 스냅샷은 재사용하지 않음
+    const { data: cached } = await supabase
+      .from("briefing_snapshots")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("date", targetDate)
+      .eq("is_fallback", false)
+      .gte("updated_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .maybeSingle();
+
+    // AI 출력만 재사용하고 시세·위험점수·단계는 방금 조회한 최신값으로 덮어쓴다
+    if (cached?.ai_output) {
+      return {
+        ...(cached as BriefingSnapshot),
+        market_data: marketResult,
+        risk_scores: riskScores,
+        risk_score: composite,
+        stage,
+      };
+    }
+
+    // 캐시 미스 — AI 생성에 필요한 포지션·원칙 조회
+    const [positionsResult, principlesResult] = await Promise.all([
       supabase
         .from("positions")
         .select("ticker, weight, is_leverage, sector, pnl, risk_level")
@@ -43,9 +58,6 @@ export async function getBriefing(date?: string): Promise<BriefingSnapshot | nul
 
     const positions = positionsResult.data ?? [];
     const principles = principlesResult.data ?? [];
-    const riskScores = calculateRiskScores(marketResult);
-    const composite = calculateCompositeScore(riskScores);
-    const stage = classifyStage(composite);
 
     const { output: aiOutput, isFallback } = await generateBriefing(
       marketResult,

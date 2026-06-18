@@ -171,7 +171,7 @@ export default function EvidenceClient({
                   </table>
                 </div>
                 <p className="mt-2 text-[12px] text-ink-48">
-                  {supplyFlows[0]?.date} 기준 · 순매매량(주) · 매수=빨강, 매도=파랑 · 출처: 네이버 금융
+                  {supplyFlows[0]?.date} {supplyFlows[0]?.provisional ? "장중 잠정" : "확정"} · 순매매량(주) · 매수=빨강, 매도=파랑 · 출처: 네이버 금융
                 </p>
               </>
             ) : (

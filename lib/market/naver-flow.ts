@@ -8,6 +8,7 @@ export type StockFlow = {
   date: string;          // 기준일 (YYYY.MM.DD)
   institution: number | null; // 기관 순매매량(주)
   foreign: number | null;     // 외국인 순매매량(주)
+  provisional: boolean;  // 오늘 장중 잠정치 여부 (true=장중 잠정, false=확정)
 };
 
 import { getYahooSymbol } from "../positions";
@@ -37,33 +38,57 @@ function parseSignedInt(s: string): number | null {
   return isNaN(n) ? null : n;
 }
 
+// 오늘 날짜를 KST 기준 YYYYMMDD로
+function kstTodayYmd(): string {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const y = kst.getUTCFullYear();
+  const mo = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(kst.getUTCDate()).padStart(2, "0");
+  return `${y}${mo}${d}`;
+}
+
+// "20260618" → "2026.06.18"
+function fmtBizdate(ymd: string): string {
+  if (!/^\d{8}$/.test(ymd)) return ymd;
+  return `${ymd.slice(0, 4)}.${ymd.slice(4, 6)}.${ymd.slice(6, 8)}`;
+}
+
+type TrendRow = {
+  bizdate?: string;
+  foreignerPureBuyQuant?: string;
+  organPureBuyQuant?: string;
+};
+
+// 네이버 모바일 trend API — 첫 행이 최신(장중이면 오늘 잠정치, 마감 후엔 확정치)
+// 확정 일별표(frgn.naver)는 장중에 오늘 행이 없어 어제 값만 나오므로 trend로 교체
 export async function fetchStockFlow(ticker: string, code: string): Promise<StockFlow | null> {
   try {
-    const res = await fetch(`https://finance.naver.com/item/frgn.naver?code=${code}`, {
+    const res = await fetch(`https://m.stock.naver.com/api/stock/${code}/trend`, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Referer: "https://finance.naver.com/",
+        Referer: "https://m.stock.naver.com/",
       },
-      next: { revalidate: 1800 },
+      next: { revalidate: 60 },
     });
     if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    const html = new TextDecoder("euc-kr").decode(buf);
+    const rows = (await res.json()) as TrendRow[];
+    if (!Array.isArray(rows) || rows.length === 0) return null;
 
-    // 데이터 행: 날짜(YYYY.MM.DD)로 시작하고 셀이 9개 내외인 tr
-    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
-    let m: RegExpExecArray | null;
-    while ((m = rowRe.exec(html))) {
-      const cells = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]);
-      if (cells.length < 7) continue;
-      const date = stripTags(cells[0]);
-      if (!/^\d{4}\.\d{2}\.\d{2}$/.test(date)) continue;
-      // 컬럼: 0날짜 1종가 2전일비 3등락률 4거래량 5기관순매매 6외국인순매매 ...
-      const institution = parseSignedInt(cells[5]);
-      const foreign = parseSignedInt(cells[6]);
-      return { ticker, code, date, institution, foreign };
-    }
-    return null;
+    const row = rows[0];
+    const bizdate = typeof row.bizdate === "string" ? row.bizdate : "";
+    if (!/^\d{8}$/.test(bizdate)) return null;
+
+    const foreign = parseSignedInt(row.foreignerPureBuyQuant ?? "");
+    const institution = parseSignedInt(row.organPureBuyQuant ?? "");
+
+    return {
+      ticker,
+      code,
+      date: fmtBizdate(bizdate),
+      institution,
+      foreign,
+      provisional: bizdate === kstTodayYmd(),
+    };
   } catch {
     return null;
   }
