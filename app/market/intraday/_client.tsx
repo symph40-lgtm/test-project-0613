@@ -349,22 +349,40 @@ export default function IntradayClient({
         <Card className="mt-4">
           <SectionLabel>나스닥 선물 · 시간외 지수</SectionLabel>
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            {offHours.map((o) => (
-              <div key={o.label} className="flex items-baseline justify-between border-b border-divider pb-2">
-                <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
-                  {o.label}
-                  <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">{o.kind}</span>
-                </span>
-                <span className="flex items-baseline gap-2">
-                  <SessionTag session={o.session} />
-                  <span className="text-[16px] font-medium tabular-nums">{fmtNum(o.price, 2)}</span>
-                  <span className="w-20 text-right"><Chg v={o.changePercent} /></span>
-                </span>
-              </div>
-            ))}
+            {offHours.map((o) =>
+              o.kind === "ETF" ? (
+                <div key={o.label} className="border-b border-divider pb-2 sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
+                      {o.label}
+                      <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">{o.kind}</span>
+                    </span>
+                    <span className="text-[16px] font-medium tabular-nums">{fmtNum(o.price, 2)}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-5 gap-y-0.5 text-[13px]">
+                    <span className="text-ink-48">전날 정규장 <Chg v={o.regularChange ?? null} /></span>
+                    <span className="text-ink-48">애프터장 <Chg v={o.afterChange ?? null} /></span>
+                    <span className="text-ink-48 font-medium">합계 <Chg v={o.totalChange ?? null} /></span>
+                  </div>
+                </div>
+              ) : (
+                <div key={o.label} className="flex items-baseline justify-between border-b border-divider pb-2">
+                  <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
+                    {o.label}
+                    <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">{o.kind}</span>
+                  </span>
+                  <span className="flex items-baseline gap-2">
+                    <SessionTag session={o.session} />
+                    <span className="text-[16px] font-medium tabular-nums">{fmtNum(o.price, 2)}</span>
+                    <span className="w-20 text-right"><Chg v={o.changePercent} /></span>
+                  </span>
+                </div>
+              ),
+            )}
           </div>
           <p className="mt-3 text-[12px] leading-snug text-ink-48">
             지수(나스닥·SOX)는 시간외 시세가 없어, 24시간 거래되는 선물과 프리/애프터장이 반영되는 ETF로 시간외 흐름을 보여줍니다.
+            ETF는 <b>전날 정규장</b>·<b>애프터장</b>·<b>합계</b>(전일 종가 대비)로 나눠 표시합니다.
           </p>
         </Card>
       )}
@@ -515,34 +533,39 @@ function classifyBondRegime(
   const equityUp = (s.nasdaq ?? 0) > 0 && (s.sox ?? 0) > 0;
   const equityDown = (s.nasdaq ?? 0) < 0 && (s.sox ?? 0) < 0;
   const wonWeak = (s.usdkrw ?? 0) > 0.3; // 원화 약세(달러 강세) = 한국 반도체 부담
-  const fear = (s.vixLevel ?? 0) >= 20 || (s.vixChange ?? 0) > 5;
+  // 변동성 '급등'으로 판단 — VXN은 절대수준이 25~30으로 높아 변화율(vixChange)로만 본다
+  const fearSpike = (s.vixChange ?? 0) > 8;
 
   if (priceTrend === "상승") {
-    // 채권 가격 상승 = 금리 하락
-    if (equityDown || fear) {
-      return {
-        verdict: "부정",
-        headline: "위험회피형 채권 강세 — 반도체에 부정적 신호",
-        detail:
-          "채권 가격이 오르는데 나스닥·반도체(SOX)가 동반 약세이고 변동성(VIX)이 높습니다. 금리 하락이 '경기 둔화·안전자산 도피' 때문일 가능성이 큽니다. 이런 국면에서는 반도체주에 부정적입니다.",
-        action: "추격 매수보다 관망·비중 축소 검토. 반등해도 추세 전환 확인 후 대응이 안전합니다.",
-      };
-    }
+    // 채권 가격 상승 = 금리 하락. 증시 실제 방향을 먼저 보고 판단 (변동성은 보조 신호)
     if (equityUp) {
       return {
         verdict: "긍정",
         headline: "금리 하락형 채권 강세 — 반도체에 우호적",
         detail:
-          "채권 가격 상승(금리 하락)에 나스닥·반도체(SOX)가 동반 상승합니다. 할인율 하락이 성장주·반도체 밸류에이션 부담을 덜어주는 '좋은 금리 하락' 국면입니다." +
-          (wonWeak ? " 다만 원화 약세는 외국인 수급에 부담일 수 있습니다." : " 원/달러도 안정적이라 외국인 수급에 우호적입니다."),
+          "채권 가격 상승(금리 하락)에 나스닥·반도체가 동반 상승합니다. 할인율 하락이 성장주·반도체 밸류에이션 부담을 덜어주는 '좋은 금리 하락' 국면입니다." +
+          (wonWeak ? " 다만 원화 약세는 외국인 수급에 부담일 수 있습니다." : " 원/달러도 안정적이라 외국인 수급에 우호적입니다.") +
+          (fearSpike ? " 단, 변동성(VXN)이 급등 중이라 변동에 유의하세요." : ""),
         action: "마이크론·삼성전자·SK하이닉스 등 비중 확대를 검토할 수 있는 구간. 단 분할 접근 권장.",
       };
     }
+    if (equityDown) {
+      return {
+        verdict: "부정",
+        headline: "위험회피형 채권 강세 — 반도체에 부정적 신호",
+        detail:
+          "채권 가격이 오르는데 나스닥·반도체가 동반 약세입니다. 금리 하락이 '경기 둔화·안전자산 도피' 때문일 가능성이 큽니다. 이런 국면에서는 반도체주에 부정적입니다." +
+          (fearSpike ? " 변동성(VXN)도 급등 중입니다." : ""),
+        action: "추격 매수보다 관망·비중 축소 검토. 반등해도 추세 전환 확인 후 대응이 안전합니다.",
+      };
+    }
+    // 나스닥·SOX가 한 방향이 아님(엇갈림) — '동반 약세'로 단정하지 않는다
     return {
-      verdict: "중립",
-      headline: "채권 강세(금리 하락) — 방향 혼조",
+      verdict: fearSpike ? "주의" : "중립",
+      headline: "채권 강세(금리 하락) — 증시 방향 혼조",
       detail:
-        "금리 하락 자체는 반도체에 우호적이나, 증시가 뚜렷한 방향을 보이지 않습니다. 나스닥·SOX·환율이 같이 돌아서는지 확인이 필요합니다.",
+        "금리 하락 자체는 반도체에 우호적이나, 나스닥과 반도체(SOX)가 같은 방향이 아닙니다(엇갈림). 동반 상승으로 정렬되는지 확인이 필요합니다." +
+        (fearSpike ? " 변동성(VXN)이 급등 중이라 단기 흔들림에 주의하세요." : ""),
       action: "나스닥·SOX 동반 상승 확인 시 매수, 동반 하락 시 관망.",
     };
   }
@@ -589,6 +612,7 @@ function BondCard({
   ind: Ind; history: BondPoint[]; etf: BondEtf; signals: BondSignals;
 }) {
   const yieldChange = ind.changePercent;
+  const [showTable, setShowTable] = useState(false);
 
   // 채권 가격 방향: 실제 TLT 가격 추세(기간 시작 vs 끝) 기준 — 차트와 일치
   let trendDir: "상승" | "하락" | "보합" | null = null;
@@ -637,6 +661,52 @@ function BondCard({
           {history.length >= 2 && <BondSparkline points={history} />}
         </div>
       </div>
+
+      {/* 표로 보기 토글 — 그래프 대신 날짜별 수치 표 */}
+      {(history.length > 0 || (etf && etf.history.length > 0)) && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowTable((v) => !v)}
+            className="flex items-center gap-1 text-[13px] text-guard"
+          >
+            {showTable ? "표 접기 ▲" : "금리·채권가 표로 보기 ▼"}
+          </button>
+          {showTable && (() => {
+            const rateMap = new Map(history.map((p) => [p.date, p.value]));
+            const etfMap = new Map((etf?.history ?? []).map((p) => [p.date, p.value]));
+            const dates = Array.from(new Set([...rateMap.keys(), ...etfMap.keys()]))
+              .sort()
+              .slice(-12)
+              .reverse();
+            return (
+              <div className="mt-2 overflow-hidden rounded-[10px] border border-hairline">
+                <table className="w-full text-[13px]">
+                  <thead className="bg-pearl text-[12px] text-ink-48">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">날짜</th>
+                      <th className="px-3 py-2 text-right font-medium">금리(10Y)</th>
+                      <th className="px-3 py-2 text-right font-medium">채권가(TLT)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-divider">
+                    {dates.map((d) => (
+                      <tr key={d}>
+                        <td className="px-3 py-1.5">{d}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {rateMap.has(d) ? `${rateMap.get(d)!.toFixed(2)}%` : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {etfMap.has(d) ? `$${etfMap.get(d)!.toFixed(2)}` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* 추세 요약 — 실제 가격 기준 */}
       {trendDir && trendDir !== "보합" && (

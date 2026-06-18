@@ -206,6 +206,10 @@ export type OffHoursQuote = {
   price: number | null;
   changePercent: number | null;
   session: "프리장" | "애프터장" | null;
+  // ETF 전용: 정규장/애프터장 분해 + 합계(전일종가→현재)
+  regularChange?: number | null; // 직전 정규장 등락
+  afterChange?: number | null;   // 애프터장(시간외) 등락
+  totalChange?: number | null;   // 합계 = 전일 종가 대비 현재가
 };
 
 // 시간외 지수 흐름: 선물(24h) + ETF(프리/애프터장)
@@ -221,7 +225,19 @@ export async function fetchOffHoursIndex(): Promise<OffHoursQuote[]> {
     defs.map(async (d): Promise<OffHoursQuote> => {
       const q = await fetchQuote(d.symbol);
       const eff = effectiveQuote(q);
-      return { label: d.label, kind: d.kind, price: eff.price, changePercent: eff.changePercent, session: eff.session };
+      const base: OffHoursQuote = {
+        label: d.label, kind: d.kind, price: eff.price, changePercent: eff.changePercent, session: eff.session,
+      };
+      if (d.kind !== "ETF") return base;
+
+      // ETF: 정규장 등락 / 애프터장 등락 / 합계(전일종가→현재) 분해
+      const regularChange = q.changePercent ?? null;
+      const afterChange = q.postMarketChangePercent ?? null;
+      const totalChange =
+        q.postMarketPrice != null && q.previousClose != null && q.previousClose !== 0
+          ? ((q.postMarketPrice - q.previousClose) / q.previousClose) * 100
+          : regularChange;
+      return { ...base, regularChange, afterChange, totalChange };
     }),
   );
   return results;
@@ -278,24 +294,46 @@ export async function fetchBondEtf(symbol = "TLT"): Promise<BondEtf | null> {
 
 export type TreasuryPoint = { date: string; value: number };
 
-// 미국 10년물 국채 금리 최근 이력 (FRED DGS10) — 채권 흐름 그래프용
-export async function fetchTreasuryHistory(limit = 20): Promise<TreasuryPoint[]> {
-  const apiKey = process.env.FRED_API_KEY;
-  if (!apiKey) return [];
+// Yahoo ^TNX(10년물 금리)로 금리 이력 — FRED 키 없거나 실패 시 폴백
+async function treasuryHistoryFromYahoo(limit: number): Promise<TreasuryPoint[]> {
   try {
-    const url =
-      `https://api.stlouisfed.org/fred/series/observations?series_id=DGS10` +
-      `&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${limit}`;
-    const res = await fetch(url, { next: { revalidate: 3600 } });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { observations?: { date: string; value: string }[] };
-    const points = (data.observations ?? [])
-      .map((o) => ({ date: o.date, value: parseFloat(o.value) }))
-      .filter((p) => !isNaN(p.value));
-    return points.reverse(); // 과거 → 최근 순
+    const days = Math.max(limit + 10, 40);
+    const period1 = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const c = await yf.chart("^TNX", { period1, interval: "1d" });
+    const pts = (c.quotes ?? [])
+      .filter((x): x is typeof x & { close: number } => x.close != null)
+      .map((x) => ({
+        date: (x.date instanceof Date ? x.date : new Date(x.date)).toISOString().slice(0, 10),
+        value: Number(x.close.toFixed(2)),
+      }));
+    return pts.slice(-limit); // 최근 limit개
   } catch {
     return [];
   }
+}
+
+// 미국 10년물 국채 금리 최근 이력 — FRED(DGS10) 우선, 없으면 Yahoo ^TNX 폴백
+export async function fetchTreasuryHistory(limit = 20): Promise<TreasuryPoint[]> {
+  const apiKey = process.env.FRED_API_KEY;
+  if (apiKey) {
+    try {
+      const url =
+        `https://api.stlouisfed.org/fred/series/observations?series_id=DGS10` +
+        `&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${limit}`;
+      const res = await fetch(url, { next: { revalidate: 3600 } });
+      if (res.ok) {
+        const data = (await res.json()) as { observations?: { date: string; value: string }[] };
+        const points = (data.observations ?? [])
+          .map((o) => ({ date: o.date, value: parseFloat(o.value) }))
+          .filter((p) => !isNaN(p.value));
+        if (points.length >= 2) return points.reverse(); // 과거 → 최근 순
+      }
+    } catch {
+      // 폴백으로 진행
+    }
+  }
+  // FRED 키 없음/실패 → Yahoo 폴백 (그래프가 비지 않게)
+  return treasuryHistoryFromYahoo(limit);
 }
 
 export async function fetchMarketData(): Promise<MarketData> {
