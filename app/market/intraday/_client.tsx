@@ -24,6 +24,7 @@ type Session = { key: string; label: string; focus: string };
 type BondPoint = { date: string; value: number };
 type BondEtf = {
   symbol: string; name: string; price: number | null; changePercent: number | null;
+  session: "프리장" | "애프터장" | null;
   history: { date: string; value: number }[];
 } | null;
 type Holding = {
@@ -616,6 +617,9 @@ function BondCard({
                 {etf.price !== null ? `$${etf.price.toFixed(2)}` : "—"}
               </span>
               <span className="text-[13px]"><Chg v={etf.changePercent} /></span>
+              {etf.session && (
+                <span className="rounded-full bg-ink/10 px-1.5 py-0.5 text-[11px] text-ink-80">{etf.session}</span>
+              )}
             </div>
             {etf.history.length >= 2 && <PriceSparkline points={etf.history} unit="$" />}
           </div>
@@ -651,7 +655,7 @@ function BondCard({
         <span className="text-ink-48">나스닥 <span className={colorOf(signals.nasdaq)}>{fmtPct(signals.nasdaq)}</span></span>
         <span className="text-ink-48">반도체SOX <span className={colorOf(signals.sox)}>{fmtPct(signals.sox)}</span></span>
         <span className="text-ink-48">달러/원 <span className={colorOf(signals.usdkrw)}>{fmtPct(signals.usdkrw)}</span></span>
-        <span className="text-ink-48">VIX {signals.vixLevel?.toFixed(1) ?? "—"} <span className={colorOf(signals.vixChange)}>{fmtPct(signals.vixChange)}</span></span>
+        <span className="text-ink-48">VXN(나스닥 변동성) {signals.vixLevel?.toFixed(1) ?? "—"} <span className={colorOf(signals.vixChange)}>{fmtPct(signals.vixChange)}</span></span>
       </div>
 
       {/* 반도체 영향 국면 판단 */}

@@ -22,8 +22,8 @@ export async function savePositions(rows: SavePositionsRow[]): Promise<void> {
   const validRows = rows.filter((r) => r.ticker.trim() && Number(r.weight) > 0);
 
   if (validRows.length === 0) redirect("/briefing");
-  if (validRows.length > 10) {
-    throw new Error("최대 10개까지만 등록할 수 있습니다.");
+  if (validRows.length > 15) {
+    throw new Error("최대 15개까지만 등록할 수 있습니다.");
   }
 
   // 현재 저장된 ticker 목록 조회

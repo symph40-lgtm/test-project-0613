@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ShieldCheck } from "lucide-react";
 import { NavAuth } from "./NavAuth";
+import { BackButton } from "./BackButton";
 
 /* 얇은 검정 글로벌 내비 — 모든 페이지 상단 고정 */
 export function GlobalNav() {
@@ -31,6 +32,7 @@ export function SubNav({
   return (
     <div className="sticky top-11 z-20 flex h-[52px] items-center justify-between border-b border-hairline bg-parchment/80 px-4 backdrop-blur-md backdrop-saturate-150 sm:px-6">
       <div className="flex items-center gap-2">
+        <BackButton />
         <h1 className="text-[21px] font-semibold tracking-[0.231px]">{title}</h1>
         {badge ? (
           <span className="rounded-full bg-ink px-2 py-0.5 text-[11px] font-normal text-white">

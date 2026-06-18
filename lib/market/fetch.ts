@@ -138,7 +138,8 @@ const SYMBOLS = {
   usdkrw: "USDKRW=X",
   oil: "CL=F",
   treasury10y: "^TNX",
-  vix: "^VIX",
+  // 변동성: S&P 기준 ^VIX 대신 나스닥100 변동성지수 ^VXN 사용 (보유 반도체·기술주와 더 직결)
+  vix: "^VXN",
 } as const;
 
 async function fetchQuote(symbol: string): Promise<QuoteData> {
@@ -231,6 +232,7 @@ export type BondEtf = {
   name: string;
   price: number | null;
   changePercent: number | null;
+  session: "프리장" | "애프터장" | null; // 시간외 세션 (정규장이면 null)
   history: { date: string; value: number }[]; // 가격 추이
 };
 
@@ -251,11 +253,22 @@ export async function fetchBondEtf(symbol = "TLT"): Promise<BondEtf | null> {
     } catch {
       history = [];
     }
+    // ETF는 프리/애프터장 시세가 있어 정규장 외에도 effectiveQuote로 시간외 반영
+    const eff = effectiveQuote({
+      price: q.regularMarketPrice ?? null,
+      changePercent: q.regularMarketChangePercent ?? null,
+      marketState: q.marketState ?? null,
+      preMarketPrice: q.preMarketPrice ?? null,
+      preMarketChangePercent: q.preMarketChangePercent ?? null,
+      postMarketPrice: q.postMarketPrice ?? null,
+      postMarketChangePercent: q.postMarketChangePercent ?? null,
+    });
     return {
       symbol,
       name: "미국 20년+ 국채 ETF (TLT)",
-      price: q.regularMarketPrice ?? null,
-      changePercent: q.regularMarketChangePercent ?? null,
+      price: eff.price,
+      changePercent: eff.changePercent,
+      session: eff.session,
       history,
     };
   } catch {
