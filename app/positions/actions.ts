@@ -53,7 +53,7 @@ export async function addPosition(formData: FormData): Promise<{ error?: string 
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
 
-  if ((count ?? 0) >= 10) return { error: "최대 10개까지만 등록할 수 있습니다." };
+  if ((count ?? 0) >= 15) return { error: "최대 15개까지만 등록할 수 있습니다." };
 
   const sector = getSectorHint(ticker);
   const risk_level = calculateRiskLevel({ weight, is_leverage });

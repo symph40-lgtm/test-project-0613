@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
-import { ButtonLink } from "../_components/Button";
 import { RiskBadge, StateNote } from "../_components/primitives";
 import { TickerInput } from "../_components/TickerInput";
 import {
@@ -26,6 +25,20 @@ type AddState = {
   weight: string;
   is_leverage: boolean;
 };
+
+type Market = "kr" | "us";
+
+const MAX_POSITIONS = 15;
+
+const SECTIONS: { market: Market; label: string }[] = [
+  { market: "kr", label: "국내장 (한국)" },
+  { market: "us", label: "해외장 (미국 등)" },
+];
+
+// 종목명/코드로 국내·해외 추정 (한글이거나 6자리 코드면 국내)
+function inferMarket(ticker: string): Market {
+  return /[가-힣]/.test(ticker) || /^\d{6}$/.test(ticker.trim()) ? "kr" : "us";
+}
 
 export default function PositionsClient({
   initialPositions,
@@ -67,7 +80,6 @@ export default function PositionsClient({
       if (result.error) {
         setError(result.error);
       } else {
-        // 로컬 상태 반영
         setPositions((ps) =>
           ps.map((p) =>
             p.id === editing.id
@@ -122,24 +134,156 @@ export default function PositionsClient({
 
   const empty = positions.length === 0;
 
+  // 데스크톱 테이블 행 (편집 중 / 보기)
+  function renderRow(p: PositionRow) {
+    if (editing?.id === p.id) {
+      return (
+        <tr key={p.id} className="bg-pearl/50">
+          <td className="px-4 py-2 font-semibold">{p.ticker}</td>
+          <td className="px-4 py-2">
+            <input
+              value={editing.weight}
+              onChange={(e) =>
+                setEditing((s) => s && { ...s, weight: e.target.value.replace(/[^\d.]/g, "") })
+              }
+              className="h-8 w-16 rounded border border-hairline px-2 text-[14px]"
+            />
+            <span className="ml-1 text-ink-48">%</span>
+          </td>
+          <td className="px-4 py-2">
+            <input
+              value={editing.pnl}
+              onChange={(e) =>
+                setEditing((s) => s && { ...s, pnl: e.target.value.replace(/[^\d.-]/g, "") })
+              }
+              placeholder="손익%"
+              className="h-8 w-20 rounded border border-hairline px-2 text-[14px]"
+            />
+          </td>
+          <td className="px-4 py-2">
+            <button
+              onClick={() => setEditing((s) => s && { ...s, is_leverage: !s.is_leverage })}
+              className={`rounded-full border px-3 py-1 text-[12px] ${
+                editing.is_leverage
+                  ? "border-guard bg-guard text-white"
+                  : "border-hairline text-ink-80"
+              }`}
+            >
+              {editing.is_leverage ? "레버리지" : "일반"}
+            </button>
+          </td>
+          <td className="px-4 py-2">
+            <input
+              value={editing.sector}
+              onChange={(e) => setEditing((s) => s && { ...s, sector: e.target.value })}
+              placeholder="섹터"
+              className="h-8 w-24 rounded border border-hairline px-2 text-[13px]"
+            />
+          </td>
+          <td className="px-4 py-2">
+            <div className="flex gap-1">
+              <button
+                onClick={handleSaveEdit}
+                disabled={isPending}
+                className="grid size-7 place-items-center rounded-full bg-guard text-white"
+              >
+                <Check size={13} />
+              </button>
+              <button
+                onClick={() => setEditing(null)}
+                className="grid size-7 place-items-center rounded-full border border-hairline text-ink-48"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          </td>
+        </tr>
+      );
+    }
+    return (
+      <tr key={p.id}>
+        <td className="px-4 py-3 font-semibold">{p.ticker}</td>
+        <td className="px-4 py-3 tabular-nums">{p.weight}%</td>
+        <td className="px-4 py-3 tabular-nums">
+          {p.pnl !== null ? (p.pnl > 0 ? `+${p.pnl}%` : `${p.pnl}%`) : "—"}
+        </td>
+        <td className="px-4 py-3">{p.is_leverage ? "레버리지" : "일반"}</td>
+        <td className="px-4 py-3">
+          <span className="mr-2 text-ink-80">{p.sector ?? "—"}</span>
+          {p.risk_level ? <RiskBadge level={p.risk_level} /> : null}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex gap-1">
+            <button
+              onClick={() => startEdit(p)}
+              className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => handleDelete(p.id)}
+              disabled={isPending}
+              className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  // 모바일 카드
+  function renderCard(p: PositionRow) {
+    return (
+      <div key={p.id} className="rounded-[18px] border border-hairline p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[17px] font-semibold">{p.ticker}</span>
+          {p.risk_level ? <RiskBadge level={p.risk_level} /> : null}
+        </div>
+        <div className="mt-1.5 flex gap-4 text-[14px] text-ink-80">
+          <span>비중 {p.weight}%</span>
+          <span>손익 {p.pnl !== null ? (p.pnl > 0 ? `+${p.pnl}%` : `${p.pnl}%`) : "—"}</span>
+          <span>{p.is_leverage ? "레버리지" : "일반"}</span>
+        </div>
+        <div className="mt-2 flex items-center justify-between">
+          <p className="text-[13px] text-ink-48">{p.sector ?? "섹터 미설정"}</p>
+          <div className="flex gap-1">
+            <button
+              onClick={() => startEdit(p)}
+              className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => handleDelete(p.id)}
+              disabled={isPending}
+              className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[17px] font-semibold">내 주요 포지션</h2>
-        <span className="text-[13px] text-ink-48">{positions.length} / 10 등록</span>
+        <span className="text-[13px] text-ink-48">{positions.length} / {MAX_POSITIONS} 등록</span>
       </div>
 
-      {error ? (
-        <p className="mb-3 text-[13px] text-red-500">{error}</p>
-      ) : null}
+      {error ? <p className="mb-3 text-[13px] text-red-500">{error}</p> : null}
 
       {empty && !adding ? (
         <StateNote title="주요 종목을 추가해 위험 노출을 확인하세요.">
-          실제 의사결정에 큰 영향을 주는 포지션을 우선 등록하면 됩니다.
+          실제 의사결정에 큰 영향을 주는 포지션을 우선 등록하면 됩니다. 국내·해외로 나눠 관리할 수 있습니다.
         </StateNote>
       ) : (
         <>
-          {/* 데스크톱: 테이블 */}
+          {/* 데스크톱: 테이블 (국내/해외 그룹) */}
           <div className="hidden overflow-hidden rounded-[18px] border border-hairline sm:block">
             <table className="w-full text-left text-[15px]">
               <thead className="bg-pearl text-[13px] text-ink-48">
@@ -153,152 +297,38 @@ export default function PositionsClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-divider">
-                {positions.map((p) =>
-                  editing?.id === p.id ? (
-                    <tr key={p.id} className="bg-pearl/50">
-                      <td className="px-4 py-2 font-semibold">{p.ticker}</td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={editing.weight}
-                          onChange={(e) =>
-                            setEditing((s) => s && { ...s, weight: e.target.value.replace(/[^\d.]/g, "") })
-                          }
-                          className="h-8 w-16 rounded border border-hairline px-2 text-[14px]"
-                        />
-                        <span className="ml-1 text-ink-48">%</span>
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={editing.pnl}
-                          onChange={(e) =>
-                            setEditing((s) => s && { ...s, pnl: e.target.value.replace(/[^\d.-]/g, "") })
-                          }
-                          placeholder="손익%"
-                          className="h-8 w-20 rounded border border-hairline px-2 text-[14px]"
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <button
-                          onClick={() =>
-                            setEditing((s) => s && { ...s, is_leverage: !s.is_leverage })
-                          }
-                          className={`rounded-full border px-3 py-1 text-[12px] ${
-                            editing.is_leverage
-                              ? "border-guard bg-guard text-white"
-                              : "border-hairline text-ink-80"
-                          }`}
-                        >
-                          {editing.is_leverage ? "레버리지" : "일반"}
-                        </button>
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={editing.sector}
-                          onChange={(e) =>
-                            setEditing((s) => s && { ...s, sector: e.target.value })
-                          }
-                          placeholder="섹터"
-                          className="h-8 w-24 rounded border border-hairline px-2 text-[13px]"
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex gap-1">
-                          <button
-                            onClick={handleSaveEdit}
-                            disabled={isPending}
-                            className="grid size-7 place-items-center rounded-full bg-guard text-white"
-                          >
-                            <Check size={13} />
-                          </button>
-                          <button
-                            onClick={() => setEditing(null)}
-                            className="grid size-7 place-items-center rounded-full border border-hairline text-ink-48"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={p.id}>
-                      <td className="px-4 py-3 font-semibold">{p.ticker}</td>
-                      <td className="px-4 py-3 tabular-nums">{p.weight}%</td>
-                      <td className="px-4 py-3 tabular-nums">
-                        {p.pnl !== null
-                          ? p.pnl > 0
-                            ? `+${p.pnl}%`
-                            : `${p.pnl}%`
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3">{p.is_leverage ? "레버리지" : "일반"}</td>
-                      <td className="px-4 py-3">
-                        <span className="mr-2 text-ink-80">{p.sector ?? "—"}</span>
-                        {p.risk_level ? <RiskBadge level={p.risk_level} /> : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => startEdit(p)}
-                            className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(p.id)}
-                            disabled={isPending}
-                            className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ),
-                )}
+                {SECTIONS.map(({ market, label }) => {
+                  const list = positions.filter((p) => inferMarket(p.ticker) === market);
+                  if (list.length === 0) return null;
+                  return (
+                    <Fragment key={market}>
+                      <tr className="bg-pearl/40">
+                        <td colSpan={6} className="px-4 py-1.5 text-[12px] font-semibold text-ink-48">
+                          {label} · {list.length}
+                        </td>
+                      </tr>
+                      {list.map(renderRow)}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {/* 모바일: 카드 */}
-          <div className="space-y-2.5 sm:hidden">
-            {positions.map((p) => (
-              <div key={p.id} className="rounded-[18px] border border-hairline p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[17px] font-semibold">{p.ticker}</span>
-                  {p.risk_level ? <RiskBadge level={p.risk_level} /> : null}
+          {/* 모바일: 카드 (국내/해외 그룹) */}
+          <div className="space-y-4 sm:hidden">
+            {SECTIONS.map(({ market, label }) => {
+              const list = positions.filter((p) => inferMarket(p.ticker) === market);
+              if (list.length === 0) return null;
+              return (
+                <div key={market}>
+                  <h3 className="mb-1.5 text-[12px] font-semibold text-ink-48">
+                    {label} · {list.length}
+                  </h3>
+                  <div className="space-y-2.5">{list.map(renderCard)}</div>
                 </div>
-                <div className="mt-1.5 flex gap-4 text-[14px] text-ink-80">
-                  <span>비중 {p.weight}%</span>
-                  <span>
-                    손익{" "}
-                    {p.pnl !== null
-                      ? p.pnl > 0
-                        ? `+${p.pnl}%`
-                        : `${p.pnl}%`
-                      : "—"}
-                  </span>
-                  <span>{p.is_leverage ? "레버리지" : "일반"}</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-[13px] text-ink-48">{p.sector ?? "섹터 미설정"}</p>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => startEdit(p)}
-                      className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      disabled={isPending}
-                      className="grid size-7 place-items-center rounded-full text-ink-48 hover:bg-divider"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -309,9 +339,7 @@ export default function PositionsClient({
           <TickerInput
             value={addState.ticker}
             symbol={addState.symbol}
-            onChange={(name, sym) =>
-              setAddState((s) => ({ ...s, ticker: name, symbol: sym }))
-            }
+            onChange={(name, sym) => setAddState((s) => ({ ...s, ticker: name, symbol: sym }))}
             autoFocus
           />
           <div className="relative w-24">
@@ -329,9 +357,7 @@ export default function PositionsClient({
             </span>
           </div>
           <button
-            onClick={() =>
-              setAddState((s) => ({ ...s, is_leverage: !s.is_leverage }))
-            }
+            onClick={() => setAddState((s) => ({ ...s, is_leverage: !s.is_leverage }))}
             className={`h-11 shrink-0 rounded-[8px] border px-3 text-[13px] ${
               addState.is_leverage
                 ? "border-guard bg-guard text-white"
@@ -357,8 +383,8 @@ export default function PositionsClient({
       ) : (
         <button
           onClick={() => {
-            if (positions.length >= 10) {
-              setError("최대 10개까지만 등록할 수 있습니다.");
+            if (positions.length >= MAX_POSITIONS) {
+              setError(`최대 ${MAX_POSITIONS}개까지만 등록할 수 있습니다.`);
               return;
             }
             setAdding(true);
@@ -371,8 +397,8 @@ export default function PositionsClient({
       )}
 
       <p className="mt-2 text-[13px] text-ink-48">
-        &lsquo;주요 종목 최대 10개&rsquo;는 모든 보유 종목이 아니라 의사결정에 큰 영향을
-        주는 포지션 기준입니다. 같은 종목을 다시 추가하면 비중이 갱신됩니다.
+        &lsquo;주요 종목 최대 {MAX_POSITIONS}개&rsquo;는 모든 보유 종목이 아니라 의사결정에 큰 영향을
+        주는 포지션 기준입니다. 국내·해외는 종목명으로 자동 분류되며, 같은 종목을 다시 추가하면 비중이 갱신됩니다.
       </p>
     </>
   );
