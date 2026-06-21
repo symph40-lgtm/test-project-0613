@@ -6,6 +6,10 @@ import { Button } from "../../_components/Button";
 import { Card, ScoreBar, SectionLabel } from "../../_components/primitives";
 import type { BriefingSnapshot, RiskScores } from "@/lib/market/types";
 import type { StockFlow } from "@/lib/market/naver-flow";
+import type { PoliticalRisk } from "@/lib/ai/political";
+
+// 정치 리스크 반영 가중치 (데이터 73% + 정치 27%)
+const POLITICAL_WEIGHT = 0.27;
 
 // 순매매량(주) 표기: 천 단위 + 매수(빨강)/매도(파랑)
 function flowText(v: number | null): { text: string; cls: string } {
@@ -63,9 +67,11 @@ function deriveSituationLevel(snapshot: BriefingSnapshot): number | null {
 export default function EvidenceClient({
   snapshot,
   supplyFlows = [],
+  political = null,
 }: {
   snapshot: BriefingSnapshot | null;
   supplyFlows?: StockFlow[];
+  political?: PoliticalRisk | null;
 }) {
   const router = useRouter();
   const ai = snapshot?.ai_output;
@@ -76,8 +82,12 @@ export default function EvidenceClient({
   const supplyNotes = ai?.supplyNotes ?? [];
   const issuesDuration = ai?.issuesDuration ?? [];
   // 가로축(큰 장세 압력) = 실제 종합 리스크 점수 기반 (AI 주관값 대신 데이터 기반)
-  const pressureLevel =
+  const dataPressure =
     snapshot?.risk_score != null ? snapshot.risk_score / 100 : (ai?.pressureLevel ?? 0.5);
+  // 정치·정책·지정학 리스크 27% 블렌딩 (데이터 73%) — 정치 점수가 높을수록 압력 ↑
+  const pressureLevel = political
+    ? dataPressure * (1 - POLITICAL_WEIGHT) + (political.score / 100) * POLITICAL_WEIGHT
+    : dataPressure;
   // 세로축(오늘 상황) = 실제 지수 등락률 기반, 없으면 AI값 폴백
   const situationLevel =
     (snapshot ? deriveSituationLevel(snapshot) : null) ?? ai?.situationLevel ?? 0.5;
@@ -118,6 +128,89 @@ export default function EvidenceClient({
             )}
           </Card>
 
+          {/* 정치·정책·지정학 리스크 — 별도 패널 (크게) */}
+          {political && (
+            <Card className="mt-4 border-guard/40">
+              <SectionLabel>정치·정책·지정학 리스크</SectionLabel>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[24px] font-semibold tabular-nums">{political.score}</span>
+                <span className="text-[13px] text-ink-48">/100</span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${
+                    political.direction === "부담"
+                      ? "bg-blue-50 text-blue-600"
+                      : political.direction === "우호"
+                        ? "bg-red-50 text-red-600"
+                        : "bg-ink/10 text-ink-80"
+                  }`}
+                >
+                  증시 {political.direction}
+                </span>
+                <span className="rounded-full bg-guard/15 px-2 py-0.5 text-[12px] font-medium text-guard">
+                  종합 판단에 27% 반영
+                </span>
+              </div>
+              <p className="mt-1 text-[12px] text-ink-48">
+                뉴스(지정학·정치) {political.newsScore} · 매크로(유가·금리·인플레) {political.macroScore} → 종합 {political.score} (각 50%)
+              </p>
+              <p className="mt-2 text-[15px] leading-snug text-ink-80">{political.summary}</p>
+
+              {/* 전쟁→유가→인플레→금리 전이 데이터 */}
+              {political.macro.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {political.macro.map((m) => {
+                    const cls =
+                      m.risk === "high"
+                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        : m.risk === "watch"
+                          ? "border-hairline bg-pearl text-ink-80"
+                          : "border-red-200 bg-red-50 text-red-600";
+                    return (
+                      <span key={m.label} className={`rounded-[8px] border px-2.5 py-1 text-[12px] ${cls}`}>
+                        <b>{m.label}</b> {m.value} <span className="tabular-nums">({m.change})</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {political.drivers.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {political.drivers.map((d, i) => (
+                    <li key={i} className="flex gap-2 text-[14px]">
+                      <span className="text-ink-48">·</span>
+                      {d}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {political.headlines.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[12px] font-semibold text-ink-48">근거 뉴스</p>
+                  <ul className="mt-1 space-y-1">
+                    {political.headlines.slice(0, 4).map((h, i) => (
+                      <li key={i}>
+                        <a
+                          href={h.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[13px] text-ink-80 hover:text-guard hover:underline"
+                        >
+                          · {h.title} <span className="text-ink-48">({h.source})</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="mt-3 text-[12px] leading-snug text-ink-48">
+                지정학·정치는 뉴스 기반 AI 추정, 유가·금리·기대인플레는 <b>FRED 실데이터</b>로 전쟁→유가→인플레→금리 전이를 확인합니다
+                {political.isFallback ? " (현재 뉴스 신호 부족으로 데이터 중심)" : ""}. 색: 파랑=증시 부담↑, 빨강=완화. 투자 권유가 아니며,
+                종합 점수는 아래 2축 맵 가로축에 27% 반영됩니다.
+              </p>
+            </Card>
+          )}
+
           {/* 2차원 맵 */}
           <Card className="mt-4">
             <SectionLabel>큰 장세 × 오늘 상황</SectionLabel>
@@ -138,6 +231,9 @@ export default function EvidenceClient({
               <li>· 가로축(큰 장세 압력): 왼쪽 = 안정, 오른쪽 = 위험 누적. 시장 구조적 위험 수준.</li>
               <li>· 세로축(오늘 상황): 위 = 완화(개선), 아래 = 악화(나빠짐). 오늘의 단기 흐름.</li>
               <li>· 점이 <b>왼쪽 위</b>일수록 좋고, <b>오른쪽 아래</b>일수록 나쁩니다.</li>
+              {political && (
+                <li>· 가로축에는 위 <b>정치·정책·지정학 리스크</b>가 27% 반영돼 있습니다(데이터 73%).</li>
+              )}
             </ul>
           </Card>
 

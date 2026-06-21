@@ -5,6 +5,7 @@ import {
   fetchTreasuryHistory,
   fetchBondEtf,
   fetchOffHoursIndex,
+  fetchMainIndicators,
   effectiveQuote,
 } from "@/lib/market/fetch";
 import type { QuoteData } from "@/lib/market/types";
@@ -16,6 +17,8 @@ import {
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
 import { recommendForHolding } from "@/lib/market/recommend";
+import { fetchAiStanceBias } from "@/lib/ai/insights";
+import { fetchBondSignal } from "@/lib/market/bondSignal";
 import { fetchSemiAiEarnings } from "@/lib/market/earnings";
 import { fetchPositionNews } from "@/lib/news/fetch";
 import IntradayClient from "./_client";
@@ -57,7 +60,7 @@ export default async function IntradaySummaryPage() {
     { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
   ];
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchPositionNews(tickers),
@@ -66,6 +69,7 @@ export default async function IntradaySummaryPage() {
     fetchBondEtf("TLT"),
     fetchPositionQuotes(SEMI_COMPARE),
     fetchOffHoursIndex(),
+    fetchBondSignal(),
   ]);
 
   const semiCompare = SEMI_COMPARE.map((s) => {
@@ -78,6 +82,9 @@ export default async function IntradaySummaryPage() {
       session: q?.session ?? null,
     };
   });
+
+  // 세션 인지형 주요 지표 (나스닥·SOX는 ETF로 정규/애프터/합계 분해)
+  const mainIndicators = await fetchMainIndicators(market);
 
   const riskScores = calculateRiskScores(market);
   const composite = calculateCompositeScore(riskScores);
@@ -101,9 +108,21 @@ export default async function IntradaySummaryPage() {
     };
   });
 
-  // 보유 종목별 매매 판단 (매수/보유/매도 + 3단계)
-  const recs = (positions ?? []).map((p) =>
-    recommendForHolding(
+  // AI Q&A 스탠스 바이어스(reflect=true 최신) — ±2 한정 반영
+  const aiStance = await fetchAiStanceBias();
+
+  // 보유 종목별 매매 판단 (7단계 스탠스 + AI 의견 한정 반영)
+  const recs = (positions ?? []).map((p) => {
+    const tickerBias = aiStance?.tickerBias?.[p.ticker];
+    const aiBias = tickerBias ?? aiStance?.marketBias ?? 0;
+    const aiReason = aiStance
+      ? tickerBias !== undefined
+        ? "종목 의견"
+        : aiStance.summary
+          ? `시장 의견: ${aiStance.summary}`.slice(0, 40)
+          : "시장 의견"
+      : null;
+    return recommendForHolding(
       {
         ticker: p.ticker,
         weight: Number(p.weight),
@@ -112,9 +131,9 @@ export default async function IntradaySummaryPage() {
         risk_level: p.risk_level as string | null,
         changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
       },
-      { composite, soxChange: market.sox.changePercent },
-    ),
-  );
+      { composite, soxChange: market.sox.changePercent, aiBias, aiReason },
+    );
+  });
 
   return (
     <IntradayClient
@@ -129,6 +148,8 @@ export default async function IntradaySummaryPage() {
         fetchedAt: market.fetchedAt,
       }}
       offHours={offHours}
+      bondSignal={bondSignal}
+      mainIndicators={mainIndicators}
       composite={composite}
       stage={stage}
       posture={posture}

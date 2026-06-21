@@ -137,7 +137,7 @@ export async function generateBriefing(
 - 나스닥100: ${market.nasdaq.price ?? "N/A"} (${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%)
 - SOX(반도체): ${market.sox.price ?? "N/A"} (${market.sox.changePercent?.toFixed(2) ?? "N/A"}%)
 - 코스피: ${market.kospi.price ?? "N/A"} (${market.kospi.changePercent?.toFixed(2) ?? "N/A"}%)
-- 달러/원: ${market.usdkrw.price ?? "N/A"} (${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%)
+- 원/달러 환율(USDKRW): ${market.usdkrw.price ?? "N/A"} (${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%)
 - WTI 유가: ${market.oil.price ?? "N/A"} (${market.oil.changePercent?.toFixed(2) ?? "N/A"}%)
 - 미국 10년물 금리: ${market.treasury10y.price ?? "N/A"}% (${market.treasury10y.changePercent?.toFixed(2) ?? "N/A"}%)
 
@@ -146,6 +146,11 @@ ${positions.map((p) => `- ${p.ticker}: 비중 ${p.weight}%, 레버리지 ${p.is_
 
 ## 활성 원칙
 ${activePrinciples || "없음"}
+
+## 환율 표기 규칙 (반드시 준수)
+- 위 환율 값은 '원/달러 환율(USDKRW=X)'이며 달러인덱스(DXY)가 아닙니다. 절대 '달러인덱스'나 '달러 가치 전반'으로 해석하지 마십시오.
+- 환율을 언급할 때는 항상 '원/달러 환율'로 부르고, 변화 방향을 원화 기준으로 표기하십시오. 값이 하락(마이너스)이면 '원/달러 환율 하락(원화 강세)', 상승(플러스)이면 '원/달러 환율 상승(원화 약세)'로 적으십시오.
+- '달러화 약세/강세'처럼 원화 기준이 모호한 표현은 쓰지 마십시오.
 
 다음 JSON 형식으로만 응답하십시오 (다른 텍스트 없이):
 {

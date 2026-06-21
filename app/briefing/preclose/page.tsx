@@ -1,7 +1,8 @@
 import { getBriefing } from "../actions";
 import { createClient } from "@/lib/supabase/server";
 import { generatePreclose } from "@/lib/ai/briefing";
-import { fetchUpcomingUsEvents, hasFredKey, type EconEvent } from "@/lib/calendar/fred";
+import { fetchMonthlyUsEvents, hasFredKey, type EconEvent } from "@/lib/calendar/fred";
+import { fetchSemiAiEarnings, fetchEarningsFundamentals, type EarningsFundamentals } from "@/lib/market/earnings";
 import { fetchHoldingsFlow, toKrCode, type StockFlow } from "@/lib/market/naver-flow";
 import PrecloseClient from "./PrecloseClient";
 import type { AiPrecloseOutput, MarketData, RiskScores } from "@/lib/market/types";
@@ -62,9 +63,11 @@ function impactFor(name: string): { up: string; mid: string; down: string } {
   };
 }
 
-// 가장 임박한 중요 지표 기준 시나리오
+// 가장 임박한 '예정' 중요 지표 기준 시나리오
 function buildEventScenario(events: EconEvent[]) {
-  const target = events.find((e) => e.importance === "high") ?? events[0];
+  const upcoming = events.filter((e) => !e.released);
+  const target =
+    upcoming.find((e) => e.stars >= 5) ?? upcoming.find((e) => e.stars >= 4) ?? upcoming[0];
   if (!target) return null;
   const imp = impactFor(target.name);
   return {
@@ -80,7 +83,19 @@ function buildEventScenario(events: EconEvent[]) {
 }
 
 export default async function PreClosePage() {
-  const [snapshot, econEvents] = await Promise.all([getBriefing(), fetchUpcomingUsEvents(5)]);
+  const [snapshot, econEvents, earnings] = await Promise.all([
+    getBriefing(),
+    fetchMonthlyUsEvents(),
+    fetchSemiAiEarnings(35),
+  ]);
+
+  // 예정 실적 기업의 펀더멘털·컨센서스·거버넌스 (발표 전 매수/매도 판단용)
+  const fundamentals: Record<string, EarningsFundamentals | null> = {};
+  await Promise.all(
+    earnings.map(async (e) => {
+      fundamentals[e.symbol] = await fetchEarningsFundamentals(e.symbol);
+    }),
+  );
 
   let preclose: AiPrecloseOutput | null = null;
   let supplyFlows: StockFlow[] = [];
@@ -130,6 +145,8 @@ export default async function PreClosePage() {
       snapshot={snapshot}
       preclose={preclose}
       econEvents={econEvents}
+      earnings={earnings}
+      fundamentals={fundamentals}
       fredConfigured={hasFredKey()}
       marketSummary={marketSummary}
       eventScenario={eventScenario}

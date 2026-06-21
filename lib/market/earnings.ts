@@ -81,3 +81,81 @@ export async function fetchSemiAiEarnings(withinDays = 120): Promise<EarningsEve
   events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return events.slice(0, 10);
 }
+
+// 실적 발표 전 펀더멘털·컨센서스·거버넌스 (Yahoo quoteSummary)
+export type EarningsFundamentals = {
+  revenueEst: number | null;   // 다음 분기 예상 매출 (컨센서스 평균)
+  epsEst: number | null;       // 예상 EPS (컨센서스 평균)
+  epsLow: number | null;
+  epsHigh: number | null;
+  opMargin: number | null;     // 영업이익률
+  opIncomeEst: number | null;  // 추정 영업이익 = 예상매출 × 영업이익률
+  roe: number | null;
+  forwardPE: number | null;
+  trailingPE: number | null;
+  pbr: number | null;
+  peg: number | null;
+  recKey: string | null;       // strong_buy | buy | hold | underperform | sell
+  recMean: number | null;      // 1(적극매수)~5(매도)
+  analysts: number | null;
+  targetMean: number | null;
+  currentPrice: number | null;
+  vsTargetPct: number | null;  // 현재가가 목표주가 대비 (양수=목표가 상회)
+  gov: { overall: number | null; board: number | null; audit: number | null; comp: number | null; shareholder: number | null };
+};
+
+export async function fetchEarningsFundamentals(symbol: string): Promise<EarningsFundamentals | null> {
+  const num = (v: unknown): number | null => (typeof v === "number" && isFinite(v) ? v : null);
+  // 중첩 경로 안전 탐색 (yahoo-finance2 모듈 타입 우회)
+  const pick = (o: unknown, ...keys: string[]): unknown =>
+    keys.reduce<unknown>(
+      (acc, k) => (acc && typeof acc === "object" ? (acc as Record<string, unknown>)[k] : undefined),
+      o,
+    );
+  try {
+    const r = (await yf.quoteSummary(symbol, {
+      modules: ["financialData", "defaultKeyStatistics", "summaryDetail", "earningsTrend", "assetProfile"],
+    })) as Record<string, unknown>;
+
+    const fd = (r.financialData ?? {}) as Record<string, unknown>;
+    const ks = (r.defaultKeyStatistics ?? {}) as Record<string, unknown>;
+    const sd = (r.summaryDetail ?? {}) as Record<string, unknown>;
+    const ap = (r.assetProfile ?? {}) as Record<string, unknown>;
+    const trend = (pick(r, "earningsTrend", "trend") ?? []) as Array<Record<string, unknown>>;
+    const et = trend.find((t) => t.period === "0q") ?? trend[0];
+
+    const revenueEst = num(pick(et, "revenueEstimate", "avg"));
+    const opMargin = num(fd.operatingMargins);
+    const target = num(fd.targetMeanPrice);
+    const cur = num(fd.currentPrice);
+
+    return {
+      revenueEst,
+      epsEst: num(pick(et, "earningsEstimate", "avg")),
+      epsLow: num(pick(et, "earningsEstimate", "low")),
+      epsHigh: num(pick(et, "earningsEstimate", "high")),
+      opMargin,
+      opIncomeEst: revenueEst !== null && opMargin !== null ? revenueEst * opMargin : null,
+      roe: num(fd.returnOnEquity),
+      forwardPE: num(sd.forwardPE),
+      trailingPE: num(sd.trailingPE),
+      pbr: num(ks.priceToBook),
+      peg: num(ks.pegRatio),
+      recKey: typeof fd.recommendationKey === "string" ? fd.recommendationKey : null,
+      recMean: num(fd.recommendationMean),
+      analysts: num(fd.numberOfAnalystOpinions),
+      targetMean: target,
+      currentPrice: cur,
+      vsTargetPct: target && cur ? ((cur - target) / target) * 100 : null,
+      gov: {
+        overall: num(ap.overallRisk),
+        board: num(ap.boardRisk),
+        audit: num(ap.auditRisk),
+        comp: num(ap.compensationRisk),
+        shareholder: num(ap.shareHolderRightsRisk),
+      },
+    };
+  } catch {
+    return null;
+  }
+}

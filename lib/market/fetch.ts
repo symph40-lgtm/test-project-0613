@@ -1,7 +1,7 @@
 import YahooFinance from "yahoo-finance2";
 import type { MarketData, QuoteData } from "./types";
 import { getYahooSymbol } from "../positions";
-import { toKrCode, fetchKoreanQuote } from "./naver-flow";
+import { toKrCode, fetchKoreanQuote, fetchKospi200Futures } from "./naver-flow";
 
 // deprecated static method 대신 인스턴스 사용 (static quote()는 never를 반환)
 const yf = new YahooFinance();
@@ -182,6 +182,110 @@ export function effectiveQuote(q: {
   return { price: q.price, changePercent: q.changePercent, session: null };
 }
 
+// ─── 세션 인지형 주요 지표 ──────────────────────────────────────────
+// 미국 주식형(나스닥·반도체)은 ETF로 정규/애프터/합계 분해, 나머지는 단일값+세션.
+export type IndicatorSession = "프리" | "정규" | "애프터" | "야간" | "마감" | "상시";
+
+export type MainIndicator = {
+  key: string;
+  label: string;
+  unit: "" | "$" | "원" | "%";
+  digits: number;
+  mode: "single" | "breakdown"; // breakdown = 정규/애프터/합계 분해 표시
+  session: IndicatorSession;
+  show: boolean;                 // false = 표기 불필요(프리 이전 등)
+  price: number | null;
+  changePercent: number | null;  // single 모드: 현재 세션 등락
+  regularChange?: number | null; // breakdown 전용
+  afterChange?: number | null;
+  totalChange?: number | null;   // 전일 종가 대비 현재(=정규+애프터 합산 효과)
+};
+
+// 미국 ETF: Yahoo marketState로 프리/정규/애프터를 구분해 표시 모드 결정
+function usEquityIndicator(key: string, label: string, q: QuoteData): MainIndicator {
+  const base = { key, label, unit: "$" as const, digits: 2 };
+  const st = (q.marketState ?? "").toUpperCase();
+  const reg = q.changePercent ?? null; // 정규장 등락
+
+  // 정규장 진행 중 → 정규장 단일
+  if (st === "REGULAR") {
+    return { ...base, mode: "single", session: "정규", show: true, price: q.price, changePercent: reg };
+  }
+  // 정규장 이전(프리) → 프리마켓 (데이터 없으면 표기 불필요)
+  if (st === "PRE") {
+    if (q.preMarketPrice != null) {
+      return { ...base, mode: "single", session: "프리", show: true, price: q.preMarketPrice, changePercent: q.preMarketChangePercent ?? null };
+    }
+    return { ...base, mode: "single", session: "프리", show: false, price: q.price, changePercent: reg };
+  }
+  // 정규장 끝남(애프터/마감) → 정규+애프터+합계 분해
+  if ((st === "POST" || st === "POSTPOST" || st === "CLOSED") && q.postMarketPrice != null) {
+    const total =
+      q.previousClose && q.previousClose !== 0
+        ? ((q.postMarketPrice - q.previousClose) / q.previousClose) * 100
+        : reg;
+    return {
+      ...base,
+      mode: "breakdown",
+      session: "애프터",
+      show: true,
+      price: q.postMarketPrice,
+      changePercent: q.postMarketChangePercent ?? null,
+      regularChange: reg,
+      afterChange: q.postMarketChangePercent ?? null,
+      totalChange: total,
+    };
+  }
+  // 프리 이전(PREPRE 등) 또는 시간외 데이터 없음 → 표기 불필요
+  return { ...base, mode: "single", session: "마감", show: false, price: q.price, changePercent: reg };
+}
+
+// 코스피: KST 기준 세션만 표기(지수는 시간외 시세가 없어 분해하지 않음)
+function koreanIndexIndicator(key: string, label: string, q: QuoteData, now: Date): MainIndicator {
+  const kst = new Date(now.getTime() + 9 * 3600 * 1000);
+  const day = kst.getUTCDay();
+  const t = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  let session: IndicatorSession = "마감";
+  if (day >= 1 && day <= 5) {
+    if (t >= 8 * 60 + 30 && t < 9 * 60) session = "프리";
+    else if (t >= 9 * 60 && t < 15 * 60 + 30) session = "정규";
+  }
+  return { key, label, unit: "", digits: 2, mode: "single", session, show: true, price: q.price, changePercent: q.changePercent };
+}
+
+// 24시간 거래(FX·선물·금리): 항상 표시, 세션은 '상시'
+function alwaysOnIndicator(key: string, label: string, q: QuoteData, unit: MainIndicator["unit"], digits: number): MainIndicator {
+  return { key, label, unit, digits, mode: "single", session: "상시", show: true, price: q.price, changePercent: q.changePercent };
+}
+
+// 코스피200 선물(네이버 FUT) — 야간 글로벌 세션 포함. 밤사이 한국장 선행 신호.
+function futuresIndicator(f: Awaited<ReturnType<typeof fetchKospi200Futures>>): MainIndicator {
+  const base = { key: "kospi200fut", label: "코스피200 선물", unit: "" as const, digits: 2, mode: "single" as const };
+  if (!f || f.price === null) {
+    return { ...base, session: "마감", show: false, price: null, changePercent: null };
+  }
+  return { ...base, session: f.session, show: true, price: f.price, changePercent: f.changePercent };
+}
+
+// 주요 지표 묶음 — 미국 주식형은 ETF(QQQ·SOXX)로 분해, 나머지는 기존 시세 재사용
+export async function fetchMainIndicators(market: MarketData): Promise<MainIndicator[]> {
+  const [qqq, soxx, fut] = await Promise.all([
+    fetchQuote("QQQ"),
+    fetchQuote("SOXX"),
+    fetchKospi200Futures(),
+  ]);
+  const now = new Date();
+  return [
+    usEquityIndicator("nasdaq", "나스닥100 (QQQ)", qqq),
+    usEquityIndicator("sox", "반도체 (SOXX)", soxx),
+    koreanIndexIndicator("kospi", "코스피", market.kospi, now),
+    futuresIndicator(fut),
+    alwaysOnIndicator("usdkrw", "달러/원", market.usdkrw, "원", 1),
+    alwaysOnIndicator("oil", "WTI 유가", market.oil, "$", 2),
+    alwaysOnIndicator("treasury10y", "미국채 10Y 금리", market.treasury10y, "%", 2),
+  ];
+}
+
 async function fetchFredRate(): Promise<number | null> {
   const apiKey = process.env.FRED_API_KEY;
   if (!apiKey) return null;
@@ -215,11 +319,10 @@ export type OffHoursQuote = {
 // 시간외 지수 흐름: 선물(24h) + ETF(프리/애프터장)
 // 지수(^NDX 등)는 시간외 시세가 없어 선물·ETF로 대체
 export async function fetchOffHoursIndex(): Promise<OffHoursQuote[]> {
+  // ETF(QQQ·SOXX) 정규/애프터/합계 분해는 '주요 지표'에서 다루므로, 여기선 24시간 선물만.
   const defs: { symbol: string; label: string; kind: "선물" | "ETF" }[] = [
     { symbol: "NQ=F", label: "나스닥 선물", kind: "선물" },
     { symbol: "ES=F", label: "S&P500 선물", kind: "선물" },
-    { symbol: "QQQ", label: "나스닥100 ETF (QQQ)", kind: "ETF" },
-    { symbol: "SOXX", label: "반도체 ETF (SOXX)", kind: "ETF" },
   ];
   const results = await Promise.all(
     defs.map(async (d): Promise<OffHoursQuote> => {

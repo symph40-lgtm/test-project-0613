@@ -235,6 +235,67 @@ export default function PositionsClient({
 
   // 모바일 카드
   function renderCard(p: PositionRow) {
+    // 편집 중: 모바일 카드용 편집 폼
+    if (editing?.id === p.id) {
+      return (
+        <div key={p.id} className="rounded-[18px] border border-guard bg-pearl/50 p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[17px] font-semibold">{p.ticker}</span>
+            <div className="flex gap-1">
+              <button
+                onClick={handleSaveEdit}
+                disabled={isPending}
+                className="grid size-7 place-items-center rounded-full bg-guard text-white disabled:opacity-50"
+              >
+                <Check size={14} />
+              </button>
+              <button
+                onClick={() => setEditing(null)}
+                className="grid size-7 place-items-center rounded-full border border-hairline text-ink-48"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="text-[13px] text-ink-48">
+              비중(%)
+              <input
+                value={editing.weight}
+                onChange={(e) => setEditing((s) => s && { ...s, weight: e.target.value.replace(/[^\d.]/g, "") })}
+                className="mt-1 h-9 w-full rounded border border-hairline px-2 text-[15px]"
+              />
+            </label>
+            <label className="text-[13px] text-ink-48">
+              손익(%)
+              <input
+                value={editing.pnl}
+                onChange={(e) => setEditing((s) => s && { ...s, pnl: e.target.value.replace(/[^\d.-]/g, "") })}
+                placeholder="손익%"
+                className="mt-1 h-9 w-full rounded border border-hairline px-2 text-[15px]"
+              />
+            </label>
+            <label className="col-span-2 text-[13px] text-ink-48">
+              섹터
+              <input
+                value={editing.sector}
+                onChange={(e) => setEditing((s) => s && { ...s, sector: e.target.value })}
+                placeholder="섹터"
+                className="mt-1 h-9 w-full rounded border border-hairline px-2 text-[15px]"
+              />
+            </label>
+          </div>
+          <button
+            onClick={() => setEditing((s) => s && { ...s, is_leverage: !s.is_leverage })}
+            className={`mt-3 rounded-full border px-3 py-1.5 text-[13px] ${
+              editing.is_leverage ? "border-guard bg-guard text-white" : "border-hairline text-ink-80"
+            }`}
+          >
+            {editing.is_leverage ? "레버리지" : "일반"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div key={p.id} className="rounded-[18px] border border-hairline p-4">
         <div className="flex items-center justify-between">

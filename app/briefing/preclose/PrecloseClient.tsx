@@ -6,9 +6,10 @@ import { CalendarClock } from "lucide-react";
 import { PageShell, Disclaimer } from "../../_components/Shell";
 import { Button } from "../../_components/Button";
 import { Card, SectionLabel, MetaRow } from "../../_components/primitives";
-import { bookmarkNextBriefing } from "./actions";
+import { bookmarkNextBriefing, getEventInsight, getEarningsInsight, type EventInsight } from "./actions";
 import type { BriefingSnapshot, AiPrecloseOutput } from "@/lib/market/types";
 import type { EconEvent } from "@/lib/calendar/fred";
+import type { EarningsEvent, EarningsFundamentals } from "@/lib/market/earnings";
 import type { StockFlow } from "@/lib/market/naver-flow";
 
 function flowText(v: number | null): { text: string; cls: string } {
@@ -17,12 +18,195 @@ function flowText(v: number | null): { text: string; cls: string } {
   return { text: `${v > 0 ? "+" : ""}${v.toLocaleString("ko-KR")}주`, cls };
 }
 
+// 발표일로부터 오늘까지 경과일 (KST 날짜 기준)
+function daysSince(dateStr: string): number {
+  const d = new Date(`${dateStr}T00:00:00Z`).getTime();
+  const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime();
+  return Math.round((today - d) / 86400000);
+}
+
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 function fmtEventDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   const today = new Date().toISOString().slice(0, 10);
   const label = dateStr === today ? "오늘" : `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WEEKDAYS[d.getUTCDay()]})`;
   return label;
+}
+
+function Stars({ n }: { n: number }) {
+  return (
+    <span className="shrink-0 text-[11px] tabular-nums text-amber-500" title={`중요도 ${n}/5`}>
+      {"★".repeat(n)}
+      <span className="text-ink-48/30">{"☆".repeat(Math.max(0, 5 - n))}</span>
+    </span>
+  );
+}
+
+function EventRow({ e }: { e: EconEvent }) {
+  const [insight, setInsight] = useState<EventInsight | null>(null);
+  const [pending, start] = useTransition();
+
+  function load() {
+    if (insight) { setInsight(null); return; } // 토글로 접기
+    start(async () => {
+      setInsight(await getEventInsight({
+        name: e.name, date: e.date, timeKst: e.timeKst,
+        released: e.released, fredSeries: e.fredSeries, unit: e.unit,
+      }));
+    });
+  }
+
+  return (
+    <li className="py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[15px] font-medium">{e.name}</span>
+          <Stars n={e.stars} />
+        </span>
+        <span className="shrink-0 text-[13px] tabular-nums text-ink-48">
+          {fmtEventDate(e.date)} · {e.timeKst}
+        </span>
+      </div>
+      {e.interp && <p className="mt-0.5 text-[12px] leading-snug text-ink-48">{e.interp}</p>}
+      <button
+        onClick={load}
+        disabled={pending}
+        className="mt-1 text-[12px] font-medium text-guard disabled:opacity-50"
+      >
+        {pending ? "분석 중…" : insight ? "접기 ▲" : e.released ? "발표 결과 분석 보기 ▾" : "발표 전 전망 보기 ▾"}
+      </button>
+      {insight && (
+        <div className="mt-1.5 rounded-[10px] border border-hairline bg-pearl p-3">
+          {insight.actual && (
+            <p className="mb-1 text-[13px] font-semibold">실제 발표값: <span className="tabular-nums">{insight.actual}</span> <span className="font-normal text-ink-48">(FRED)</span></p>
+          )}
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-80">{insight.text}</p>
+          <p className="mt-1.5 text-[11px] text-ink-48">AI 추정 분석이며 투자 권유가 아닙니다. 예상치(컨센서스)는 직접 확인이 필요합니다.</p>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function EventGroup({ title, events, muted }: { title: string; events: EconEvent[]; muted?: boolean }) {
+  if (events.length === 0) return null;
+  return (
+    <div className="mt-2">
+      {title && <p className="text-[13px] font-semibold text-ink-48">{title}</p>}
+      <ul className={`mt-1 divide-y divide-divider ${muted ? "opacity-70" : ""}`}>
+        {events.map((e, i) => (
+          <EventRow key={i} e={e} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function fmtUsd(v: number | null): string {
+  if (v === null) return "—";
+  if (Math.abs(v) >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (Math.abs(v) >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
+  return `$${v.toFixed(0)}`;
+}
+function pctOf(v: number | null, digits = 1): string {
+  return v === null ? "—" : `${(v * 100).toFixed(digits)}%`;
+}
+const REC_KO: Record<string, string> = {
+  strong_buy: "적극 매수", buy: "매수", hold: "중립", underperform: "비중축소", sell: "매도",
+};
+
+function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-[8px] border border-hairline bg-pearl px-2.5 py-1.5">
+      <p className="text-[11px] text-ink-48">{label}</p>
+      <p className="text-[14px] font-semibold tabular-nums">{value}</p>
+      {hint && <p className="text-[10px] leading-tight text-ink-48">{hint}</p>}
+    </div>
+  );
+}
+
+function FundamentalsBlock({ f }: { f: EarningsFundamentals }) {
+  const rec = f.recKey ? REC_KO[f.recKey] ?? f.recKey : null;
+  const vs = f.vsTargetPct;
+  return (
+    <div className="mt-2 rounded-[10px] border border-hairline p-3">
+      <p className="text-[12px] font-semibold text-ink-48">발표 전 컨센서스·펀더멘털</p>
+      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Metric label="예상 매출" value={fmtUsd(f.revenueEst)} hint="다음분기 컨센서스" />
+        <Metric label="예상 EPS" value={f.epsEst != null ? f.epsEst.toFixed(2) : "—"} hint={f.epsLow != null && f.epsHigh != null ? `${f.epsLow.toFixed(1)}~${f.epsHigh.toFixed(1)}` : undefined} />
+        <Metric label="추정 영업이익" value={fmtUsd(f.opIncomeEst)} hint={f.opMargin != null ? `영업이익률 ${pctOf(f.opMargin)}` : undefined} />
+        <Metric label="ROE" value={pctOf(f.roe)} />
+        <Metric label="PER 선행/후행" value={`${f.forwardPE != null ? f.forwardPE.toFixed(1) : "—"} / ${f.trailingPE != null ? f.trailingPE.toFixed(1) : "—"}`} />
+        <Metric label="PBR / PEG" value={`${f.pbr != null ? f.pbr.toFixed(1) : "—"} / ${f.peg != null ? f.peg.toFixed(2) : "—"}`} />
+        <Metric label="투자의견 컨센서스" value={rec ?? "—"} hint={f.recMean != null ? `${f.recMean.toFixed(2)}/5 · 애널 ${f.analysts ?? "—"}명` : undefined} />
+        <Metric label="목표주가 대비" value={vs != null ? `${vs >= 0 ? "+" : ""}${vs.toFixed(0)}%` : "—"} hint={f.targetMean != null ? `목표 $${f.targetMean.toFixed(0)}` : undefined} />
+      </div>
+      {f.gov.overall != null && (
+        <p className="mt-2 text-[12px] text-ink-48">
+          거버넌스 리스크(1=양호 ~ 10=위험): 종합 <b className="text-ink">{f.gov.overall}</b>
+          {f.gov.board != null ? ` · 이사회 ${f.gov.board}` : ""}
+          {f.gov.audit != null ? ` · 감사 ${f.gov.audit}` : ""}
+          {f.gov.comp != null ? ` · 보상 ${f.gov.comp}` : ""}
+          {f.gov.shareholder != null ? ` · 주주권리 ${f.gov.shareholder}` : ""}
+        </p>
+      )}
+      <p className="mt-1.5 text-[11px] leading-snug text-ink-48">
+        출처: Yahoo Finance. ‘컨센서스 이상/이하’는 발표 후 실제값으로 확정됩니다 — 위는 발표 전 컨센서스·밸류에이션입니다.
+        목표주가 상회(+)는 고평가, 하회(−)는 저평가 신호로 참고하세요. 투자 권유가 아닙니다.
+      </p>
+    </div>
+  );
+}
+
+function EarningsRow({ e, f }: { e: EarningsEvent; f?: EarningsFundamentals | null }) {
+  const [text, setText] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function load() {
+    if (text) { setText(null); return; }
+    start(async () => {
+      const r = await getEarningsInsight({ name: e.name, symbol: e.symbol, dateKst: e.dateKst, epsForward: e.epsForward });
+      setText(r.text);
+    });
+  }
+
+  return (
+    <li className="py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[15px] font-medium">{e.name}</span>
+          <span className="shrink-0 text-[12px] text-ink-48">{e.symbol}</span>
+        </span>
+        <span className="shrink-0 text-[13px] tabular-nums text-ink-48">{e.dateKst} (한국시간)</span>
+      </div>
+      {f && <FundamentalsBlock f={f} />}
+      <button onClick={load} disabled={pending} className="mt-1.5 text-[12px] font-medium text-guard disabled:opacity-50">
+        {pending ? "분석 중…" : text ? "접기 ▲" : "AI 실적 전망·매매 시사점 보기 ▾"}
+      </button>
+      {text && (
+        <div className="mt-1.5 rounded-[10px] border border-hairline bg-pearl p-3">
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-80">{text}</p>
+          <p className="mt-1.5 text-[11px] text-ink-48">AI 추정 전망이며 투자 권유가 아닙니다. 실제 결과·가이던스는 발표 후 확인하세요.</p>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function EarningsGroup({
+  title, earnings, fundamentals,
+}: { title: string; earnings: EarningsEvent[]; fundamentals: Record<string, EarningsFundamentals | null> }) {
+  if (earnings.length === 0) return null;
+  return (
+    <div className="mt-3">
+      <p className="text-[13px] font-semibold text-ink-48">{title}</p>
+      <ul className="mt-1 divide-y divide-divider">
+        {earnings.map((e) => (
+          <EarningsRow key={e.symbol} e={e} f={fundamentals[e.symbol]} />
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 type EventScenario = {
@@ -36,6 +220,8 @@ export default function PrecloseClient({
   snapshot,
   preclose,
   econEvents,
+  earnings,
+  fundamentals,
   fredConfigured,
   marketSummary,
   eventScenario,
@@ -44,6 +230,8 @@ export default function PrecloseClient({
   snapshot: BriefingSnapshot | null;
   preclose: AiPrecloseOutput | null;
   econEvents: EconEvent[];
+  earnings: EarningsEvent[];
+  fundamentals: Record<string, EarningsFundamentals | null>;
   fredConfigured: boolean;
   marketSummary: string;
   eventScenario: EventScenario;
@@ -85,27 +273,31 @@ export default function PrecloseClient({
           )}
       </Card>
 
-      {/* 주요 경제지표 일정 — 실제 캘린더(FRED) 우선, 없으면 AI 예측 */}
-      {econEvents.length > 0 ? (
+      {/* 이번 달 주요 일정 — 지표(FRED)와 실적(Yahoo)을 분리해 표시 */}
+      {econEvents.length > 0 || earnings.length > 0 ? (
         <Card className="mt-4">
-          <SectionLabel>향후 5일 주요 경제지표 (실제 일정)</SectionLabel>
-          <ul className="divide-y divide-divider">
-            {econEvents.map((e, i) => (
-              <li key={i} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  {e.importance === "high" ? (
-                    <span className="rounded bg-ink px-1.5 py-0.5 text-[11px] text-white">중요</span>
-                  ) : null}
-                  <span className="text-[15px] font-medium">{e.name}</span>
-                </div>
-                <span className="shrink-0 text-[14px] text-ink-48 tabular-nums">
-                  {fmtEventDate(e.date)} · {e.timeKst} (한국시간)
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-[12px] text-ink-48">
-            출처: FRED 공식 릴리즈 캘린더. 발표 시각은 한국시간 환산값(서머타임 반영)입니다.
+          <SectionLabel>{new Date().getMonth() + 1}월 주요 일정 (실제 데이터)</SectionLabel>
+
+          {/* ── 경제지표 ── */}
+          <p className="mt-1 text-[14px] font-semibold">📊 경제지표 발표</p>
+          <EventGroup title="앞으로 남은 일정 — 발표 전 전망" events={econEvents.filter((e) => !e.released)} />
+          <EventGroup
+            title="최근 발표 (5일 내) — 결과 분석"
+            events={econEvents.filter((e) => e.released && daysSince(e.date) <= 5)}
+            muted
+          />
+
+          {/* ── 실적 발표 ── */}
+          <p className="mt-5 text-[14px] font-semibold">🏢 기업 실적 발표 (반도체·AI)</p>
+          {earnings.length > 0 ? (
+            <EarningsGroup title="예정" earnings={earnings} fundamentals={fundamentals} />
+          ) : (
+            <p className="mt-1 text-[13px] text-ink-48">향후 일정 내 예정된 주요 실적이 없습니다.</p>
+          )}
+
+          <p className="mt-3 text-[12px] leading-snug text-ink-48">
+            지표 출처: FRED 공식 릴리즈 캘린더 + 연준 FOMC. 실적 출처: Yahoo Finance(반도체·AI 워치리스트, 마이크론 등).
+            시각은 한국시간(서머타임 반영), ★는 주식시장 영향 중요도(★3 이상만 표시)입니다.
           </p>
         </Card>
       ) : preclose?.nightEvents && preclose.nightEvents.length > 0 ? (

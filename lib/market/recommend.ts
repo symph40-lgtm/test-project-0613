@@ -1,5 +1,8 @@
-// 보유 종목별 매매 판단 (매수/보유/매도 + 3단계 강도)
-// 실데이터(장세 composite, 반도체 SOX, 레버리지, 비중, 위험도) 기반 — 규칙 기반이라 항상 동작
+// 보유 종목별 매매 판단 (7단계 스탠스)
+// 실데이터(장세 composite, 반도체 SOX, 레버리지, 비중, 위험도) 기반 — 규칙 기반이라 항상 동작.
+// 선택적으로 AI Q&A 기반 바이어스(aiBias)를 '한정 폭(±2)'으로만 반영해 환각이 신호를 단독으로 뒤집지 못하게 한다.
+
+import { type Stance7, STANCE7_META, scoreToStance7 } from "./stance";
 
 export type HoldingInput = {
   ticker: string;
@@ -12,26 +15,16 @@ export type HoldingInput = {
 
 export type Recommendation = {
   ticker: string;
-  direction: "매수" | "보유" | "매도";
-  level: number;        // 1~3 (보유는 0)
-  label: string;        // 예: "매수 2단계 · 매수 검토"
-  reason: string;       // 보충 설명
-};
-
-const BUY_LABEL: Record<number, string> = {
-  1: "분할 매수 검토",
-  2: "매수 검토",
-  3: "적극 매수 검토",
-};
-const SELL_LABEL: Record<number, string> = {
-  1: "비중 축소 검토",
-  2: "매도 검토",
-  3: "적극 매도·현금화 검토",
+  stance: Stance7;       // 1(적극매도)~10(적극매수)
+  tone: "buy" | "hold" | "sell";
+  label: string;         // 예: "적극 매수"
+  reason: string;        // 보충 설명
+  aiNote: string | null; // AI 의견 반영 설명(있을 때)
 };
 
 export function recommendForHolding(
   h: HoldingInput,
-  ctx: { composite: number; soxChange: number | null },
+  ctx: { composite: number; soxChange: number | null; aiBias?: number; aiReason?: string | null },
 ): Recommendation {
   const reasons: string[] = [];
   let score = 0; // 양수=매수, 음수=매도
@@ -64,30 +57,24 @@ export function recommendForHolding(
   // 6) 종목 당일 급등 시 일부 차익 관점 (과열)
   if ((h.changePercent ?? 0) > 8 && score > 0) { score -= 1; reasons.push(`당일 급등 +${h.changePercent?.toFixed(1)}%(과열 주의)`); }
 
-  // 점수 → 방향/단계
-  let direction: Recommendation["direction"];
-  let level = 0;
-  if (score >= 1) {
-    direction = "매수";
-    level = Math.min(3, score);
-  } else if (score <= -1) {
-    direction = "매도";
-    level = Math.min(3, -score);
-  } else {
-    direction = "보유";
-    level = 0;
+  // 7) AI Q&A 기반 바이어스 — ±2로 한정 반영 (환각이 신호를 단독으로 뒤집지 못하게)
+  let aiNote: string | null = null;
+  const rawBias = ctx.aiBias ?? 0;
+  if (rawBias !== 0) {
+    const bias = Math.max(-2, Math.min(2, Math.round(rawBias)));
+    score += bias;
+    aiNote = `AI 의견 ${bias > 0 ? "+" : ""}${bias}${ctx.aiReason ? ` · ${ctx.aiReason}` : ""}`;
   }
 
-  const label =
-    direction === "보유"
-      ? "보유 유지"
-      : `${direction} ${level}단계 · ${(direction === "매수" ? BUY_LABEL : SELL_LABEL)[level]}`;
+  const stance = scoreToStance7(score);
+  const meta = STANCE7_META[stance];
 
   return {
     ticker: h.ticker,
-    direction,
-    level,
-    label,
+    stance,
+    tone: meta.tone,
+    label: meta.label,
     reason: reasons.join(" · "),
+    aiNote,
   };
 }

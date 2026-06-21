@@ -212,6 +212,103 @@ export async function fetchKoreanOffHours(code: string): Promise<KoreanOffHours 
   }
 }
 
+// ─── 한국 종목 밸류에이션 (네이버 — Yahoo가 .KS PER을 안 주는 문제 보완) ──
+export type KoreanValuation = {
+  trailingPE: number | null; // PER (후행)
+  forwardPE: number | null;  // 추정 PER (선행/컨센서스)
+  pbr: number | null;
+  eps: number | null;
+};
+
+// "28.61배" / "12,372원" → 숫자. 음수·마이너스 표기도 처리, 값 없으면 null
+function parseNaverNum(v: unknown): number | null {
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const cleaned = v.replace(/,/g, "").replace(/[^0-9.\-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return null;
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
+// 네이버 종목 통합정보(totalInfos)에서 PER/추정PER/PBR/EPS 추출
+export async function fetchKoreanValuation(code: string): Promise<KoreanValuation | null> {
+  try {
+    const res = await fetch(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+      headers: { "User-Agent": "Mozilla/5.0", Referer: "https://m.stock.naver.com/" },
+      next: { revalidate: 600 },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { totalInfos?: { code?: string; value?: string }[] };
+    const infos = j.totalInfos;
+    if (!Array.isArray(infos)) return null;
+    const pick = (k: string) => parseNaverNum(infos.find((x) => x.code === k)?.value);
+    return {
+      trailingPE: pick("per"),
+      forwardPE: pick("cnsPer"), // 추정PER = 선행 PER
+      pbr: pick("pbr"),
+      eps: pick("eps"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── 코스피200 선물 (네이버 국내지수선물 FUT, 정규+야간 글로벌 세션) ──────
+export type Kospi200Futures = {
+  price: number | null;
+  changePercent: number | null;
+  session: "정규" | "야간" | "마감"; // KST 기준 세션
+  marketStatus: string | null;       // 네이버 OPEN/CLOSE
+  tradedAt: string | null;           // 마지막 체결 시각(ISO+09:00)
+};
+
+// KST 시각으로 선물 세션 판별 (정규 09:00~15:45, 야간 18:00~익일 05:00)
+function kospiFuturesSession(now: Date): Kospi200Futures["session"] {
+  const kst = new Date(now.getTime() + 9 * 3600 * 1000);
+  const day = kst.getUTCDay(); // 0일~6토
+  const t = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  const weekday = day >= 1 && day <= 5;
+  if (weekday && t >= 9 * 60 && t <= 15 * 60 + 45) return "정규";
+  // 야간: 평일 18:00~24:00, 또는 화~토 00:00~05:00 (전 영업일 야간 연장)
+  if (weekday && t >= 18 * 60) return "야간";
+  if (day >= 2 && day <= 6 && t < 5 * 60) return "야간";
+  return "마감";
+}
+
+// 네이버 실시간 폴링 API에서 코스피200 선물 시세 조회
+// 평일 정규장(09:00~15:45)과 야간 글로벌 세션(18:00~익일 05:00)을 반영
+export async function fetchKospi200Futures(): Promise<Kospi200Futures | null> {
+  try {
+    const res = await fetch(
+      "https://polling.finance.naver.com/api/realtime/domestic/index/FUT",
+      {
+        headers: { "User-Agent": "Mozilla/5.0", Referer: "https://m.stock.naver.com/" },
+        next: { revalidate: 60 },
+      },
+    );
+    if (!res.ok) return null;
+    const j = (await res.json()) as { datas?: Record<string, unknown>[] };
+    const d = j.datas?.[0];
+    if (!d) return null;
+
+    const price = toNumKR(d.closePriceRaw ?? d.closePrice);
+    let chg = toNumKR(d.fluctuationsRatioRaw ?? d.fluctuationsRatio);
+    if (chg !== null) {
+      const dir = (d.compareToPreviousPrice as { name?: string } | undefined)?.name ?? "";
+      chg = dir === "FALLING" || dir === "LOWER_LIMIT" ? -Math.abs(chg) : Math.abs(chg);
+    }
+    return {
+      price,
+      changePercent: chg,
+      session: kospiFuturesSession(new Date()),
+      marketStatus: typeof d.marketStatus === "string" ? d.marketStatus : null,
+      tradedAt: typeof d.localTradedAt === "string" ? d.localTradedAt : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // 여러 종목 수급 병렬 조회 (상위 N개만)
 export async function fetchHoldingsFlow(
   holdings: { ticker: string; code: string }[],

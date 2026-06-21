@@ -11,7 +11,9 @@ import type { EarningsEvent } from "@/lib/market/earnings";
 import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain } from "./actions";
 import { HoldingCalls } from "../../_components/HoldingCalls";
 import type { Recommendation } from "@/lib/market/recommend";
-import type { OffHoursQuote } from "@/lib/market/fetch";
+import type { OffHoursQuote, MainIndicator } from "@/lib/market/fetch";
+import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
+import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
 
 type Sess = string | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess };
@@ -91,10 +93,130 @@ function SessionTag({ session }: { session?: Sess }) {
   );
 }
 
+// 주요 지표 세션 아이콘·라벨
+const SESSION_META: Record<MainIndicator["session"], { icon: string; label: string }> = {
+  프리: { icon: "🌅", label: "프리장" },
+  정규: { icon: "🔆", label: "정규장" },
+  애프터: { icon: "🌙", label: "애프터장" },
+  야간: { icon: "🌃", label: "야간" },
+  마감: { icon: "🌑", label: "마감" },
+  상시: { icon: "🌐", label: "24시간" },
+};
+
+function IndSessionBadge({ session }: { session: MainIndicator["session"] }) {
+  const m = SESSION_META[session];
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded bg-ink/8 px-1.5 py-0.5 text-[11px] font-medium text-ink-80">
+      <span>{m.icon}</span>
+      {m.label}
+    </span>
+  );
+}
+
+function indValue(ind: MainIndicator): string {
+  if (ind.price === null) return "—";
+  const num = fmtNum(ind.price, ind.digits);
+  if (ind.unit === "$") return `$${num}`;
+  if (ind.unit === "원") return `${Math.round(ind.price).toLocaleString("ko-KR")}원`;
+  if (ind.unit === "%") return `${num}%`;
+  return num;
+}
+
+// 세션 인지형 주요 지표 한 줄 (single / breakdown / 표기없음)
+function IndicatorRow({ ind }: { ind: MainIndicator }) {
+  // 프리 이전 등 — 표기 불필요(흐리게 라벨만 유지해 목록 안정)
+  if (!ind.show) {
+    return (
+      <div className="flex items-baseline justify-between border-b border-divider pb-2 opacity-50">
+        <span className="text-[14px] text-ink-48">{ind.label}</span>
+        <span className="text-[13px] text-ink-48">장 시작 전 · 표시 없음</span>
+      </div>
+    );
+  }
+
+  // 정규장 마감 후: 정규 + 애프터 각각 + 합계 분해
+  if (ind.mode === "breakdown") {
+    return (
+      <div className="border-b border-divider pb-2 sm:col-span-2">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
+            {ind.label}
+            <IndSessionBadge session={ind.session} />
+          </span>
+          <span className="text-[16px] font-medium tabular-nums">{indValue(ind)}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap gap-x-5 gap-y-0.5 text-[13px]">
+          <span className="text-ink-48">정규장 <Chg v={ind.regularChange ?? null} /></span>
+          <span className="text-ink-48">애프터장 <Chg v={ind.afterChange ?? null} /></span>
+          <span className="font-medium text-ink-48">합계 <Chg v={ind.totalChange ?? null} /></span>
+        </div>
+      </div>
+    );
+  }
+
+  // 단일값 + 세션 아이콘
+  return (
+    <div className="flex items-baseline justify-between border-b border-divider pb-2">
+      <span className="text-[14px] text-ink-48">{ind.label}</span>
+      <span className="flex items-baseline gap-2">
+        <IndSessionBadge session={ind.session} />
+        <span className="text-[16px] font-medium tabular-nums">{indValue(ind)}</span>
+        <span className="w-20 text-right"><Chg v={ind.changePercent} /></span>
+      </span>
+    </div>
+  );
+}
+
+// 채권·금리 실데이터 매도 시그널 패널
+function statusPill(status: TriggerStatus, weight: number) {
+  const label = status === "on" ? "발동" : status === "watch" ? "경계" : "비발동";
+  const cls = weight < 0 ? "bg-blue-50 text-blue-600" : weight > 0 ? "bg-red-50 text-red-600" : "bg-ink/10 text-ink-80";
+  return { label, cls };
+}
+
+function Stance7Badge({ stance }: { stance: Stance7 }) {
+  const m = STANCE7_META[stance];
+  const cls = m.tone === "buy" ? "bg-red-50 text-red-600" : m.tone === "sell" ? "bg-blue-50 text-blue-600" : "bg-ink/10 text-ink-80";
+  return <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${cls}`}>{stance}. {m.label}</span>;
+}
+
+function BondSignalCard({ sig }: { sig: BondSignal }) {
+  return (
+    <Card className="mt-4">
+      <SectionLabel>채권·금리 매도 시그널 (실데이터)</SectionLabel>
+      <div className="flex flex-wrap items-center gap-2">
+        <Stance7Badge stance={sig.stance} />
+        <span className="text-[14px] text-ink-80">{sig.summary}</span>
+      </div>
+      <div className="mt-3 divide-y divide-divider">
+        {sig.triggers.map((t) => {
+          const p = statusPill(t.status, t.weight);
+          return (
+            <div key={t.key} className="flex items-start justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[14px] font-medium">{t.label}</span>
+                  <span className="tabular-nums text-[13px] text-ink-48">{t.value}</span>
+                </div>
+                <p className="mt-0.5 text-[12px] leading-snug text-ink-48">{t.detail}</p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium ${p.cls}`}>{p.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[12px] leading-snug text-ink-48">
+        실시간 채권 데이터(FRED: 미 2·10·30년물, 10Y-2Y 스프레드, 하이일드 OAS)에 임계값을 적용해 트리거를 직접 판정합니다.
+        ‘발동’은 매도 압력, ‘비발동’(빨강)은 우호 신호입니다. AI 텍스트 의견이 아닌 실데이터 기반이며, 투자 권유가 아닙니다.
+      </p>
+    </Card>
+  );
+}
+
 export default function IntradayClient({
-  market, offHours, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
+  market, offHours, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
 }: {
-  market: MarketBlock; offHours: OffHoursQuote[]; composite: number; stage: string; posture: Posture;
+  market: MarketBlock; offHours: OffHoursQuote[]; bondSignal: BondSignal | null; mainIndicators: MainIndicator[]; composite: number; stage: string; posture: Posture;
   session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
   earnings: EarningsEvent[]; holdings: Holding[]; recs: Recommendation[]; news: NewsItem[];
 }) {
@@ -152,15 +274,6 @@ export default function IntradayClient({
   const watchTickers = holdings
     .filter((h) => h.risk_level === "주의" || h.risk_level === "취약")
     .map((h) => h.ticker);
-
-  const indicators: { label: string; ind: Ind; unit?: string; digits?: number }[] = [
-    { label: "나스닥100 선물", ind: market.nasdaq, digits: 2 },
-    { label: "반도체(SOX)", ind: market.sox, digits: 2 },
-    { label: "코스피", ind: market.kospi, digits: 2 },
-    { label: "달러/원", ind: market.usdkrw, unit: "원", digits: 1 },
-    { label: "WTI 유가", ind: market.oil, unit: "$", digits: 2 },
-    { label: "미국채 10Y 금리", ind: market.treasury10y, unit: "%", digits: 2 },
-  ];
 
   return (
     <PageShell title="장중 시황 요약" width="default">
@@ -324,30 +437,25 @@ export default function IntradayClient({
         )}
       </Card>
 
-      {/* 주요 지표 — 값 + 등락률 */}
+      {/* 주요 지표 — 세션 인지형 (정규/프리/애프터 + 미국 주식형은 정규+애프터+합계 분해) */}
       <Card className="mt-4">
         <SectionLabel>주요 지표</SectionLabel>
         <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-          {indicators.map(({ label, ind, unit, digits }) => (
-            <div key={label} className="flex items-baseline justify-between border-b border-divider pb-2">
-              <span className="text-[14px] text-ink-48">{label}</span>
-              <span className="flex items-baseline gap-2">
-                <SessionTag session={ind.session} />
-                <span className="text-[16px] font-medium tabular-nums">
-                  {unit === "$" ? "$" : ""}{fmtNum(ind.price, digits)}{unit && unit !== "$" ? unit : ""}
-                </span>
-                <span className="w-20 text-right"><Chg v={ind.changePercent} /></span>
-              </span>
-            </div>
+          {mainIndicators.map((ind) => (
+            <IndicatorRow key={ind.key} ind={ind} />
           ))}
         </div>
-        <p className="mt-3 text-[12px] text-ink-48">색상: 상승=빨강, 하락=파랑 (한국식 표기)</p>
+        <p className="mt-3 text-[12px] leading-snug text-ink-48">
+          세션: 🌅프리장 · 🔆정규장 · 🌙애프터장 · 🌃야간 · 🌑마감 · 🌐24시간. 나스닥·반도체는 시간외 시세가 있는 ETF(QQQ·SOXX)로
+          정규장 마감 후 <b>정규·애프터·합계</b>(전일 종가 대비)를 나눠 표시합니다. 코스피200 선물은 정규(09:00~15:45)와
+          야간 글로벌 세션(18:00~익일 05:00)을 반영해 밤사이 한국장 방향을 선행해 보여줍니다(출처: 네이버). 색상: 상승=빨강, 하락=파랑(한국식).
+        </p>
       </Card>
 
       {/* 선물 · 시간외 지수 (프리장/애프터장 대용) */}
       {offHours.length > 0 && (
         <Card className="mt-4">
-          <SectionLabel>나스닥 선물 · 시간외 지수</SectionLabel>
+          <SectionLabel>지수 선물 (24시간)</SectionLabel>
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
             {offHours.map((o) =>
               o.kind === "ETF" ? (
@@ -381,8 +489,8 @@ export default function IntradayClient({
             )}
           </div>
           <p className="mt-3 text-[12px] leading-snug text-ink-48">
-            지수(나스닥·SOX)는 시간외 시세가 없어, 24시간 거래되는 선물과 프리/애프터장이 반영되는 ETF로 시간외 흐름을 보여줍니다.
-            ETF는 <b>전날 정규장</b>·<b>애프터장</b>·<b>합계</b>(전일 종가 대비)로 나눠 표시합니다.
+            나스닥·S&P500 선물은 24시간 거래돼 밤사이 미국장 방향을 실시간으로 보여줍니다.
+            나스닥·반도체의 프리/애프터장 분해는 위 <b>주요 지표</b>(QQQ·SOXX)에서 확인하세요.
           </p>
         </Card>
       )}
@@ -400,6 +508,9 @@ export default function IntradayClient({
           vixChange: market.vix.changePercent,
         }}
       />
+
+      {/* 채권·금리 실데이터 매도 시그널 */}
+      {bondSignal && <BondSignalCard sig={bondSignal} />}
 
       {/* 글로벌 반도체 비교 (한국 ↔ 미국 메모리/스토리지) */}
       {semiCompare.length > 0 && (

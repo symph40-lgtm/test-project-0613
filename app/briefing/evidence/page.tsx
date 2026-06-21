@@ -1,12 +1,16 @@
 import { getBriefing } from "../actions";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHoldingsFlow, toKrCode, type StockFlow } from "@/lib/market/naver-flow";
+import { assessPoliticalRisk } from "@/lib/ai/political";
+import { fetchMarketData } from "@/lib/market/fetch";
 import EvidenceClient from "./EvidenceClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function EvidencePage() {
-  const snapshot = await getBriefing();
+  // 유가·금리는 실시간 시세로 정치 리스크 매크로를 평가 (FRED는 지연되어 급변기 부정확)
+  const [snapshot, market] = await Promise.all([getBriefing(), fetchMarketData()]);
+  const political = await assessPoliticalRisk(market);
 
   // 보유 한국 종목 수급(외국인·기관 순매매) 조회
   let supplyFlows: StockFlow[] = [];
@@ -37,5 +41,5 @@ export default async function EvidencePage() {
     supplyFlows = [];
   }
 
-  return <EvidenceClient snapshot={snapshot} supplyFlows={supplyFlows} />;
+  return <EvidenceClient snapshot={snapshot} supplyFlows={supplyFlows} political={political} />;
 }

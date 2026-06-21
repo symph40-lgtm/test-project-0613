@@ -45,6 +45,7 @@ const menuGroups = [
     items: [
       { name: "장중 시황 요약", href: "/market/intraday" },
       { name: "종목 단기 분석", href: "/analyze" },
+      { name: "전문가 Q&A (AI)", href: "/consult" },
       { name: "장중 알림", href: "/alerts/intraday" },
     ],
   },
@@ -60,6 +61,7 @@ const menuGroups = [
   {
     title: "행동 기록 · 인사이트",
     items: [
+      { name: "투자 메모", href: "/notes" },
       { name: "행동 기록", href: "/journal" },
       { name: "판단 갭 리포트", href: "/journal/gap-report" },
       { name: "유사 상황 회상", href: "/journal/similar" },

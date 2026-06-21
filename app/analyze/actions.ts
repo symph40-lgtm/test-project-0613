@@ -3,6 +3,7 @@
 import YahooFinance from "yahoo-finance2";
 import { getYahooSymbol } from "@/lib/positions";
 import { fetchMarketData } from "@/lib/market/fetch";
+import { toKrCode, fetchKoreanValuation } from "@/lib/market/naver-flow";
 import { calculateRiskScores, calculateCompositeScore, classifyStage } from "@/lib/market/risk";
 import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
 
@@ -182,8 +183,17 @@ export async function analyzeStock(query: string, knownSymbol?: string | null): 
   const num = (v: unknown): number | null => (typeof v === "number" && isFinite(v) ? v : null);
   const price = num(q.regularMarketPrice);
   const changePercent = num(q.regularMarketChangePercent);
-  const trailingPE = num(q.trailingPE);
-  const forwardPE = num(q.forwardPE);
+  let trailingPE = num(q.trailingPE);
+  let forwardPE = num(q.forwardPE);
+  // 한국 종목(.KS/.KQ)은 Yahoo가 PER을 주지 않으므로 네이버에서 보완
+  const krCode = toKrCode(symbol, query);
+  if (krCode && (trailingPE === null || forwardPE === null)) {
+    const v = await fetchKoreanValuation(krCode);
+    if (v) {
+      trailingPE = trailingPE ?? v.trailingPE;
+      forwardPE = forwardPE ?? v.forwardPE;
+    }
+  }
   const hi = num(q.fiftyTwoWeekHigh), lo = num(q.fiftyTwoWeekLow);
   const weekRangePos =
     price !== null && hi !== null && lo !== null && hi > lo
