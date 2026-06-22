@@ -28,7 +28,13 @@ export const dynamic = "force-dynamic";
 
 function indicator(q: QuoteData) {
   const eff = effectiveQuote(q);
-  return { price: eff.price, changePercent: eff.changePercent, session: eff.session };
+  return {
+    price: eff.price,
+    changePercent: eff.changePercent,
+    session: eff.session,
+    stale: q.stale ?? false,
+    sourceNote: q.sourceNote ?? null,
+  };
 }
 
 export default async function IntradaySummaryPage() {
@@ -131,7 +137,12 @@ export default async function IntradaySummaryPage() {
         risk_level: p.risk_level as string | null,
         changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
       },
-      { composite, soxChange: market.sox.changePercent, aiBias, aiReason },
+      {
+        composite,
+        soxChange: market.sox.stale ? market.nasdaq.changePercent : market.sox.changePercent,
+        aiBias,
+        aiReason,
+      },
     );
   });
 

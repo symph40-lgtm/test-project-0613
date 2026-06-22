@@ -46,14 +46,17 @@ export async function getMarketExplain(): Promise<MarketExplain> {
 
   const pct = (v: number | null) => (v === null ? "N/A" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
   const nasdaq = market.nasdaq.changePercent;
-  const sox = market.sox.changePercent;
+  const soxStale = market.sox.stale ?? false;
+  // SOX가 지난 종가에 멈췄으면 신호에서 제외하고 실시간 나스닥 선물로 대체 판단
+  const sox = soxStale ? null : market.sox.changePercent;
+  const soxDisp = soxStale ? `정지(지난 종가, 나스닥선물로 대체)` : pct(market.sox.changePercent);
   const kospi = market.kospi.changePercent;
   // 코스피200 선물(야간 포함) — 밤사이 한국장 선행 신호
   const futStr =
     fut && fut.price !== null
       ? `${pct(fut.changePercent)} [${fut.session}${fut.session === "야간" ? "·글로벌세션" : ""}]`
       : "N/A";
-  const moves = `나스닥 ${pct(nasdaq)} · 반도체SOX ${pct(sox)} · 코스피 ${pct(kospi)} · 코스피200선물 ${futStr}`;
+  const moves = `나스닥 ${pct(nasdaq)} · 반도체SOX ${soxDisp} · 코스피 ${pct(kospi)} · 코스피200선물 ${futStr}`;
 
   // 급변 판정 (지수 ±1.5% 이상 또는 VIX 급등)
   const maxMove = Math.max(Math.abs(nasdaq ?? 0), Math.abs(sox ?? 0), Math.abs(kospi ?? 0));
@@ -94,7 +97,7 @@ export async function getMarketExplain(): Promise<MarketExplain> {
 
 ## 교차자산 신호 (당일 등락률)
 - 나스닥100: ${pct(nasdaq)}
-- 반도체 SOX: ${pct(sox)}
+- 반도체 SOX: ${soxDisp}${soxStale ? " — SOX는 미국 지수라 지금 지난 거래일 종가에 멈춰 있습니다. 절대 SOX 등락으로 오늘을 판단하지 말고, 위 나스닥(선물) 등락을 반도체 대리 신호로 쓰세요." : ""}
 - 코스피: ${pct(kospi)}
 - 코스피200 선물(야간 글로벌 세션 포함): ${futStr} — 밤사이 한국장 방향을 선행하는 신호. 한국 정규장 마감 후/개장 전에는 이 선물 흐름을 우선 참고.
 - 미국채 10년물 금리: ${market.treasury10y.price ?? "N/A"}% (${pct(market.treasury10y.changePercent)})
@@ -234,7 +237,7 @@ ${session.label} — ${session.focus}
 ${stage} / 종합 리스크 ${composite}/100 / 권장 자세 ${posture.stance}(공격성 ${posture.aggressiveness})
 
 ## 시장 (당일 등락률)
-나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}% / 반도체SOX ${market.sox.changePercent?.toFixed(2) ?? "N/A"}% / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(야간 글로벌세션 포함, 정규장 외 시간엔 한국장 선행 신호) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
+나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%${market.nasdaq.sourceNote ? `(${market.nasdaq.sourceNote})` : ""} / 반도체SOX ${market.sox.stale ? "정지(지난 종가 — 나스닥 선물로 대체 판단)" : (market.sox.changePercent?.toFixed(2) ?? "N/A") + "%"} / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(야간 글로벌세션 포함, 정규장 외 시간엔 한국장 선행 신호) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
 
 ## 보유 종목
 ${holdings.map((h) => `- ${h.ticker} 비중${h.weight}% ${h.is_leverage ? "[레버리지]" : ""} 섹터:${h.sector ?? "기타"} 위험도:${h.risk_level ?? "-"}`).join("\n")}

@@ -146,6 +146,10 @@ async function fetchQuote(symbol: string): Promise<QuoteData> {
   try {
     const result = await yf.quote(symbol);
 
+    const t = result.regularMarketTime;
+    const marketTime =
+      t instanceof Date ? Math.floor(t.getTime() / 1000) : typeof t === "number" ? t : null;
+
     return {
       symbol,
       price: result.regularMarketPrice ?? null,
@@ -156,10 +160,19 @@ async function fetchQuote(symbol: string): Promise<QuoteData> {
       preMarketChangePercent: result.preMarketChangePercent ?? null,
       postMarketPrice: result.postMarketPrice ?? null,
       postMarketChangePercent: result.postMarketChangePercent ?? null,
+      marketTime,
     };
   } catch {
     return { symbol, price: null, previousClose: null, changePercent: null };
   }
+}
+
+// 마지막 체결이 너무 오래됐는지(주말·휴장으로 지난 종가에 멈춤) 판정.
+// 18시간 기준: 평일 미국장 직전(전일 종가 ~17h)은 통과, 주말/휴장(40h+)은 stale.
+const STALE_HOURS = 18;
+function isStaleQuote(q: QuoteData): boolean {
+  if (q.marketTime == null) return false;
+  return Date.now() / 1000 - q.marketTime > STALE_HOURS * 3600;
 }
 
 // 현재 세션(프리장/애프터장/정규장)에 맞는 유효 시세 선택
@@ -460,6 +473,28 @@ export async function fetchMarketData(): Promise<MarketData> {
     treasury10y.price = fredRate;
     treasury10y.changePercent =
       prevRate !== 0 ? ((fredRate - prevRate) / prevRate) * 100 : 0;
+  }
+
+  // SOX(필라델피아 반도체)는 미국 지수라 한국 낮 시간엔 지난 종가에 멈춤 → stale 표시
+  // (판단 엔진에서 stale이면 실시간 나스닥 선물로 대체)
+  sox.stale = isStaleQuote(sox);
+
+  // 나스닥 선물(NQ=F)이 정지/지연이면 마이크로나스닥(MNQ=F)→S&P선물(ES=F) 순으로 대체
+  if (isStaleQuote(nasdaq) || nasdaq.price === null) {
+    const [mnq, es] = await Promise.all([fetchQuote("MNQ=F"), fetchQuote("ES=F")]);
+    const alt = !isStaleQuote(mnq) && mnq.changePercent !== null ? { q: mnq, label: "마이크로나스닥(MNQ)" }
+      : !isStaleQuote(es) && es.changePercent !== null ? { q: es, label: "S&P선물(ES)" }
+      : null;
+    if (alt) {
+      nasdaq.price = alt.q.price;
+      nasdaq.changePercent = alt.q.changePercent;
+      nasdaq.marketTime = alt.q.marketTime;
+      nasdaq.stale = false;
+      nasdaq.sourceNote = `NQU26 정지중 · ${alt.label} 대체`;
+    } else {
+      nasdaq.stale = true;
+      nasdaq.sourceNote = "NQU26 정지중 · 대체 선물도 지연";
+    }
   }
 
   return {

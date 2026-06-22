@@ -42,7 +42,9 @@ export function calculateRiskScores(market: MarketData): RiskScores {
   }
 
   // 반도체(SOX): 하락폭 클수록 위험 (3% 하락 → 100점)
-  const semiconductor = pctToRisk(market.sox.changePercent, 3, "down") ?? 50;
+  // SOX가 stale(지난 종가에 멈춤)이면 그 값으로 판단 시 왜곡되므로, 실시간 나스닥 선물 등락을 대체 신호로 사용.
+  const semiPct = market.sox.stale ? market.nasdaq.changePercent : market.sox.changePercent;
+  const semiconductor = pctToRisk(semiPct, 3, "down") ?? 50;
 
   // 수급: S&P500 + KOSPI 평균 하락 기준 (2% 하락 → 100점)
   const supplyPcts = [market.sp500.changePercent, market.kospi.changePercent].filter(
@@ -57,7 +59,7 @@ export function calculateRiskScores(market: MarketData): RiskScores {
   const nasdaqPct = market.nasdaq.changePercent;
   const ratePct = market.treasury10y.changePercent;
   let bond = 50;
-  if (nasdaqPct !== null && ratePct !== null) {
+  if (!market.nasdaq.stale && nasdaqPct !== null && ratePct !== null) {
     // 나스닥 하락(-) + 금리 상승(+) 이면 채권 이동 위험 증가
     const bondSignal = -nasdaqPct + ratePct;
     bond = Math.max(0, Math.min(100, (bondSignal / 3) * 100));

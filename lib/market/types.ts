@@ -8,6 +8,9 @@ export type QuoteData = {
   preMarketChangePercent?: number | null;
   postMarketPrice?: number | null;
   postMarketChangePercent?: number | null;
+  marketTime?: number | null;   // 마지막 체결 시각(unix 초) — staleness 판정용
+  stale?: boolean;              // 데이터가 오래됨(예: 주말·휴장으로 지난 종가에 멈춤)
+  sourceNote?: string | null;   // 대체 소스/정지 안내 (예: "NQU26 정지중 · MNQ 대체")
 };
 
 export type MarketData = {

@@ -24,7 +24,12 @@ export default async function BriefingPage() {
         .select("ticker, weight, is_leverage, sector, risk_level")
         .eq("user_id", user.id)
         .order("weight", { ascending: false });
-      const sox = (snapshot.market_data as MarketData | null)?.sox.changePercent ?? null;
+      const md = snapshot.market_data as MarketData | null;
+      // SOX는 미국 지수라 한국 낮 시간엔 지난 종가에 멈춤. 캐시된 스냅샷이라 marketTime으로 렌더 시점에 재판정.
+      // stale이면 그 값으로 "반도체 강세/약세"를 단정하지 않도록 신호에서 제외(null).
+      const soxTime = md?.sox.marketTime ?? null;
+      const soxStale = soxTime ? Date.now() / 1000 - soxTime > 18 * 3600 : false;
+      const sox = soxStale ? null : md?.sox.changePercent ?? null;
       recs = (positions ?? []).map((p) =>
         recommendForHolding(
           {

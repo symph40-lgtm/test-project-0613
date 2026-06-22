@@ -16,7 +16,7 @@ import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
 import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
 
 type Sess = string | null;
-type Ind = { price: number | null; changePercent: number | null; session?: Sess };
+type Ind = { price: number | null; changePercent: number | null; session?: Sess; stale?: boolean; sourceNote?: string | null };
 type MarketBlock = {
   nasdaq: Ind; sox: Ind; kospi: Ind; usdkrw: Ind; oil: Ind; treasury10y: Ind; vix: Ind;
   fetchedAt: string;
@@ -293,6 +293,16 @@ export default function IntradayClient({
             {refreshing ? "갱신 중…" : "실시간 새로고침"}
           </Button>
         </div>
+
+        {/* 미국 지수 stale/정지 경고 */}
+        {(market.sox.stale || market.nasdaq.stale || market.nasdaq.sourceNote) && (
+          <div className="mt-3 rounded-[10px] border border-guard/40 bg-pearl p-3 text-[13px] leading-snug text-ink-80">
+            <b className="text-guard">⚠ 미국 지수 데이터 주의</b>
+            {market.sox.stale && " · 필라델피아 반도체(SOX)가 지난 거래일 종가에 멈춰 있어, 위험·매매 판단은 실시간 나스닥 선물로 대체했습니다."}
+            {market.nasdaq.sourceNote ? ` · ${market.nasdaq.sourceNote}` : ""}
+            {market.nasdaq.stale && !market.nasdaq.sourceNote ? " · 나스닥 선물도 지연 상태라 신중히 보세요." : ""}
+          </div>
+        )}
 
         {/* 장세 단계 + 풀이 */}
         <div className="mt-4 rounded-[12px] border border-hairline bg-pearl p-4">
