@@ -111,6 +111,21 @@ function dataSemiFallback(semi: SectorFlow | null, rev: number | null = null): S
   };
 }
 
+// 데이터만으로 만든 픽(반등 후보) — AI 실패 시
+function dataSectorPick(s: SectorFlow): SectorPick {
+  return {
+    sector: s.sector, etf: s.etf, total: s.buyAttract,
+    verdict: s.buyAttract >= 60 ? "매수 매력 우위" : "매수 매력 보통",
+    items: [],
+    reason: `전고점대비 ${s.drawdown ?? "?"}% · RSI ${s.rsi14 ?? "?"} · 동시순매수 ${s.bothBuying ? "O" : "X"} · 매수매력도 ${s.buyAttract}`,
+    outlook: s.buyAttract >= 60 ? "낙폭·과매도·수급 기준 반등 매력 — 바닥 확인 후 분할." : "반등 신호 약함 — 추세·수급 확인 필요.",
+    keyIndicators: [],
+    buyTiming: "외국인·기관 순매수 전환 + 20일선 회복 확인 후 분할 접근 검토.",
+    watch: "수급 전환·거래량 동반 반등 여부.",
+    risks: "추세 미회복 시 추가 하락 위험.",
+  };
+}
+
 const clampItem = (it: ScoredItem): ScoredItem => ({
   label: String(it.label ?? "").slice(0, 30),
   score: Math.max(0, Math.round(Number(it.score ?? 0))),
@@ -120,35 +135,25 @@ const clampItem = (it: ScoredItem): ScoredItem => ({
 
 export async function recommendSectors(sectors: SectorFlow[]): Promise<SectorReco> {
   const semi = sectors.find((s) => s.isSemi) ?? null;
-  // 매수매력도(반등 매력) 높은 순 — 픽은 이 상위에서 선정해 표와 일치시킴
+  // 매수매력도(반등 매력) 높은 순. 분석 대상은 '상위 2개로 코드에서 고정'(AI가 못 바꾸게).
   const others = sectors
     .filter((s) => !s.isSemi)
-    .sort((a, b) => b.buyAttract - a.buyAttract)
-    .slice(0, 6);
+    .sort((a, b) => b.buyAttract - a.buyAttract);
+  const targets = others.slice(0, 2);
 
   const fallback = (): SectorReco => ({
     overview: "데이터 신호 기준(AI 미사용/지연).",
-    picks: [...others].sort((a, b) => b.buyAttract - a.buyAttract).slice(0, 2).map((s) => ({
-      sector: s.sector, etf: s.etf, total: s.buyAttract,
-      verdict: s.buyAttract >= 60 ? "매수 매력 우위" : "매수 매력 보통",
-      items: [],
-      reason: `전고점대비 ${s.drawdown ?? "?"}% · RSI ${s.rsi14 ?? "?"} · 동시순매수 ${s.bothBuying ? "O" : "X"} · 매수매력도 ${s.buyAttract}`,
-      outlook: s.buyAttract >= 60 ? "낙폭·과매도·수급 기준 반등 매력 — 바닥 확인 후 분할." : "반등 신호 약함 — 추세·수급 확인 필요.",
-      keyIndicators: [],
-      buyTiming: "외국인·기관 순매수 전환 + 20일선 회복 확인 후 분할 접근 검토.",
-      watch: "수급 전환·거래량 동반 반등 여부.",
-      risks: "추세 미회복 시 추가 하락 위험.",
-    })),
+    picks: targets.map(dataSectorPick),
     semiconductor: dataSemiFallback(semi),
     isFallback: true,
   });
 
   if (!hasAiKey() || sectors.length === 0) return fallback();
 
-  // 미국 대표주 EPS 90일 리비전(실적 전망 상향 실데이터) — 병렬 수집
-  const [semiRev, othersRev] = await Promise.all([
+  // 미국 대표주 EPS 90일 리비전(실적 전망 상향 실데이터) — 반도체 + 분석 대상 2개만
+  const [semiRev, targetsRev] = await Promise.all([
     semi ? fetchEpsRevision(SECTOR_REPS[semi.sector] ?? []) : Promise.resolve(null),
-    Promise.all(others.map((s) => fetchEpsRevision(SECTOR_REPS[s.sector] ?? []))),
+    Promise.all(targets.map((s) => fetchEpsRevision(SECTOR_REPS[s.sector] ?? []))),
   ]);
   const revStr = (rev: number | null) =>
     rev !== null ? ` · 미국대표주 EPS 90일리비전 ${rev >= 0 ? "+" : ""}${rev}%(실적전망 ${rev > 5 ? "강한 상향" : rev > 1 ? "상향" : rev < -1 ? "하향" : "보합"})` : " · 실적리비전 데이터없음";
@@ -185,13 +190,15 @@ note는 12자 이내로 간결히. 다음 JSON으로만:
 
 ${SECTOR_GUIDE}
 
-다음은 '반도체 외' 섹터를 매수매력도(반등 매력) 높은 순으로 정렬한 것입니다. 이 중 반등 가능성(실적-주가 괴리·수급 유입·과매도 반등)이 가장 높은 2개를 골라 8항목 깊게 채점하십시오(가급적 상위 매수매력도 섹터 우선).
-${others.map((s, i) => "- " + fmtLine(s) + revStr(othersRev[i])).join("\n")}
-'실적 전망 상향' 항목은 위 'EPS 90일 리비전'을 우선 근거로 채점(+5%↑ 강한 상향=높은 점수, 데이터없음이면 보수적). note는 12자 이내 간결히, keyIndicators는 3~4개. 다음 JSON으로만:
+'반도체 외'에서 매수매력도(반등 매력) 1·2위로 확정된 아래 2개 섹터를 '그대로' 각각 8항목으로 분석하십시오. 절대 다른 섹터로 바꾸지 마십시오. picks[0]=1위, picks[1]=2위 순서.
+${targets.map((s, i) => `- ${i + 1}위 ` + fmtLine(s) + revStr(targetsRev[i])).join("\n")}
+(참고용 전체 순위: ${others.slice(0, 6).map((s) => `${s.sector}(매수매력 ${s.buyAttract})`).join(", ")})
+'실적 전망 상향' 항목은 위 'EPS 90일 리비전'을 우선 근거로 채점. reason/outlook에서 그 섹터가 실제 반등할지/추가 하락할지 판단. note는 12자 이내, keyIndicators는 3~4개. 다음 JSON으로만:
 {
   "overview":"섹터 로테이션 흐름 한 줄 (자금이 어디로 도는지)",
   "picks":[
-    { "sector":"", "etf":"", "total":0~100, "verdict":"판정", "items": ${ITEMS_SCHEMA}, "reason":"왜 매수 매력이 있는지 2문장", "outlook":"다시 오를지(반등 가능) vs 더 떨어질지(추가 하락 위험) 방향 전망 1~2문장", "keyIndicators":["섹터 핵심 점검 지표 3~4개"], "buyTiming":"매수 타이밍(조건형)", "watch":"모니터링", "risks":"핵심 리스크 1문장" }
+    { "sector":"${targets[0]?.sector ?? ""}", "etf":"", "total":0~100, "verdict":"판정", "items": ${ITEMS_SCHEMA}, "reason":"왜 매수 매력이 있는지 2문장", "outlook":"반등 가능 vs 추가 하락 위험 방향 전망 1~2문장", "keyIndicators":["섹터 핵심 점검 지표 3~4개"], "buyTiming":"매수 타이밍(조건형)", "watch":"모니터링", "risks":"핵심 리스크 1문장" },
+    { "sector":"${targets[1]?.sector ?? ""}", "etf":"", ... 위와 동일 구조 ... }
   ]
 }`;
 
@@ -211,21 +218,24 @@ ${others.map((s, i) => "- " + fmtLine(s) + revStr(othersRev[i])).join("\n")}
       }
     : dataSemiFallback(semi, semiRev);
 
-  const picks: SectorPick[] = picksRaw?.picks
-    ? picksRaw.picks.slice(0, 2).map((x) => ({
-        sector: String(x.sector ?? "").slice(0, 30),
-        etf: String(x.etf ?? "").slice(0, 40),
-        total: Math.max(0, Math.min(100, Math.round(Number(x.total ?? 50)))),
-        verdict: String(x.verdict ?? "").slice(0, 60),
-        items: (x.items ?? []).slice(0, 8).map(clampItem),
-        reason: String(x.reason ?? "").slice(0, 400),
-        outlook: String(x.outlook ?? "").slice(0, 300),
-        keyIndicators: (x.keyIndicators ?? []).slice(0, 6).map((k) => String(k).slice(0, 120)),
-        buyTiming: String(x.buyTiming ?? "").slice(0, 300),
-        watch: String(x.watch ?? "").slice(0, 200),
-        risks: String(x.risks ?? "").slice(0, 300),
-      }))
-    : fallback().picks;
+  // 섹터명을 코드의 1·2위(targets)로 강제 고정 — AI가 이름을 바꿔도 표시는 항상 매수매력 1·2위
+  const picks: SectorPick[] = targets.map((t, i) => {
+    const x = picksRaw?.picks?.[i];
+    if (!x) return dataSectorPick(t);
+    return {
+      sector: t.sector,
+      etf: t.etf,
+      total: Math.max(0, Math.min(100, Math.round(Number(x.total ?? t.buyAttract)))),
+      verdict: String(x.verdict ?? "").slice(0, 60),
+      items: (x.items ?? []).slice(0, 8).map(clampItem),
+      reason: String(x.reason ?? "").slice(0, 400),
+      outlook: String(x.outlook ?? "").slice(0, 300),
+      keyIndicators: (x.keyIndicators ?? []).slice(0, 6).map((k) => String(k).slice(0, 120)),
+      buyTiming: String(x.buyTiming ?? "").slice(0, 300),
+      watch: String(x.watch ?? "").slice(0, 200),
+      risks: String(x.risks ?? "").slice(0, 300),
+    };
+  });
 
   return {
     overview: String(picksRaw?.overview ?? "").slice(0, 200),

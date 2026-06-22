@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { Sparkles, TrendingUp } from "lucide-react";
 import { Button } from "../_components/Button";
 import { Card, SectionLabel, StateNote } from "../_components/primitives";
@@ -25,6 +25,57 @@ function ScoreBars({ items }: { items: ScoredItem[] }) {
         );
       })}
     </div>
+  );
+}
+
+// 용어 설명 + 산식 토글
+function HelpToggle() {
+  const Term = ({ t, children }: { t: string; children: ReactNode }) => (
+    <div className="border-l-2 border-divider pl-3">
+      <p className="text-[13px] font-semibold text-ink">{t}</p>
+      <p className="mt-0.5 text-[12px] leading-relaxed text-ink-80">{children}</p>
+    </div>
+  );
+  return (
+    <details className="mt-2 rounded-[10px] border border-hairline bg-pearl/40">
+      <summary className="cursor-pointer list-none px-3 py-2 text-[13px] font-medium text-guard select-none">
+        📖 용어 설명·산식 보기
+      </summary>
+      <div className="space-y-3 px-3 pb-3 pt-1">
+        <Term t="상대강도 (%p)">
+          섹터 ETF 당일 등락 − <b>코스피</b> 당일 등락. 양수면 시장보다 강함(주도), 음수면 약함.
+          <br />예) ETF +2%, 코스피 −1% → <b>+3%p</b>.
+        </Term>
+        <Term t="정배열 / 역배열">
+          <b>정배열</b> = 현재가 &gt; 20일선 &gt; 60일선 (상승추세). <b>역배열</b> = 반대(하락추세).
+          정배열은 이미 오르는 중(주도), 역배열은 조정 중(반등 매력 후보).
+        </Term>
+        <Term t="거래량 (배수)">
+          당일 거래량 ÷ 20일 평균. <b>🔥 ≥2배(급증)</b>, <b>↑ ≥1.5배</b>. 자금 유입 강도.
+        </Term>
+        <Term t="주도력 (0~100) — '지금 강한 섹터인가'">
+          상대강도(0~22) + 전고점 위치(0~22) + 정배열(12) + 당일 모멘텀(0~12) + 거래량 급증(0~12) + 외인·기관 수급(0~20).
+          신고가권·정배열·수급유입일수록 높음.
+        </Term>
+        <Term t="매수매력 (0~100) — '조정 후 반등할 매력'">
+          기본 38점에서 가감:
+          <br />· <b>낙폭</b>: 5~40% 빠질수록 ↑(최대 +26), 40%↑ 과대낙폭은 소폭 ↓
+          <br />· <b>과매도</b> RSI&lt;35 +12 / &lt;45 +6 / &gt;70 −8
+          <br />· <b>볼린저%B</b> &lt;25 +8 / &lt;40 +4 / &gt;90 −6
+          <br />· <b>수급</b> 외인·기관 동시순매수 +16 / 한쪽+ +8 / <span className="text-blue-600">둘다 이탈 −12</span>
+          <br />· <b>반등 시작</b> 당일 +1%↑ &amp; 거래량 1.3배↑ +8
+          <br />· <b>추가하락 위험</b> 역배열 &amp; 당일 −1%↓ −12
+          <br />→ 많이 빠졌는데 과매도이고 <b>외인·기관이 바닥에서 사면 ↑</b>, 수급이 빠지면 ↓.
+        </Term>
+        <Term t="주도력 ↔ 매수매력 (반대 개념)">
+          <b>주도력↑</b> = 이미 강세(신고가, 예: 반도체) → 추격 부담.
+          <b>매수매력↑</b> = 많이 빠졌고 과매도인데 수급이 들어오는 섹터 → 반등 기대.
+        </Term>
+        <p className="text-[11px] text-ink-48">
+          수급·전고점·상대강도·정배열·거래량은 실데이터(네이버·Yahoo). 실적(EPS 전망)만 미국 대표주 90일 리비전(실데이터)을 AI가 해석.
+        </p>
+      </div>
+    </details>
   );
 }
 
@@ -82,7 +133,7 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
       {/* AI 주도 섹터 판정 */}
       <Card className="border-guard/40">
         <div className="flex items-center justify-between gap-3">
-          <SectionLabel>섹터 채점 — 반도체 진단 + 유망 섹터 발굴</SectionLabel>
+          <SectionLabel>섹터 채점 — ① 보유 반도체 진단 + ② 매수매력 후보</SectionLabel>
           <Button variant="primary" onClick={run} disabled={isPending} className="!px-4 !py-2 !text-[14px] shrink-0">
             <Sparkles size={15} />
             {loading ? "분석 중…" : reco ? "다시 분석" : "주도 섹터 분석 받기"}
@@ -102,6 +153,7 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
             {/* 반도체 진단 (항목별 점수 + 보유 관점 매수/매도) */}
             {reco.semiconductor && (
               <div className="rounded-[12px] border border-ink/20 bg-canvas p-3">
+                <p className="mb-1 text-[12px] font-semibold text-ink-48">① 내 보유 섹터 진단 (순위 아님 · 보유 관점)</p>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[16px] font-semibold">반도체 진단</span>
                   <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-bold ${scoreCls(reco.semiconductor.total)}`}>{reco.semiconductor.total}점 / 100</span>
@@ -119,7 +171,7 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
               </div>
             )}
 
-            {reco.picks.length > 0 && <p className="pt-1 text-[13px] font-semibold text-ink-48">반도체 외 매수 매력 후보 (반등 기대)</p>}
+            {reco.picks.length > 0 && <p className="pt-2 text-[13px] font-semibold text-ink-48">② 반도체 외 매수 매력 후보 (매수매력도 1·2위 · 반등 기대)</p>}
             {reco.picks.map((p, i) => (
               <div key={i} className="rounded-[12px] border border-guard/30 bg-pearl p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -162,12 +214,14 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
       {/* 섹터 신호 모니터 */}
       <Card>
         <SectionLabel>섹터 신호 모니터 (매수매력도 순)</SectionLabel>
-        <div className="overflow-x-auto">
+        <HelpToggle />
+        <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-pearl text-[12px] text-ink-48">
               <tr>
                 <th className="px-2 py-2 text-left font-medium">섹터</th>
                 <th className="px-2 py-2 text-right font-medium">당일</th>
+                <th className="px-2 py-2 text-right font-medium">거래량</th>
                 <th className="px-2 py-2 text-right font-medium">외인5일</th>
                 <th className="px-2 py-2 text-center font-medium">동시수급</th>
                 <th className="px-2 py-2 text-right font-medium">전고점대비</th>
@@ -186,13 +240,18 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
                     <td className={`px-2 py-1.5 text-right tabular-nums ${pctCls(s.changePercent)}`}>
                       {s.changePercent !== null ? `${s.changePercent > 0 ? "+" : ""}${s.changePercent.toFixed(1)}%` : "—"}
                     </td>
+                    <td className={`px-2 py-1.5 text-right tabular-nums ${s.volRatio == null ? "text-ink-48" : s.volRatio >= 2 ? "text-red-600 font-semibold" : s.volRatio >= 1.5 ? "text-red-500" : s.volRatio < 0.8 ? "text-ink-48" : "text-ink-80"}`}>
+                      {s.volRatio != null ? `${s.volRatio.toFixed(1)}x${s.volRatio >= 2 ? "🔥" : s.volRatio >= 1.5 ? "↑" : ""}` : "—"}
+                    </td>
                     <td className={`px-2 py-1.5 text-right tabular-nums ${f5.cls}`}>{f5.text}</td>
                     <td className="px-2 py-1.5 text-center">{s.bothBuying ? "🔴" : "·"}</td>
                     <td className={`px-2 py-1.5 text-right tabular-nums ${s.near52wHigh ? "text-red-600 font-semibold" : (s.drawdown ?? 0) <= -15 ? "text-blue-600" : "text-ink-48"}`}>
                       {s.drawdown != null ? `${s.drawdown}%` : "—"}
                     </td>
                     <td className={`px-2 py-1.5 text-right tabular-nums ${pctCls(s.relStrength)}`}>{s.relStrength != null ? `${s.relStrength > 0 ? "+" : ""}${s.relStrength}` : "—"}</td>
-                    <td className="px-2 py-1.5 text-center">{s.maAligned ? "✓" : "·"}{s.near52wHigh ? "↑" : ""}</td>
+                    <td className="px-2 py-1.5 text-center">
+                      {s.maAligned ? <span className="text-red-600 font-semibold">정배열{s.near52wHigh ? "↑" : ""}</span> : <span className="text-blue-600">역배열</span>}
+                    </td>
                     <td className="px-2 py-1.5 text-right tabular-nums font-semibold">{s.dataScore}</td>
                     <td className={`px-2 py-1.5 text-right tabular-nums font-semibold ${s.buyAttract >= 60 ? "text-guard" : "text-ink-80"}`}>{s.buyAttract}</td>
                   </tr>
@@ -202,8 +261,8 @@ export default function SectorsClient({ sectors }: { sectors: SectorFlow[] }) {
           </table>
         </div>
         <p className="mt-3 text-[12px] leading-snug text-ink-48">
-매수매력도 순 정렬. <b>주도력</b>=지금 강한 섹터(전고점 위치·상대강도·정배열·모멘텀·수급) / <b>매수매력</b>=조정 후 반등 매력(낙폭·과매도·수급유입). <b>둘은 다릅니다</b> — 반도체는 주도력↑·매수매력↓(신고가), 조정 섹터는 주도력↓·매수매력↑일 수 있음. 위 AI '후보'는 매수매력도 상위에서 선정됩니다.
-          전고점대비 0%=신고가(빨강)·-15%↓=되돌림(파랑) · 동시수급🔴=ETF 외인·기관 5일 동시순매수 · 상대강도=코스피 대비(%p).
+매수매력도 순 정렬. <b>주도력</b>=지금 강한 섹터(전고점 위치·상대강도·정배열·모멘텀·수급) / <b>매수매력</b>=조정 후 반등 매력(낙폭·과매도·수급유입). <b>둘은 다릅니다</b> — 반도체는 주도력↑·매수매력↓(신고가), 조정 섹터는 주도력↓·매수매력↑일 수 있음. 위 AI '후보'는 매수매력도 상위에서 선정됩니다. <b>정배열</b>(현재가&gt;20일선&gt;60일선)=상승추세, <b>역배열</b>=하락추세 — 후보 섹터는 대부분 역배열(조정 중)이라 반등 매력으로 봅니다.
+          전고점대비 0%=신고가(빨강)·-15%↓=되돌림(파랑) · 동시수급🔴=ETF 외인·기관 5일 동시순매수 · 상대강도=코스피 대비(%p) · <b>거래량=20일 평균 대비 배수</b>(🔥≥2배 급증·↑≥1.5배).
           <b>주의: ETF 외인 수급·전고점은 개별주와 다를 수 있습니다.</b> 실적은 미국 대표주 EPS 리비전(실데이터). 출처: 네이버·Yahoo.
         </p>
       </Card>
