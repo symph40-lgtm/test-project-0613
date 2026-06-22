@@ -16,11 +16,12 @@ import {
   stagePosture,
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
+import { fetchKospi200Futures } from "@/lib/market/naver-flow";
 import { recommendForHolding } from "@/lib/market/recommend";
 import { fetchAiStanceBias } from "@/lib/ai/insights";
 import { fetchBondSignal } from "@/lib/market/bondSignal";
 import { fetchSemiAiEarnings } from "@/lib/market/earnings";
-import { fetchPositionNews } from "@/lib/news/fetch";
+import { fetchSemiSectorNews } from "@/lib/news/fetch";
 import IntradayClient from "./_client";
 
 // 클릭(새로고침) 시 항상 그 시점 실시간 데이터를 가져오도록 동적 렌더링
@@ -66,16 +67,17 @@ export default async function IntradaySummaryPage() {
     { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
   ];
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal, kospiFut] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
-    fetchPositionNews(tickers),
+    fetchSemiSectorNews(tickers, 15),
     fetchTreasuryHistory(20),
     fetchSemiAiEarnings(),
     fetchBondEtf("TLT"),
     fetchPositionQuotes(SEMI_COMPARE),
     fetchOffHoursIndex(),
     fetchBondSignal(),
+    fetchKospi200Futures(),
   ]);
 
   const semiCompare = SEMI_COMPARE.map((s) => {
@@ -86,6 +88,8 @@ export default async function IntradaySummaryPage() {
       changePercent: q?.changePercent ?? null,
       currency: q?.currency ?? null,
       session: q?.session ?? null,
+      asOf: q?.asOf ?? null,
+      stale: q?.stale ?? false,
     };
   });
 
@@ -137,12 +141,7 @@ export default async function IntradaySummaryPage() {
         risk_level: p.risk_level as string | null,
         changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
       },
-      {
-        composite,
-        soxChange: market.sox.stale ? market.nasdaq.changePercent : market.sox.changePercent,
-        aiBias,
-        aiReason,
-      },
+      { composite, soxChange: market.sox.changePercent, aiBias, aiReason },
     );
   });
 
@@ -159,6 +158,7 @@ export default async function IntradaySummaryPage() {
         fetchedAt: market.fetchedAt,
       }}
       offHours={offHours}
+      kospiFut={kospiFut}
       bondSignal={bondSignal}
       mainIndicators={mainIndicators}
       composite={composite}

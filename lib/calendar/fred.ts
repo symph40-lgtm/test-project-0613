@@ -103,6 +103,15 @@ const FOMC_ANNOUNCEMENTS_2026 = [
   "2026-12-09",
 ];
 
+// 오늘 이후 가장 가까운 FOMC 발표일 (YYYY-MM-DD)
+export function nextFomcDate(): string | null {
+  const today = ymdUtc(new Date());
+  return FOMC_ANNOUNCEMENTS_2026.find((d) => d >= today) ?? null;
+}
+function ymdUtc(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 function fomcEventsInRange(start: string, end: string, today: string): EconEvent[] {
   return FOMC_ANNOUNCEMENTS_2026.filter((d) => d >= start && d <= end).map((date) => ({
     name: "FOMC 통화정책 결정 / 점도표",

@@ -8,10 +8,11 @@ import { Button } from "../../_components/Button";
 import { Card, SectionLabel, RiskBadge } from "../../_components/primitives";
 import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
-import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain } from "./actions";
+import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain, summarizeNews, type NewsSummary } from "./actions";
 import { HoldingCalls } from "../../_components/HoldingCalls";
 import type { Recommendation } from "@/lib/market/recommend";
 import type { OffHoursQuote, MainIndicator } from "@/lib/market/fetch";
+import type { Kospi200Futures } from "@/lib/market/naver-flow";
 import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
 import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
 
@@ -81,7 +82,7 @@ function stageMeaning(stage: string): string {
   return "하방 압력이 우세한 국면입니다. 단계가 높을수록 위험이 큽니다.";
 }
 
-type SemiCmp = { ticker: string; price: number | null; changePercent: number | null; currency: string | null; session?: Sess };
+type SemiCmp = { ticker: string; price: number | null; changePercent: number | null; currency: string | null; session?: Sess; asOf?: string | null; stale?: boolean };
 
 // 세션 배지
 function SessionTag({ session }: { session?: Sess }) {
@@ -214,9 +215,9 @@ function BondSignalCard({ sig }: { sig: BondSignal }) {
 }
 
 export default function IntradayClient({
-  market, offHours, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
+  market, offHours, kospiFut, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
 }: {
-  market: MarketBlock; offHours: OffHoursQuote[]; bondSignal: BondSignal | null; mainIndicators: MainIndicator[]; composite: number; stage: string; posture: Posture;
+  market: MarketBlock; offHours: OffHoursQuote[]; kospiFut: Kospi200Futures | null; bondSignal: BondSignal | null; mainIndicators: MainIndicator[]; composite: number; stage: string; posture: Posture;
   session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
   earnings: EarningsEvent[]; holdings: Holding[]; recs: Recommendation[]; news: NewsItem[];
 }) {
@@ -227,6 +228,19 @@ export default function IntradayClient({
   const [consulting, setConsulting] = useState(false);
   const [explain, setExplain] = useState<MarketExplain | null>(null);
   const [explaining, setExplaining] = useState(false);
+  const [newsSummary, setNewsSummary] = useState<NewsSummary | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+
+  function runNewsSummary() {
+    setSummarizing(true);
+    startTransition(async () => {
+      try {
+        setNewsSummary(await summarizeNews(news.map((n) => ({ title: n.title, source: n.source }))));
+      } finally {
+        setSummarizing(false);
+      }
+    });
+  }
 
   function runExplain() {
     setExplaining(true);
@@ -298,7 +312,7 @@ export default function IntradayClient({
         {(market.sox.stale || market.nasdaq.stale || market.nasdaq.sourceNote) && (
           <div className="mt-3 rounded-[10px] border border-guard/40 bg-pearl p-3 text-[13px] leading-snug text-ink-80">
             <b className="text-guard">⚠ 미국 지수 데이터 주의</b>
-            {market.sox.stale && " · 필라델피아 반도체(SOX)가 지난 거래일 종가에 멈춰 있어, 위험·매매 판단은 실시간 나스닥 선물로 대체했습니다."}
+            {market.sox.sourceNote ? ` · ${market.sox.sourceNote} 기준으로 위험·매매 판단을 보정했습니다.` : ""}
             {market.nasdaq.sourceNote ? ` · ${market.nasdaq.sourceNote}` : ""}
             {market.nasdaq.stale && !market.nasdaq.sourceNote ? " · 나스닥 선물도 지연 상태라 신중히 보세요." : ""}
           </div>
@@ -462,11 +476,24 @@ export default function IntradayClient({
         </p>
       </Card>
 
-      {/* 선물 · 시간외 지수 (프리장/애프터장 대용) */}
-      {offHours.length > 0 && (
+      {/* 지수 선물 — 미국(나스닥/S&P) + 한국(코스피200) */}
+      {(offHours.length > 0 || kospiFut) && (
         <Card className="mt-4">
           <SectionLabel>지수 선물 (24시간)</SectionLabel>
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+            {kospiFut && kospiFut.price !== null && (
+              <div className="flex items-baseline justify-between border-b border-divider pb-2">
+                <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
+                  코스피200 선물 (FKS200)
+                  <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">선물</span>
+                </span>
+                <span className="flex items-baseline gap-2">
+                  <SessionTag session={kospiFut.session} />
+                  <span className="text-[16px] font-medium tabular-nums">{fmtNum(kospiFut.price, 2)}</span>
+                  <span className="w-20 text-right"><Chg v={kospiFut.changePercent} /></span>
+                </span>
+              </div>
+            )}
             {offHours.map((o) =>
               o.kind === "ETF" ? (
                 <div key={o.label} className="border-b border-divider pb-2 sm:col-span-2">
@@ -499,8 +526,8 @@ export default function IntradayClient({
             )}
           </div>
           <p className="mt-3 text-[12px] leading-snug text-ink-48">
-            나스닥·S&P500 선물은 24시간 거래돼 밤사이 미국장 방향을 실시간으로 보여줍니다.
-            나스닥·반도체의 프리/애프터장 분해는 위 <b>주요 지표</b>(QQQ·SOXX)에서 확인하세요.
+            나스닥(USTECH)·S&P500 선물은 24시간 거래돼 밤사이 미국장 방향을 실시간으로 보여줍니다.
+            코스피200 선물(FKS200)은 정규(09:00~15:45)와 야간 글로벌 세션(18:00~익일 05:00)을 반영합니다(출처: 네이버).
           </p>
         </Card>
       )}
@@ -525,13 +552,17 @@ export default function IntradayClient({
       {/* 글로벌 반도체 비교 (한국 ↔ 미국 메모리/스토리지) */}
       {semiCompare.length > 0 && (
         <Card className="mt-4">
-          <SectionLabel>글로벌 반도체 비교 (실시간)</SectionLabel>
+          <SectionLabel>글로벌 반도체 비교</SectionLabel>
           <div className="space-y-1">
             {semiCompare.map((s) => (
               <div key={s.ticker} className="flex items-center justify-between gap-3 border-b border-divider py-2 last:border-0">
                 <span className="text-[15px] font-medium">{s.ticker}</span>
                 <div className="flex items-center gap-2 text-[15px]">
-                  <SessionTag session={s.session} />
+                  {s.stale ? (
+                    <span className="rounded bg-ink/10 px-1.5 py-0.5 text-[11px] text-ink-48">{s.asOf ? `${s.asOf} 종가` : "지난 종가"}</span>
+                  ) : (
+                    <SessionTag session={s.session} />
+                  )}
                   <span className="tabular-nums text-ink-80">{fmtPrice(s.price, s.currency)}</span>
                   <span className="w-20 text-right"><Chg v={s.changePercent} /></span>
                 </div>
@@ -539,8 +570,8 @@ export default function IntradayClient({
             ))}
           </div>
           <p className="mt-3 text-[12px] leading-snug text-ink-48">
-            마이크론·씨게이트·WD는 메모리·스토리지에서 삼성전자·SK하이닉스와 직접 경쟁·동조합니다.
-            이들 미국 종목의 야간 등락은 다음날 한국 반도체주 시초가에 선행 지표가 되는 경우가 많습니다.
+            한국 종목은 실시간(네이버), 미국 종목은 정규장 마감/휴장 시 <b>지난 거래일 종가</b>로 표기됩니다(예: 준틴스 휴장 6/19 → 6/18 종가).
+            마이크론·씨게이트·WD는 삼성·SK하이닉스와 직접 경쟁·동조해, 야간 등락이 다음날 한국 반도체주 시초가의 선행 지표가 되는 경우가 많습니다.
           </p>
         </Card>
       )}
@@ -608,7 +639,46 @@ export default function IntradayClient({
       {/* 관련 뉴스 */}
       {news.length > 0 && (
         <Card className="mt-4">
-          <SectionLabel>관련 뉴스</SectionLabel>
+          <div className="flex items-center justify-between gap-3">
+            <SectionLabel>관련 뉴스</SectionLabel>
+            <Button variant="secondary" onClick={runNewsSummary} disabled={isPending} className="!px-4 !py-2 !text-[14px] shrink-0">
+              {summarizing ? "요약 중…" : newsSummary ? "다시 요약" : "매수/매도 관점 핵심 요약"}
+            </Button>
+          </div>
+
+          {newsSummary && (() => {
+            const cls = newsSummary.stance === "매수 우호" ? "bg-red-50 text-red-600" : newsSummary.stance === "매도 주의" ? "bg-blue-50 text-blue-600" : "bg-ink/10 text-ink-80";
+            return (
+              <div className="mb-3 rounded-[12px] border border-hairline bg-pearl p-3">
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${cls}`}>뉴스 종합: {newsSummary.stance}</span>
+                </div>
+                {newsSummary.bullets.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {newsSummary.bullets.map((b, i) => (
+                      <li key={i} className="flex gap-1.5 text-[14px] leading-snug text-ink-80"><span className="text-ink-48">·</span>{b}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {newsSummary.buyFactors.length > 0 && (
+                    <div>
+                      <p className="text-[12px] font-semibold text-red-600">매수 우호</p>
+                      <ul className="mt-0.5 space-y-0.5">{newsSummary.buyFactors.map((b, i) => <li key={i} className="text-[13px] leading-snug text-ink-80">+ {b}</li>)}</ul>
+                    </div>
+                  )}
+                  {newsSummary.sellFactors.length > 0 && (
+                    <div>
+                      <p className="text-[12px] font-semibold text-blue-600">매도·주의</p>
+                      <ul className="mt-0.5 space-y-0.5">{newsSummary.sellFactors.map((b, i) => <li key={i} className="text-[13px] leading-snug text-ink-80">− {b}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-ink-48">{newsSummary.isFallback ? "AI 미사용 — 헤드라인만 정리. " : ""}AI 추정 요약이며 투자 권유가 아닙니다.</p>
+              </div>
+            );
+          })()}
+
           <ul className="space-y-3">
             {news.map((n, i) => (
               <li key={i}>
@@ -783,6 +853,34 @@ function BondCard({
         </div>
       </div>
 
+      {/* 채권 가격(TLT) 최근 3일 — 당일·어제·그저께 + 전일 대비 변동 */}
+      {etf && etf.history.length >= 2 && (() => {
+        const n = etf.history.length;
+        const labels = ["그저께", "어제", "당일"];
+        const idxs = [n - 3, n - 2, n - 1].filter((i) => i >= 0);
+        const rows = idxs.map((idx, k) => {
+          const cur = etf.history[idx].value;
+          const prev = idx > 0 ? etf.history[idx - 1].value : null;
+          const chg = prev && prev !== 0 ? ((cur - prev) / prev) * 100 : null;
+          return { label: labels[labels.length - idxs.length + k], date: etf.history[idx].date, value: cur, chg };
+        });
+        return (
+          <div className="mt-3 rounded-[10px] border border-hairline bg-pearl p-3">
+            <p className="text-[12px] text-ink-48">채권 가격(TLT) 최근 3일 · 전일 대비</p>
+            <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+              {rows.map((r) => (
+                <span key={r.date} className="text-ink-80">
+                  <span className="text-ink-48">{r.label}</span> ${r.value.toFixed(2)}
+                  {r.chg !== null && (
+                    <span className={`ml-1 ${colorOf(r.chg)}`}>({r.chg > 0 ? "+" : ""}{r.chg.toFixed(2)}%)</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 표로 보기 토글 — 그래프 대신 날짜별 수치 표 */}
       {(history.length > 0 || (etf && etf.history.length > 0)) && (
         <div className="mt-3">
@@ -793,20 +891,35 @@ function BondCard({
             {showTable ? "표 접기 ▲" : "금리·채권가 표로 보기 ▼"}
           </button>
           {showTable && (() => {
-            const rateMap = new Map(history.map((p) => [p.date, p.value]));
-            const etfMap = new Map((etf?.history ?? []).map((p) => [p.date, p.value]));
+            const rateAsc = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
+            const etfAsc = [...(etf?.history ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+            const rateMap = new Map(rateAsc.map((p) => [p.date, p.value]));
+            const etfMap = new Map(etfAsc.map((p) => [p.date, p.value]));
+            // 전일 대비 변동% 맵
+            const chgMap = (arr: BondPoint[]) => {
+              const m = new Map<string, number>();
+              for (let i = 1; i < arr.length; i++) {
+                const prev = arr[i - 1].value;
+                if (prev !== 0) m.set(arr[i].date, ((arr[i].value - prev) / prev) * 100);
+              }
+              return m;
+            };
+            const rateChg = chgMap(rateAsc);
+            const etfChg = chgMap(etfAsc);
             const dates = Array.from(new Set([...rateMap.keys(), ...etfMap.keys()]))
               .sort()
               .slice(-12)
               .reverse();
+            const chgSpan = (v: number | undefined) =>
+              v === undefined ? null : <span className={`ml-1 text-[11px] ${colorOf(v)}`}>({v > 0 ? "+" : ""}{v.toFixed(2)}%)</span>;
             return (
               <div className="mt-2 overflow-hidden rounded-[10px] border border-hairline">
                 <table className="w-full text-[13px]">
                   <thead className="bg-pearl text-[12px] text-ink-48">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">날짜</th>
-                      <th className="px-3 py-2 text-right font-medium">금리(10Y)</th>
-                      <th className="px-3 py-2 text-right font-medium">채권가(TLT)</th>
+                      <th className="px-3 py-2 text-right font-medium">금리(10Y) · 변동</th>
+                      <th className="px-3 py-2 text-right font-medium">채권가(TLT) · 변동</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-divider">
@@ -815,9 +928,11 @@ function BondCard({
                         <td className="px-3 py-1.5">{d}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">
                           {rateMap.has(d) ? `${rateMap.get(d)!.toFixed(2)}%` : "—"}
+                          {chgSpan(rateChg.get(d))}
                         </td>
                         <td className="px-3 py-1.5 text-right tabular-nums">
                           {etfMap.has(d) ? `$${etfMap.get(d)!.toFixed(2)}` : "—"}
+                          {chgSpan(etfChg.get(d))}
                         </td>
                       </tr>
                     ))}

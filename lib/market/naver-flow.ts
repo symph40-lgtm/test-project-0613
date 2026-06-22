@@ -142,10 +142,10 @@ export async function fetchKoreanQuote(code: string): Promise<KoreanQuote | null
       const day = kst.getUTCDay(); // 0일~6토
       const t = kst.getUTCHours() * 60 + kst.getUTCMinutes();
       const regularNow = day >= 1 && day <= 5 && t >= 9 * 60 && t <= 15 * 60 + 30;
-      const statusOpen = over.overMarketStatus === "OPEN";
 
-      // 정규장 시간이 아니거나 시간외 세션이 열려 있으면 시간외가 표시
-      if (!regularNow || statusOpen) {
+      // 정규장 시간(평일 09:00~15:30)에는 무조건 정규가를 쓴다.
+      // (네이버 overMarketPriceInfo에 전일 시간외가가 남아 있어, 정규장 중 시간외로 잘못 표기되던 버그 수정)
+      if (!regularNow) {
         const oRatio = signedRatio(over.fluctuationsRatio, over.compareToPreviousPrice);
         const isBefore = over.tradingSessionType === "BEFORE_MARKET" || t < 9 * 60;
         return {

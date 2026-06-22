@@ -13,6 +13,8 @@ export type PositionQuote = {
   changePercent: number | null;
   currency: string | null;
   session?: string | null; // 현재 표시 시세의 세션 (프리장/애프터장/장전/시간외)
+  asOf?: string | null;    // 마지막 체결 날짜 (지난 종가 표시용, MM/DD)
+  stale?: boolean;         // 마지막 체결이 오래됨(휴장·주말로 지난 종가에 멈춤)
 };
 
 // 한국 거래소 코드 (KOSPI=KSC, KOSDAQ=KOE/KOQ)
@@ -95,6 +97,13 @@ async function fetchOneQuote(
       postMarketPrice: r.postMarketPrice ?? null,
       postMarketChangePercent: r.postMarketChangePercent ?? null,
     });
+    // 마지막 체결 시각 → 지난 종가(휴장·주말) 여부와 날짜 표시
+    const t = r.regularMarketTime;
+    const ms = t instanceof Date ? t.getTime() : typeof t === "number" ? t * 1000 : null;
+    const stale = eff.session === null && ms !== null && Date.now() - ms > 18 * 3600 * 1000;
+    const asOf = stale && ms !== null
+      ? new Date(ms).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })
+      : null;
     return {
       ticker,
       symbol,
@@ -102,6 +111,8 @@ async function fetchOneQuote(
       changePercent: eff.changePercent,
       currency: r.currency ?? null,
       session: eff.session,
+      asOf,
+      stale,
     };
   } catch {
     return empty;
@@ -334,7 +345,7 @@ export type OffHoursQuote = {
 export async function fetchOffHoursIndex(): Promise<OffHoursQuote[]> {
   // ETF(QQQ·SOXX) 정규/애프터/합계 분해는 '주요 지표'에서 다루므로, 여기선 24시간 선물만.
   const defs: { symbol: string; label: string; kind: "선물" | "ETF" }[] = [
-    { symbol: "NQ=F", label: "나스닥 선물", kind: "선물" },
+    { symbol: "NQ=F", label: "나스닥 선물 (USTECH)", kind: "선물" },
     { symbol: "ES=F", label: "S&P500 선물", kind: "선물" },
   ];
   const results = await Promise.all(
@@ -475,10 +486,6 @@ export async function fetchMarketData(): Promise<MarketData> {
       prevRate !== 0 ? ((fredRate - prevRate) / prevRate) * 100 : 0;
   }
 
-  // SOX(필라델피아 반도체)는 미국 지수라 한국 낮 시간엔 지난 종가에 멈춤 → stale 표시
-  // (판단 엔진에서 stale이면 실시간 나스닥 선물로 대체)
-  sox.stale = isStaleQuote(sox);
-
   // 나스닥 선물(NQ=F)이 정지/지연이면 마이크로나스닥(MNQ=F)→S&P선물(ES=F) 순으로 대체
   if (isStaleQuote(nasdaq) || nasdaq.price === null) {
     const [mnq, es] = await Promise.all([fetchQuote("MNQ=F"), fetchQuote("ES=F")]);
@@ -494,6 +501,25 @@ export async function fetchMarketData(): Promise<MarketData> {
     } else {
       nasdaq.stale = true;
       nasdaq.sourceNote = "NQU26 정지중 · 대체 선물도 지연";
+    }
+  }
+
+  // SOX(미국 지수)는 한국 낮 시간엔 지난 종가에 멈춤(예: 금요일 +6.4% 고정).
+  // → SOXX(반도체 ETF, 프리/애프터 시세 있음)로 대체, 없으면 나스닥 선물. stale 플래그는 UI 안내용으로 유지.
+  sox.stale = isStaleQuote(sox);
+  if (sox.stale) {
+    const soxx = await fetchQuote("SOXX");
+    const eff = effectiveQuote(soxx);
+    const soxxLive = eff.changePercent !== null && (eff.session !== null || !isStaleQuote(soxx));
+    if (soxxLive) {
+      sox.changePercent = eff.changePercent;
+      sox.price = eff.price;
+      sox.sourceNote = `SOX 정지(지난 종가) · SOXX ${eff.session ?? "시간외"} 대체`;
+    } else if (nasdaq.changePercent !== null && !nasdaq.stale) {
+      sox.changePercent = nasdaq.changePercent;
+      sox.sourceNote = "SOX 정지 · 나스닥 선물 대체";
+    } else {
+      sox.sourceNote = "SOX 정지(지난 종가)";
     }
   }
 

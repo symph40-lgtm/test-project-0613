@@ -45,6 +45,7 @@ const menuGroups = [
     items: [
       { name: "장중 시황 요약", href: "/market/intraday" },
       { name: "종목 단기 분석", href: "/analyze" },
+      { name: "유망 섹터 모니터", href: "/sectors" },
       { name: "전문가 Q&A (AI)", href: "/consult" },
       { name: "장중 알림", href: "/alerts/intraday" },
     ],

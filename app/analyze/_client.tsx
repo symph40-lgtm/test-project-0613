@@ -108,6 +108,24 @@ export default function AnalyzeClient() {
             {result.valuationText && <p className="mt-2 text-[14px] leading-snug text-ink-80">{result.valuationText}</p>}
           </Card>
 
+          {/* 펀더멘털 (영업이익·ROE·컨센서스·거버넌스 — 해외 종목) */}
+          {(result.fundamentals || result.fundamentalText) && (
+            <Card>
+              <SectionLabel>펀더멘털 · 컨센서스</SectionLabel>
+              {result.fundamentals ? (
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-[14px] text-ink-80">
+                  <span>ROE <b>{result.fundamentals.roe != null ? (result.fundamentals.roe * 100).toFixed(1) + "%" : "N/A"}</b></span>
+                  <span>영업이익률 <b>{result.fundamentals.opMargin != null ? (result.fundamentals.opMargin * 100).toFixed(1) + "%" : "N/A"}</b></span>
+                  <span>예상 영업이익 <b>{result.fundamentals.opIncomeEst != null ? "$" + (result.fundamentals.opIncomeEst / 1e9).toFixed(1) + "B" : "N/A"}</b></span>
+                  <span>투자의견 <b>{result.fundamentals.recKey ?? "N/A"}</b>{result.fundamentals.analysts != null ? `(애널 ${result.fundamentals.analysts})` : ""}</span>
+                  <span>목표가 대비 <b className={(result.fundamentals.vsTargetPct ?? 0) > 0 ? "text-red-600" : (result.fundamentals.vsTargetPct ?? 0) < 0 ? "text-blue-600" : ""}>{result.fundamentals.vsTargetPct != null ? `${result.fundamentals.vsTargetPct >= 0 ? "+" : ""}${result.fundamentals.vsTargetPct.toFixed(0)}%` : "N/A"}</b></span>
+                  {result.fundamentals.gov.overall != null && <span>거버넌스 <b>{result.fundamentals.gov.overall}/10</b></span>}
+                </div>
+              ) : null}
+              {result.fundamentalText && <p className="mt-2 text-[14px] leading-snug text-ink-80">{result.fundamentalText}</p>}
+            </Card>
+          )}
+
           <Card>
             <SectionLabel>기술적 분석</SectionLabel>
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[14px] text-ink-80">
@@ -115,6 +133,8 @@ export default function AnalyzeClient() {
               <span>RSI <b>{result.rsi14 ?? "N/A"}</b></span>
               <span>1개월 추세 <b className={(result.trend1m ?? 0) > 0 ? "text-red-600" : (result.trend1m ?? 0) < 0 ? "text-blue-600" : ""}>{result.trend1m ?? "N/A"}%</b></span>
               <span>20/60/200일선 <b>{result.ma20 ?? "-"} / {result.ma60 ?? "-"} / {result.ma200 ?? "-"}</b></span>
+              {result.macd && <span>MACD <b>{result.macd.state}</b></span>}
+              {result.bollinger && <span>볼린저 <b>{result.bollinger.state}</b>(%B {result.bollinger.pctB})</span>}
             </div>
             {result.patterns.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -128,32 +148,41 @@ export default function AnalyzeClient() {
               </div>
             )}
             {result.technicalText && <p className="mt-2 text-[14px] leading-snug text-ink-80">{result.technicalText}</p>}
+            {result.chartText && <p className="mt-1.5 text-[13px] leading-snug text-ink-48">차트기법 종합 · {result.chartText}</p>}
           </Card>
 
-          {/* 목표가 · 지지/저항 */}
+          {/* 목표가 · 지지/저항 (현재가 기준 1차·2차) */}
           <Card>
-            <SectionLabel>지지 · 저항 (목표 구간)</SectionLabel>
-            <div className="space-y-2">
+            <SectionLabel>지지 · 저항 (현재가 기준 1·2차)</SectionLabel>
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[14px] text-red-600">저항선(고점)</span>
+                <span className="text-[13px] text-red-600/70">2차 저항</span>
+                <span className="text-[14px] tabular-nums text-ink-48">{fmtPrice(result.resistance2, result.currency)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[14px] font-medium text-red-600">1차 저항</span>
                 <span className="text-[15px] tabular-nums">
                   {fmtPrice(result.resistance, result.currency)}
-                  {result.upside !== null && <span className="ml-2 text-[13px] text-ink-48">상승 여력 +{result.upside}%</span>}
+                  {result.upside !== null && <span className="ml-2 text-[13px] text-ink-48">+{result.upside}%</span>}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[14px] text-ink-80">현재가</span>
-                <span className="text-[15px] font-semibold tabular-nums">{fmtPrice(result.price, result.currency)}</span>
+              <div className="flex items-center justify-between gap-3 border-y border-divider py-1.5">
+                <span className="text-[14px] font-semibold text-ink-80">현재가</span>
+                <span className="text-[16px] font-semibold tabular-nums">{fmtPrice(result.price, result.currency)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[14px] text-blue-600">지지선(저점)</span>
+                <span className="text-[14px] font-medium text-blue-600">1차 지지</span>
                 <span className="text-[15px] tabular-nums">
                   {fmtPrice(result.support, result.currency)}
-                  {result.downside !== null && <span className="ml-2 text-[13px] text-ink-48">하락 여지 {result.downside}%</span>}
+                  {result.downside !== null && <span className="ml-2 text-[13px] text-ink-48">{result.downside}%</span>}
                 </span>
               </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] text-blue-600/70">2차 지지</span>
+                <span className="text-[14px] tabular-nums text-ink-48">{fmtPrice(result.support2, result.currency)}</span>
+              </div>
             </div>
-            <p className="mt-2 text-[12px] text-ink-48">최근 60거래일 고점·저점 기준</p>
+            <p className="mt-2 text-[12px] text-ink-48">최근 스윙 고/저점(변곡점) 중 현재가에 가장 가까운 순으로 표시</p>
           </Card>
 
           {/* 거래량 */}
@@ -180,8 +209,20 @@ export default function AnalyzeClient() {
           </Card>
 
           <Card>
-            <SectionLabel>매크로 · 섹터</SectionLabel>
-            <p className="text-[14px] leading-snug text-ink-80">{result.macroSectorText}</p>
+            <SectionLabel>매크로 · 금리 · 정치 · 시장 전망</SectionLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {result.nextFomc && (
+                <span className="rounded-full bg-ink/10 px-2.5 py-0.5 text-[12px] text-ink-80">다음 FOMC {result.nextFomc}</span>
+              )}
+              {result.politicalScore != null && (
+                <span className={`rounded-full px-2.5 py-0.5 text-[12px] ${result.politicalScore >= 58 ? "bg-blue-50 text-blue-600" : result.politicalScore <= 42 ? "bg-red-50 text-red-600" : "bg-ink/10 text-ink-80"}`}>
+                  정치·지정학 리스크 {result.politicalScore}/100
+                </span>
+              )}
+            </div>
+            {result.macroSectorText && <p className="mt-2 text-[14px] leading-snug text-ink-80">{result.macroSectorText}</p>}
+            {result.bondHeadline && <p className="mt-1.5 text-[13px] leading-snug text-ink-48">채권·금리 · {result.bondHeadline}</p>}
+            {result.outlookText && <p className="mt-1.5 text-[14px] leading-snug text-ink-80">{result.outlookText}</p>}
           </Card>
 
           {result.risks && (

@@ -14,6 +14,75 @@ import { getMarketSession } from "@/lib/market/session";
 import { fetchMarketNews, type NewsItem } from "@/lib/news/fetch";
 import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
 
+// 관련 뉴스를 매수/매도 관점으로 핵심 요약
+export type NewsSummary = {
+  stance: "매수 우호" | "중립" | "매도 주의";
+  bullets: string[];     // 핵심 내용 요약
+  buyFactors: string[];  // 매수에 우호적인 점
+  sellFactors: string[]; // 매도/주의 요인
+  isFallback: boolean;
+};
+
+export async function summarizeNews(
+  headlines: { title: string; source: string }[],
+): Promise<NewsSummary> {
+  const items = headlines.filter((h) => h.title).slice(0, 15);
+  if (!hasAiKey() || items.length === 0) {
+    return {
+      stance: "중립",
+      bullets: items.slice(0, 5).map((h) => h.title),
+      buyFactors: [],
+      sellFactors: [],
+      isFallback: true,
+    };
+  }
+
+  const prompt = `다음은 반도체 섹터 관련 오늘의 뉴스 헤드라인입니다.
+
+${items.map((h, i) => `${i + 1}. ${h.title} (${h.source})`).join("\n")}
+
+이 뉴스들을 '반도체 주식을 매수/매도 관점'에서 핵심만 간단히 요약하십시오.
+규칙: 단정·투자권유 금지("반드시","매수하세요" X), "~우호적","~주의 필요" 등 코칭 표현. 헤드라인에 없는 사실을 지어내지 말 것.
+
+JSON으로만 응답:
+{
+  "stance": "매수 우호 | 중립 | 매도 주의",
+  "bullets": ["핵심 내용 3~5개 (각 한 줄)"],
+  "buyFactors": ["매수에 우호적인 요인 1~3개"],
+  "sellFactors": ["매도/주의 요인 1~3개"]
+}`;
+
+  try {
+    const client = getAiClient();
+    const msg = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 900,
+      system:
+        "당신은 한국 개인 투자자를 위한 뉴스 요약 AI입니다. 반도체 섹터 뉴스를 매수/매도 관점에서 핵심만 간결하게 요약하되, 단정·투자권유 없이 코칭 언어로 답합니다. JSON만 반환합니다.",
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = msg.content[0].type === "text" ? msg.content[0].text : "";
+    const p = parseJsonLoose<Omit<NewsSummary, "isFallback">>(text);
+    const stance =
+      p.stance === "매수 우호" || p.stance === "매도 주의" ? p.stance : "중립";
+    return {
+      stance,
+      bullets: (p.bullets ?? []).slice(0, 6).map((s) => String(s).slice(0, 200)),
+      buyFactors: (p.buyFactors ?? []).slice(0, 4).map((s) => String(s).slice(0, 150)),
+      sellFactors: (p.sellFactors ?? []).slice(0, 4).map((s) => String(s).slice(0, 150)),
+      isFallback: false,
+    };
+  } catch {
+    return {
+      stance: "중립",
+      bullets: items.slice(0, 5).map((h) => h.title),
+      buyFactors: [],
+      sellFactors: [],
+      isFallback: true,
+    };
+  }
+}
+
 export type MarketExplain = {
   generatedAt: string;
   moves: string;          // 핵심 등락 요약
@@ -46,10 +115,9 @@ export async function getMarketExplain(): Promise<MarketExplain> {
 
   const pct = (v: number | null) => (v === null ? "N/A" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
   const nasdaq = market.nasdaq.changePercent;
-  const soxStale = market.sox.stale ?? false;
-  // SOX가 지난 종가에 멈췄으면 신호에서 제외하고 실시간 나스닥 선물로 대체 판단
-  const sox = soxStale ? null : market.sox.changePercent;
-  const soxDisp = soxStale ? `정지(지난 종가, 나스닥선물로 대체)` : pct(market.sox.changePercent);
+  // SOX가 지난 종가에 멈췄으면 fetchMarketData가 이미 SOXX/나스닥선물로 changePercent를 대체해 둠
+  const sox = market.sox.changePercent;
+  const soxDisp = pct(sox) + (market.sox.sourceNote ? ` [${market.sox.sourceNote}]` : "");
   const kospi = market.kospi.changePercent;
   // 코스피200 선물(야간 포함) — 밤사이 한국장 선행 신호
   const futStr =
@@ -97,7 +165,7 @@ export async function getMarketExplain(): Promise<MarketExplain> {
 
 ## 교차자산 신호 (당일 등락률)
 - 나스닥100: ${pct(nasdaq)}
-- 반도체 SOX: ${soxDisp}${soxStale ? " — SOX는 미국 지수라 지금 지난 거래일 종가에 멈춰 있습니다. 절대 SOX 등락으로 오늘을 판단하지 말고, 위 나스닥(선물) 등락을 반도체 대리 신호로 쓰세요." : ""}
+- 반도체 SOX: ${soxDisp}${market.sox.sourceNote ? " — 원지수 SOX는 멈춰 있어 SOXX(반도체 ETF)/나스닥 선물로 대체한 값입니다. 이 대체값 기준으로 판단하세요." : ""}
 - 코스피: ${pct(kospi)}
 - 코스피200 선물(야간 글로벌 세션 포함): ${futStr} — 밤사이 한국장 방향을 선행하는 신호. 한국 정규장 마감 후/개장 전에는 이 선물 흐름을 우선 참고.
 - 미국채 10년물 금리: ${market.treasury10y.price ?? "N/A"}% (${pct(market.treasury10y.changePercent)})
@@ -237,7 +305,7 @@ ${session.label} — ${session.focus}
 ${stage} / 종합 리스크 ${composite}/100 / 권장 자세 ${posture.stance}(공격성 ${posture.aggressiveness})
 
 ## 시장 (당일 등락률)
-나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%${market.nasdaq.sourceNote ? `(${market.nasdaq.sourceNote})` : ""} / 반도체SOX ${market.sox.stale ? "정지(지난 종가 — 나스닥 선물로 대체 판단)" : (market.sox.changePercent?.toFixed(2) ?? "N/A") + "%"} / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(야간 글로벌세션 포함, 정규장 외 시간엔 한국장 선행 신호) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
+나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%${market.nasdaq.sourceNote ? `(${market.nasdaq.sourceNote})` : ""} / 반도체SOX ${market.sox.changePercent?.toFixed(2) ?? "N/A"}%${market.sox.sourceNote ? `(${market.sox.sourceNote})` : ""} / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(야간 글로벌세션 포함, 정규장 외 시간엔 한국장 선행 신호) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
 
 ## 보유 종목
 ${holdings.map((h) => `- ${h.ticker} 비중${h.weight}% ${h.is_leverage ? "[레버리지]" : ""} 섹터:${h.sector ?? "기타"} 위험도:${h.risk_level ?? "-"}`).join("\n")}

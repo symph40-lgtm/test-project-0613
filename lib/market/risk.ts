@@ -42,9 +42,8 @@ export function calculateRiskScores(market: MarketData): RiskScores {
   }
 
   // 반도체(SOX): 하락폭 클수록 위험 (3% 하락 → 100점)
-  // SOX가 stale(지난 종가에 멈춤)이면 그 값으로 판단 시 왜곡되므로, 실시간 나스닥 선물 등락을 대체 신호로 사용.
-  const semiPct = market.sox.stale ? market.nasdaq.changePercent : market.sox.changePercent;
-  const semiconductor = pctToRisk(semiPct, 3, "down") ?? 50;
+  // SOX가 stale이면 fetchMarketData에서 이미 SOXX(또는 나스닥 선물)로 changePercent를 대체해 둠.
+  const semiconductor = pctToRisk(market.sox.changePercent, 3, "down") ?? 50;
 
   // 수급: S&P500 + KOSPI 평균 하락 기준 (2% 하락 → 100점)
   const supplyPcts = [market.sp500.changePercent, market.kospi.changePercent].filter(
