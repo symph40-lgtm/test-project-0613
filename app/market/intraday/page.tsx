@@ -14,6 +14,7 @@ import {
   calculateCompositeScore,
   classifyStage,
   stagePosture,
+  intradayDropRisk,
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
 import { fetchKospi200Futures } from "@/lib/market/naver-flow";
@@ -96,10 +97,6 @@ export default async function IntradaySummaryPage() {
   // 세션 인지형 주요 지표 (나스닥·SOX는 ETF로 정규/애프터/합계 분해)
   const mainIndicators = await fetchMainIndicators(market);
 
-  const riskScores = calculateRiskScores(market);
-  const composite = calculateCompositeScore(riskScores);
-  const stage = classifyStage(composite);
-  const posture = stagePosture(stage, composite);
   const session = getMarketSession();
 
   const quoteMap = new Map(quotes.map((q) => [q.ticker, q]));
@@ -117,6 +114,38 @@ export default async function IntradaySummaryPage() {
       session: q?.session ?? null,
     };
   });
+
+  // 보유 종목 가중 평균 당일 등락(있는 것만)
+  const hw = holdings.filter((h) => typeof h.changePercent === "number");
+  const wSum = hw.reduce((a, h) => a + h.weight, 0);
+  const holdingsAvg =
+    hw.length > 0 && wSum > 0
+      ? hw.reduce((a, h) => a + (h.changePercent as number) * h.weight, 0) / wSum
+      : null;
+
+  // 당일 실시간 급락 오버레이로 composite 보정(미국 밤사이 데이터에 가려진 '오늘의 하락' 반영)
+  const riskScores = calculateRiskScores(market);
+  const baseComposite = calculateCompositeScore(riskScores);
+  const dropRisk = intradayDropRisk({
+    kospi: market.kospi.changePercent,
+    kospiFut: kospiFut?.changePercent ?? null,
+    nasdaqFut: market.nasdaq.stale ? null : market.nasdaq.changePercent,
+    holdingsAvg,
+  });
+  const composite = Math.max(0, Math.min(100, baseComposite + dropRisk));
+  const stage = classifyStage(composite);
+  const posture = stagePosture(stage, composite);
+
+  // 당일 시장 최악 신호(코스피·코스피선물·나스닥선물·보유평균 중 가장 많이 빠진 값)
+  const marketDrop = Math.min(
+    ...[
+      market.kospi.changePercent,
+      kospiFut?.changePercent ?? null,
+      market.nasdaq.stale ? null : market.nasdaq.changePercent,
+      holdingsAvg,
+    ].filter((v): v is number => typeof v === "number"),
+    0,
+  );
 
   // AI Q&A 스탠스 바이어스(reflect=true 최신) — ±2 한정 반영
   const aiStance = await fetchAiStanceBias();
@@ -141,7 +170,7 @@ export default async function IntradaySummaryPage() {
         risk_level: p.risk_level as string | null,
         changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
       },
-      { composite, soxChange: market.sox.changePercent, aiBias, aiReason },
+      { composite, soxChange: market.sox.changePercent, marketDrop, aiBias, aiReason },
     );
   });
 

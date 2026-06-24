@@ -6,7 +6,7 @@ import { History, X } from "lucide-react";
 import { GlobalNav, SubNav, Disclaimer } from "../_components/Shell";
 import { ButtonLink, Button } from "../_components/Button";
 import { Tile, ActionList, StateNote } from "../_components/primitives";
-import { stagePosture } from "@/lib/market/risk";
+import { stagePosture, stageAction } from "@/lib/market/risk";
 import { HoldingCalls } from "../_components/HoldingCalls";
 import type { Recommendation } from "@/lib/market/recommend";
 import type { BriefingSnapshot } from "@/lib/market/types";
@@ -79,12 +79,15 @@ export default function BriefingClient({
                   const posture = stagePosture(snapshot.stage ?? ai.stage, snapshot.risk_score ?? undefined);
                   return (
                     <div className="mt-4 rounded-[12px] border border-white/15 bg-white/5 p-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-[13px] font-semibold text-white">
+                          한마디: {stageAction(snapshot.stage ?? ai.stage).word}
+                        </span>
                         <span className="rounded-full bg-guard-on-dark/20 px-2.5 py-0.5 text-[13px] font-semibold text-guard-on-dark">
                           권장 자세: {posture.stance}
                         </span>
                         <span className="text-[13px] text-body-muted">
-                          공격성 {posture.aggressiveness}/100
+                          구간 공격성 {posture.aggressiveness}/100
                         </span>
                       </div>
                       <p className="mt-2 text-[15px] leading-snug text-body-muted">

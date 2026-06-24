@@ -15,6 +15,7 @@ import type { OffHoursQuote, MainIndicator } from "@/lib/market/fetch";
 import type { Kospi200Futures } from "@/lib/market/naver-flow";
 import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
 import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
+import { stageAction } from "@/lib/market/risk";
 
 type Sess = string | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess; stale?: boolean; sourceNote?: string | null };
@@ -322,8 +323,13 @@ export default function IntradayClient({
         <div className="mt-4 rounded-[12px] border border-hairline bg-pearl p-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[18px] font-semibold">{stage}</span>
+            {(() => {
+              const a = stageAction(stage);
+              const cls = a.tone === "buy" ? "bg-red-50 text-red-600" : a.tone === "sell" ? "bg-blue-50 text-blue-600" : "bg-amber-50 text-amber-700";
+              return <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${cls}`}>한마디: {a.word}</span>;
+            })()}
             <span className="rounded-full bg-guard/15 px-2.5 py-0.5 text-[13px] font-medium text-guard">
-              권장 자세: {posture.stance} · 공격성 {posture.aggressiveness}/100
+              권장 자세: {posture.stance} · 구간 공격성 {posture.aggressiveness}/100
             </span>
             <span className="text-[13px] text-ink-48">종합 리스크 {composite}/100</span>
           </div>

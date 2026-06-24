@@ -115,10 +115,10 @@ function dataSemiFallback(semi: SectorFlow | null, rev: number | null = null): S
 function dataSectorPick(s: SectorFlow): SectorPick {
   return {
     sector: s.sector, etf: s.etf, total: s.buyAttract,
-    verdict: s.buyAttract >= 60 ? "매수 매력 우위" : "매수 매력 보통",
+    verdict: s.buyAttract >= 50 ? "반등 조짐 있음" : "반등 조짐 약함",
     items: [],
     reason: `전고점대비 ${s.drawdown ?? "?"}% · RSI ${s.rsi14 ?? "?"} · 동시순매수 ${s.bothBuying ? "O" : "X"} · 매수매력도 ${s.buyAttract}`,
-    outlook: s.buyAttract >= 60 ? "낙폭·과매도·수급 기준 반등 매력 — 바닥 확인 후 분할." : "반등 신호 약함 — 추세·수급 확인 필요.",
+    outlook: s.buyAttract >= 50 ? "반등 신호(양봉·수급·추세) 포착 — 바닥 확인 후 분할." : "반등 조짐 미흡 — 계속 하락/수급 이탈, 진입 보류.",
     keyIndicators: [],
     buyTiming: "외국인·기관 순매수 전환 + 20일선 회복 확인 후 분할 접근 검토.",
     watch: "수급 전환·거래량 동반 반등 여부.",

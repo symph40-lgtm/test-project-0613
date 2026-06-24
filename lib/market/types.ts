@@ -21,6 +21,7 @@ export type MarketData = {
   usdkrw: QuoteData;      // USDKRW=X 달러/원
   oil: QuoteData;         // CL=F   WTI 유가
   treasury10y: QuoteData; // ^TNX   10년물 금리
+  dollarIndex: QuoteData; // DX-Y.NYB 달러지수(DXY)
   vix: QuoteData;         // ^VXN   나스닥100 변동성지수
   fetchedAt: string;      // ISO timestamp
 };

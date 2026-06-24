@@ -231,18 +231,45 @@ async function fetchOne(def: { sector: string; etf: string; code: string; isSemi
     if (!ch.maAligned && (drawdown ?? 0) <= -10) sell += 22; // 추세 훼손 + 되돌림
     const sellTiming = Math.round(clamp(sell, 0, 100));
 
-    // 매수 매력도(0~100) — '조정 후 반등' 역발상 매력: 낙폭과대+과매도 반등여지+수급유입+반등신호 / 추가하락 위험은 감점
-    let attr = 38;
-    if (drawdown !== null) {
-      const dd = -drawdown; // 하락폭 크기
-      attr += dd <= 5 ? 0 : dd <= 40 ? clamp(((dd - 5) / 35) * 26, 0, 26) : Math.max(14, 26 - (dd - 40) * 0.6); // -50%↑은 낙폭과대 매력 소폭 감소(추가하락 위험)
+    // 매수 매력도(0~100) — '반등의 조짐이 실제로 보이는가'.
+    // 50점이 분기점: 가격이 실제로 돌아서는 신호(당일 반등 양봉·정배열 회복·외인기관 동시순매수)가
+    // 하나라도 있어야 50 이상. 계속 빠지기만 하면(과매도·낙폭과대여도) 50 미만 = 떨어지는 칼.
+    const dd = drawdown !== null ? -drawdown : 0; // 하락폭(양수)
+    const vol = ch.volRatio ?? 0;
+    const fIn = (foreign5d ?? 0) > 0, iIn = (inst5d ?? 0) > 0;
+    const fOut = (foreign5d ?? 0) < 0, iOut = (inst5d ?? 0) < 0;
+
+    // 가격이 실제로 돌아서는 신호 (반등 조짐의 핵심)
+    const priceTurn = chg >= 1.5 && vol >= 1.3 ? 2 : chg >= 0.4 ? 1 : 0; // 당일 반등 양봉
+    const trendTurn = ch.maAligned ? 1 : 0;                              // 정배열 회복(추세 전환)
+    const supTurn = bothBuying ? 2 : fIn || iIn ? 1 : 0;                 // 수급 유입
+
+    // 하락 지속 신호 (반등 부정)
+    let down = 0;
+    if (chg <= -1) down += 2; else if (chg <= -0.3) down += 1; // 당일 하락
+    if (fOut && iOut) down += 2;                               // 수급 동반 이탈
+    if (!ch.maAligned && chg < 0) down += 1;                   // 역배열 + 당일 음봉
+
+    // '조금이라도 반등 가능성' 게이트: 당일 양봉 / 정배열 회복 / 동시순매수 중 하나라도
+    const hasTurn = priceTurn > 0 || trendTurn > 0 || bothBuying;
+
+    let attr: number;
+    if (!hasTurn) {
+      // 반등 조짐 없음(계속 하락·수급 이탈) → 50 미만으로 제한
+      attr = 30 - down * 5 + supTurn * 3;
+      if (rsiV !== null && rsiV < 30) attr += 4; // 과매도 '여건'만 약간 (그래도 50 미만)
+      attr = clamp(attr, 5, 48);
+    } else {
+      // 반등 조짐 있음 → 50 기준 가감
+      attr = 50 + (priceTurn + trendTurn - 1) * 8 + supTurn * 5;
+      attr -= down * 5;
+      if (rsiV !== null && rsiV >= 30 && rsiV <= 45) attr += 5; // 과매도 탈출 보조
+      if (pb !== null && pb >= 25 && pb <= 55) attr += 4;
+      if (relStrength !== null && relStrength > 0) attr += 4;   // 시장보다 강함
+      if (dd >= 45 && !bothBuying) attr -= 6;                   // 과대낙폭 잔여 위험
+      attr = clamp(attr, 50, 100);
     }
-    if (rsiV !== null) attr += rsiV < 35 ? 12 : rsiV < 45 ? 6 : rsiV > 70 ? -8 : 0; // 과매도=반등 여지
-    if (pb !== null) attr += pb < 25 ? 8 : pb < 40 ? 4 : pb > 90 ? -6 : 0;
-    attr += bothBuying ? 16 : (foreign5d ?? 0) > 0 || (inst5d ?? 0) > 0 ? 8 : ((foreign5d ?? 0) < 0 && (inst5d ?? 0) < 0) ? -12 : 0; // 바닥 수급 유입 vs 이탈
-    if (chg > 1 && (ch.volRatio ?? 0) >= 1.3) attr += 8; // 거래량 동반 반등 시작
-    if (!ch.maAligned && chg < -1) attr -= 12; // 역배열 + 추가 하락 = 위험
-    const buyAttract = Math.round(clamp(attr, 0, 100));
+    const buyAttract = Math.round(attr);
 
     return {
       sector: def.sector, etf: def.etf, code: def.code, isSemi: !!def.isSemi,

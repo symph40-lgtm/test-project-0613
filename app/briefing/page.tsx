@@ -27,6 +27,17 @@ export default async function BriefingPage() {
       const md = snapshot.market_data as MarketData | null;
       // SOX가 stale이면 스냅샷 생성 시 fetchMarketData가 이미 SOXX/나스닥선물로 changePercent를 대체해 둠.
       const sox = md?.sox.changePercent ?? null;
+      // 스냅샷 시점 시장 최악 신호(코스피·나스닥선물·S&P 중) — 하락장 스냅샷이면 보수적으로
+      const marketDrop = md
+        ? Math.min(
+            ...[
+              md.kospi.changePercent,
+              md.nasdaq.stale ? null : md.nasdaq.changePercent,
+              md.sp500.changePercent,
+            ].filter((v): v is number => typeof v === "number"),
+            0,
+          )
+        : null;
       recs = (positions ?? []).map((p) =>
         recommendForHolding(
           {
@@ -36,7 +47,7 @@ export default async function BriefingPage() {
             sector: p.sector,
             risk_level: p.risk_level as string | null,
           },
-          { composite: snapshot.risk_score!, soxChange: sox },
+          { composite: snapshot.risk_score!, soxChange: sox, marketDrop },
         ),
       );
     }

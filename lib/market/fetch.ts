@@ -149,6 +149,8 @@ const SYMBOLS = {
   usdkrw: "USDKRW=X",
   oil: "CL=F",
   treasury10y: "^TNX",
+  // 달러지수(DXY) — ICE US Dollar Index. 달러/원과 별개로 글로벌 달러 강도.
+  dollarIndex: "DX-Y.NYB",
   // 변동성: S&P 기준 ^VIX 대신 나스닥100 변동성지수 ^VXN 사용 (보유 반도체·기술주와 더 직결)
   vix: "^VXN",
 } as const;
@@ -307,6 +309,7 @@ export async function fetchMainIndicators(market: MarketData): Promise<MainIndic
     alwaysOnIndicator("usdkrw", "달러/원", market.usdkrw, "원", 1),
     alwaysOnIndicator("oil", "WTI 유가", market.oil, "$", 2),
     alwaysOnIndicator("treasury10y", "미국채 10Y 금리", market.treasury10y, "%", 2),
+    alwaysOnIndicator("dollarIndex", "달러지수 (DXY)", market.dollarIndex, "", 2),
   ];
 }
 
@@ -464,7 +467,7 @@ export async function fetchTreasuryHistory(limit = 20): Promise<TreasuryPoint[]>
 }
 
 export async function fetchMarketData(): Promise<MarketData> {
-  const [sp500, nasdaq, sox, kospi, usdkrw, oil, treasury10y, vix, fredRate] =
+  const [sp500, nasdaq, sox, kospi, usdkrw, oil, treasury10y, dollarIndex, vix, fredRate] =
     await Promise.all([
       fetchQuote(SYMBOLS.sp500),
       fetchQuote(SYMBOLS.nasdaq),
@@ -473,17 +476,17 @@ export async function fetchMarketData(): Promise<MarketData> {
       fetchQuote(SYMBOLS.usdkrw),
       fetchQuote(SYMBOLS.oil),
       fetchQuote(SYMBOLS.treasury10y),
+      fetchQuote(SYMBOLS.dollarIndex),
       fetchQuote(SYMBOLS.vix),
       fetchFredRate(),
     ]);
 
-  // FRED 금리가 있으면 Yahoo ^TNX 값 교체
-  if (fredRate !== null && treasury10y.price !== null) {
-    const prevRate = treasury10y.previousClose ?? treasury10y.price;
-    treasury10y.previousClose = prevRate;
+  // 금리는 실시간 Yahoo ^TNX를 우선 사용(장중 갱신). FRED DGS10은 발표가 1영업일 지연돼
+  // 옛 값(예: 6/18)이 그대로 남으므로, ^TNX가 없을 때만 폴백으로 사용한다.
+  if (treasury10y.price === null && fredRate !== null) {
     treasury10y.price = fredRate;
-    treasury10y.changePercent =
-      prevRate !== 0 ? ((fredRate - prevRate) / prevRate) * 100 : 0;
+    treasury10y.previousClose = fredRate;
+    treasury10y.changePercent = 0;
   }
 
   // 나스닥 선물(NQ=F)이 정지/지연이면 마이크로나스닥(MNQ=F)→S&P선물(ES=F) 순으로 대체
@@ -531,6 +534,7 @@ export async function fetchMarketData(): Promise<MarketData> {
     usdkrw,
     oil,
     treasury10y,
+    dollarIndex,
     vix,
     fetchedAt: new Date().toISOString(),
   };
