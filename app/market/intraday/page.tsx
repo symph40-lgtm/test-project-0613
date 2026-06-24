@@ -128,7 +128,7 @@ export default async function IntradaySummaryPage() {
   const baseComposite = calculateCompositeScore(riskScores);
   const dropRisk = intradayDropRisk({
     kospi: market.kospi.changePercent,
-    kospiFut: kospiFut?.changePercent ?? null,
+    kospiFut: kospiFut && !kospiFut.stale ? kospiFut.changePercent : null,
     nasdaqFut: market.nasdaq.stale ? null : market.nasdaq.changePercent,
     holdingsAvg,
   });
@@ -140,7 +140,7 @@ export default async function IntradaySummaryPage() {
   const marketDrop = Math.min(
     ...[
       market.kospi.changePercent,
-      kospiFut?.changePercent ?? null,
+      kospiFut && !kospiFut.stale ? kospiFut.changePercent : null,
       market.nasdaq.stale ? null : market.nasdaq.changePercent,
       holdingsAvg,
     ].filter((v): v is number => typeof v === "number"),

@@ -2,7 +2,21 @@
 // AI 텍스트 의견이 아니라 실제 금리/스프레드 숫자에 임계값을 적용해 켜짐/꺼짐을 매긴다.
 // 트리거 출처: 사용자 Q&A의 매도-경보 프레임(수익률곡선·절대금리·크레딧 스프레드·베어 스티프닝).
 
+import YahooFinance from "yahoo-finance2";
 import { type Stance7, scoreToStance7, STANCE7_META } from "./stance";
+
+const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+
+// 실시간 미 10년물 금리(^TNX) — FRED DGS10은 1~2영업일 지연돼 절대 레벨엔 부적합.
+async function liveTnx(): Promise<number | null> {
+  try {
+    const q = await yf.quote("^TNX");
+    const p = q.regularMarketPrice;
+    return typeof p === "number" && p > 0 && p < 20 ? p : null;
+  } catch {
+    return null;
+  }
+}
 
 export type TriggerStatus = "on" | "watch" | "off";
 
@@ -61,15 +75,18 @@ function change(o: Obs[]): number | null {
 
 export async function fetchBondSignal(): Promise<BondSignal | null> {
   if (!process.env.FRED_API_KEY) return null;
-  const [s2, s10, s30, spr, hy] = await Promise.all([
+  const [s2, s10, s30, spr, hy, tnx] = await Promise.all([
     fredSeries("DGS2"),
     fredSeries("DGS10"),
     fredSeries("DGS30"),
     fredSeries("T10Y2Y"),
     fredSeries("BAMLH0A0HYM2"),
+    liveTnx(),
   ]);
 
-  const y2 = latest(s2), y10 = latest(s10), y30 = latest(s30);
+  const y2 = latest(s2), y30 = latest(s30);
+  // 10년물 절대 레벨은 실시간 ^TNX 우선(FRED는 지연) — 변화·곡선 분석은 FRED 시계열 유지
+  const y10 = tnx ?? latest(s10);
   const spread10_2 = latest(spr);
   const hyOas = latest(hy);
   const hyOasBp = hyOas !== null ? Math.round(hyOas * 100) : null;

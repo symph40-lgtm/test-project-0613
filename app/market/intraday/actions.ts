@@ -98,7 +98,7 @@ export type MarketExplain = {
 
 const EXPLAIN_SYSTEM = `당신은 한국 개인 투자자를 위한 실시간 시황 해설가입니다.
 교차자산 신호(지수·코스피200 선물·금리·유가·환율·VIX)와 뉴스 헤드라인을 근거로 급등락의 원인을 추정합니다.
-코스피200 선물은 야간 글로벌 세션이 있어, 한국 정규장이 닫혀 있을 때 밤사이 한국장 방향의 선행 지표로 활용합니다.
+코스피200 선물(네이버)은 정규장만 제공되며 야간선물은 미제공입니다. 한국 정규장 외 시간의 밤사이 방향은 나스닥·S&P 선물(24시간)로 판단합니다.
 규칙:
 1. 단정 금지("반드시", "확실히"). "~로 보입니다", "~가능성" 등 추정 표현 사용.
 2. 원인을 '수급·포지션성'(일시적 매물/수급)인지 '매크로·이벤트성'(금리·지표·정책·뉴스)인지 구분해 제시.
@@ -119,10 +119,10 @@ export async function getMarketExplain(): Promise<MarketExplain> {
   const sox = market.sox.changePercent;
   const soxDisp = pct(sox) + (market.sox.sourceNote ? ` [${market.sox.sourceNote}]` : "");
   const kospi = market.kospi.changePercent;
-  // 코스피200 선물(야간 포함) — 밤사이 한국장 선행 신호
+  // 코스피200 선물 — 네이버는 정규장만 제공(야간선물 미제공). stale이면 정규 마감값에 멈춘 상태.
   const futStr =
     fut && fut.price !== null
-      ? `${pct(fut.changePercent)} [${fut.session}${fut.session === "야간" ? "·글로벌세션" : ""}]`
+      ? `${pct(fut.changePercent)} [${fut.stale ? "정규 마감·야간 미반영" : fut.session}]`
       : "N/A";
   const moves = `나스닥 ${pct(nasdaq)} · 반도체SOX ${soxDisp} · 코스피 ${pct(kospi)} · 코스피200선물 ${futStr}`;
 
@@ -140,12 +140,16 @@ export async function getMarketExplain(): Promise<MarketExplain> {
     let driver = "뚜렷한 단일 원인을 특정하기 어렵습니다.";
     let nature: MarketExplain["nature"] = "수급·포지션성";
     const futMove = fut?.changePercent ?? 0;
-    const krClosed = !fut || fut.session !== "정규";
+    // 선물이 정규장 라이브일 때만 선행 신호로 사용(stale=정규 마감값에 멈춤, 야간 미반영)
+    const futLive = !!fut && !fut.stale && fut.session === "정규";
     if (vixSpike) { driver = "변동성(VIX) 급등 — 위험회피 심리 확대."; nature = "매크로·이벤트성"; }
     else if (rateUp && (nasdaq ?? 0) < 0) { driver = "미국 금리 상승이 기술주에 부담을 준 것으로 보입니다."; nature = "매크로·이벤트성"; }
     else if (oilSpike) { driver = "유가 급변에 따른 인플레이션·경기 민감 반응 가능."; nature = "매크로·이벤트성"; }
-    else if (krClosed && Math.abs(futMove) >= 0.5) {
-      driver = `한국 정규장 외 시간 — 코스피200 선물이 ${futMove > 0 ? "강세" : "약세"}(${pct(fut?.changePercent ?? null)})로, 밤사이 한국장 시초가 방향을 ${futMove > 0 ? "위로" : "아래로"} 선행하는 흐름입니다.`;
+    else if (futLive && Math.abs(futMove) >= 0.5) {
+      driver = `코스피200 선물이 ${futMove > 0 ? "강세" : "약세"}(${pct(fut?.changePercent ?? null)})로, 한국 정규장 방향을 주도하는 흐름입니다.`;
+      nature = "수급·포지션성";
+    } else if ((!fut || fut.stale) && Math.abs(nasdaq ?? 0) >= 0.5) {
+      driver = `한국 정규장 외 시간 — 밤사이 방향은 나스닥 선물(${pct(nasdaq)})이 선행 지표입니다. (네이버 코스피200 야간선물 미제공)`;
       nature = "수급·포지션성";
     }
     return {
@@ -167,7 +171,7 @@ export async function getMarketExplain(): Promise<MarketExplain> {
 - 나스닥100: ${pct(nasdaq)}
 - 반도체 SOX: ${soxDisp}${market.sox.sourceNote ? " — 원지수 SOX는 멈춰 있어 SOXX(반도체 ETF)/나스닥 선물로 대체한 값입니다. 이 대체값 기준으로 판단하세요." : ""}
 - 코스피: ${pct(kospi)}
-- 코스피200 선물(야간 글로벌 세션 포함): ${futStr} — 밤사이 한국장 방향을 선행하는 신호. 한국 정규장 마감 후/개장 전에는 이 선물 흐름을 우선 참고.
+- 코스피200 선물: ${futStr} — 네이버는 정규장만 제공하며 야간선물(18:00~05:00)은 미제공입니다. '정규 마감·야간 미반영'으로 표기된 경우 이는 낮 정규장 마감값이지 밤사이 신호가 아니므로, 밤사이 한국장 방향은 위 나스닥·S&P 선물(24시간)로 판단하십시오.
 - 미국채 10년물 금리: ${market.treasury10y.price ?? "N/A"}% (${pct(market.treasury10y.changePercent)})
 - WTI 유가: ${pct(market.oil.changePercent)}
 - 원/달러 환율(USDKRW): ${pct(market.usdkrw.changePercent)}
@@ -277,7 +281,7 @@ export async function getIntradayConsult(): Promise<IntradayConsult> {
   const holdings = positions ?? [];
   const futLine =
     fut && fut.price !== null
-      ? `${fut.changePercent?.toFixed(2) ?? "N/A"}%[${fut.session}]`
+      ? `${fut.changePercent?.toFixed(2) ?? "N/A"}%[${fut.stale ? "정규 마감·야간 미반영" : fut.session}]`
       : "N/A";
 
   // 폴백 (AI 키 없음)
@@ -305,7 +309,7 @@ ${session.label} — ${session.focus}
 ${stage} / 종합 리스크 ${composite}/100 / 권장 자세 ${posture.stance}(공격성 ${posture.aggressiveness})
 
 ## 시장 (당일 등락률)
-나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%${market.nasdaq.sourceNote ? `(${market.nasdaq.sourceNote})` : ""} / 반도체SOX ${market.sox.changePercent?.toFixed(2) ?? "N/A"}%${market.sox.sourceNote ? `(${market.sox.sourceNote})` : ""} / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(야간 글로벌세션 포함, 정규장 외 시간엔 한국장 선행 신호) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
+나스닥 ${market.nasdaq.changePercent?.toFixed(2) ?? "N/A"}%${market.nasdaq.sourceNote ? `(${market.nasdaq.sourceNote})` : ""} / 반도체SOX ${market.sox.changePercent?.toFixed(2) ?? "N/A"}%${market.sox.sourceNote ? `(${market.sox.sourceNote})` : ""} / 코스피 ${market.kospi.changePercent?.toFixed(2) ?? "N/A"}% / 코스피200선물 ${futLine}(네이버 정규장만, 야간선물 미제공 — '정규 마감·야간 미반영'이면 낮 종가이니 밤사이 방향은 나스닥선물로 판단) / 원달러환율 ${market.usdkrw.changePercent?.toFixed(2) ?? "N/A"}%(USDKRW, 마이너스=원화강세) / 유가 ${market.oil.changePercent?.toFixed(2) ?? "N/A"}% / 미국채10Y ${market.treasury10y.price ?? "N/A"}%
 
 ## 보유 종목
 ${holdings.map((h) => `- ${h.ticker} 비중${h.weight}% ${h.is_leverage ? "[레버리지]" : ""} 섹터:${h.sector ?? "기타"} 위험도:${h.risk_level ?? "-"}`).join("\n")}

@@ -477,8 +477,9 @@ export default function IntradayClient({
         </div>
         <p className="mt-3 text-[12px] leading-snug text-ink-48">
           세션: 🌅프리장 · 🔆정규장 · 🌙애프터장 · 🌃야간 · 🌑마감 · 🌐24시간. 나스닥·반도체는 시간외 시세가 있는 ETF(QQQ·SOXX)로
-          정규장 마감 후 <b>정규·애프터·합계</b>(전일 종가 대비)를 나눠 표시합니다. 코스피200 선물은 정규(09:00~15:45)와
-          야간 글로벌 세션(18:00~익일 05:00)을 반영해 밤사이 한국장 방향을 선행해 보여줍니다(출처: 네이버). 색상: 상승=빨강, 하락=파랑(한국식).
+          정규장 마감 후 <b>정규·애프터·합계</b>(전일 종가 대비)를 나눠 표시합니다. 코스피200 선물은 네이버 정규장(09:00~15:45)
+          값입니다 — <b>네이버는 야간선물(18:00~05:00, CME 연계)을 제공하지 않아</b>, 야간엔 정규 마감값에 멈추며 "정규 마감 · 야간 미반영"으로 표기합니다.
+          밤사이 글로벌 방향은 위 <b>나스닥·S&P 선물(24시간)</b>을 참고하세요. 색상: 상승=빨강, 하락=파랑(한국식).
         </p>
       </Card>
 
@@ -490,8 +491,9 @@ export default function IntradayClient({
             {kospiFut && kospiFut.price !== null && (
               <div className="flex items-baseline justify-between border-b border-divider pb-2">
                 <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
-                  코스피200 선물 (FKS200)
+                  코스피200 선물{kospiFut.stale ? " (정규 마감)" : " (FKS200)"}
                   <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">선물</span>
+                  {kospiFut.stale && <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">야간 미반영</span>}
                 </span>
                 <span className="flex items-baseline gap-2">
                   <SessionTag session={kospiFut.session} />
@@ -533,7 +535,7 @@ export default function IntradayClient({
           </div>
           <p className="mt-3 text-[12px] leading-snug text-ink-48">
             나스닥(USTECH)·S&P500 선물은 24시간 거래돼 밤사이 미국장 방향을 실시간으로 보여줍니다.
-            코스피200 선물(FKS200)은 정규(09:00~15:45)와 야간 글로벌 세션(18:00~익일 05:00)을 반영합니다(출처: 네이버).
+            코스피200 선물은 네이버 정규장(09:00~15:45) 값입니다. 네이버는 야간선물(18:00~05:00)을 제공하지 않아 야간엔 정규 마감값에 멈춥니다.
           </p>
         </Card>
       )}

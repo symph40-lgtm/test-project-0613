@@ -284,13 +284,15 @@ function alwaysOnIndicator(key: string, label: string, q: QuoteData, unit: MainI
   return { key, label, unit, digits, mode: "single", session: "상시", show: true, price: q.price, changePercent: q.changePercent };
 }
 
-// 코스피200 선물(네이버 FUT) — 야간 글로벌 세션 포함. 밤사이 한국장 선행 신호.
+// 코스피200 선물(네이버 FUT) — 정규장만 제공(네이버는 야간선물 미제공).
 function futuresIndicator(f: Awaited<ReturnType<typeof fetchKospi200Futures>>): MainIndicator {
   const base = { key: "kospi200fut", label: "코스피200 선물", unit: "" as const, digits: 2, mode: "single" as const };
   if (!f || f.price === null) {
     return { ...base, session: "마감", show: false, price: null, changePercent: null };
   }
-  return { ...base, session: f.session, show: true, price: f.price, changePercent: f.changePercent };
+  // 야간엔 정규 마감값에 멈춤 → 라벨/세션으로 명확히 표기(야간선물 값 아님)
+  const label = f.stale ? "코스피200 선물(정규 마감)" : "코스피200 선물";
+  return { ...base, label, session: f.session, show: true, price: f.price, changePercent: f.changePercent };
 }
 
 // 주요 지표 묶음 — 미국 주식형은 ETF(QQQ·SOXX)로 분해, 나머지는 기존 시세 재사용
@@ -301,8 +303,20 @@ export async function fetchMainIndicators(market: MarketData): Promise<MainIndic
     fetchKospi200Futures(),
   ]);
   const now = new Date();
+
+  // 나스닥100: 정규/프리/애프터엔 QQQ(분해 표시), QQQ가 마감(시간외 없음)이면
+  // 24시간 거래되는 나스닥100 선물(NQ=F=USTECH)로 대체해 항상 라이브로 보이게 한다.
+  let nasdaqInd = usEquityIndicator("nasdaq", "나스닥100 (QQQ)", qqq);
+  if (!nasdaqInd.show && market.nasdaq.changePercent !== null && !market.nasdaq.stale) {
+    nasdaqInd = {
+      key: "nasdaq", label: "나스닥100 선물 (USTECH)", unit: "", digits: 2,
+      mode: "single", session: "야간", show: true,
+      price: market.nasdaq.price, changePercent: market.nasdaq.changePercent,
+    };
+  }
+
   return [
-    usEquityIndicator("nasdaq", "나스닥100 (QQQ)", qqq),
+    nasdaqInd,
     usEquityIndicator("sox", "반도체 (SOXX)", soxx),
     koreanIndexIndicator("kospi", "코스피", market.kospi, now),
     futuresIndicator(fut),
@@ -508,19 +522,26 @@ export async function fetchMarketData(): Promise<MarketData> {
   }
 
   // SOX(미국 지수)는 한국 낮 시간엔 지난 종가에 멈춤(예: 금요일 +6.4% 고정).
-  // → SOXX(반도체 ETF, 프리/애프터 시세 있음)로 대체, 없으면 나스닥 선물. stale 플래그는 UI 안내용으로 유지.
+  // 대체 순서: ① SOXX(반도체 ETF, 프리/애프터 시세) → ② QQQ(나스닥100 ETF, 유동성 큼·프리/애프터)
+  //          → ③ 나스닥 선물(NQ=F, 24시간). stale 플래그는 UI 안내용으로 유지.
   sox.stale = isStaleQuote(sox);
   if (sox.stale) {
-    const soxx = await fetchQuote("SOXX");
-    const eff = effectiveQuote(soxx);
-    const soxxLive = eff.changePercent !== null && (eff.session !== null || !isStaleQuote(soxx));
+    const [soxx, qqq] = await Promise.all([fetchQuote("SOXX"), fetchQuote("QQQ")]);
+    const sEff = effectiveQuote(soxx);
+    const soxxLive = sEff.changePercent !== null && (sEff.session !== null || !isStaleQuote(soxx));
+    const qEff = effectiveQuote(qqq);
+    const qqqLive = qEff.changePercent !== null && (qEff.session !== null || !isStaleQuote(qqq));
     if (soxxLive) {
-      sox.changePercent = eff.changePercent;
-      sox.price = eff.price;
-      sox.sourceNote = `SOX 정지(지난 종가) · SOXX ${eff.session ?? "시간외"} 대체`;
+      sox.changePercent = sEff.changePercent;
+      sox.price = sEff.price;
+      sox.sourceNote = `SOX 정지(지난 종가) · SOXX ${sEff.session ?? "시간외"} 대체`;
+    } else if (qqqLive) {
+      sox.changePercent = qEff.changePercent;
+      sox.price = qEff.price;
+      sox.sourceNote = `SOX 정지(지난 종가) · QQQ ${qEff.session ?? "시간외"} 대체`;
     } else if (nasdaq.changePercent !== null && !nasdaq.stale) {
       sox.changePercent = nasdaq.changePercent;
-      sox.sourceNote = "SOX 정지 · 나스닥 선물 대체";
+      sox.sourceNote = "SOX 정지 · 나스닥 선물(NQ=F) 대체";
     } else {
       sox.sourceNote = "SOX 정지(지난 종가)";
     }

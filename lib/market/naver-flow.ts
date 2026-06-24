@@ -253,11 +253,14 @@ export async function fetchKoreanValuation(code: string): Promise<KoreanValuatio
   }
 }
 
-// ─── 코스피200 선물 (네이버 국내지수선물 FUT, 정규+야간 글로벌 세션) ──────
+// ─── 코스피200 선물 (네이버 국내지수선물 FUT) ──────
+// 주의: 네이버 FUT 피드는 '정규장(09:00~15:45)'만 제공하며, 야간선물(18:00~익일 05:00, CME 연계)은
+// 반영하지 않는다. 야간엔 정규장 마감값에 그대로 멈춰 있으므로, stale 플래그로 구분해 오표기를 막는다.
 export type Kospi200Futures = {
   price: number | null;
   changePercent: number | null;
   session: "정규" | "야간" | "마감"; // KST 기준 세션
+  stale: boolean;                    // true=정규 마감값에 멈춤(야간 미반영)
   marketStatus: string | null;       // 네이버 OPEN/CLOSE
   tradedAt: string | null;           // 마지막 체결 시각(ISO+09:00)
 };
@@ -297,12 +300,26 @@ export async function fetchKospi200Futures(): Promise<Kospi200Futures | null> {
       const dir = (d.compareToPreviousPrice as { name?: string } | undefined)?.name ?? "";
       chg = dir === "FALLING" || dir === "LOWER_LIMIT" ? -Math.abs(chg) : Math.abs(chg);
     }
+    const now = new Date();
+    const tradedAt = typeof d.localTradedAt === "string" ? d.localTradedAt : null;
+    let session = kospiFuturesSession(now);
+    // 체결 시각이 30분 이상 과거면 멈춘 값(정규 마감). 네이버는 야간선물을 제공하지 않으므로
+    // 야간 시간대에 정규 마감값이 '야간'으로 표기되지 않게 stale 처리하고 세션을 '마감'으로 보정.
+    let stale = false;
+    if (tradedAt) {
+      const ageMin = (now.getTime() - new Date(tradedAt).getTime()) / 60000;
+      if (ageMin > 30) {
+        stale = true;
+        if (session === "야간") session = "마감";
+      }
+    }
     return {
       price,
       changePercent: chg,
-      session: kospiFuturesSession(new Date()),
+      session,
+      stale,
       marketStatus: typeof d.marketStatus === "string" ? d.marketStatus : null,
-      tradedAt: typeof d.localTradedAt === "string" ? d.localTradedAt : null,
+      tradedAt,
     };
   } catch {
     return null;
