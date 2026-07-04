@@ -99,6 +99,7 @@ function makeCtx(over: Partial<PremarketContext> & { hynixDaily: DailyBar[] }): 
     frgn20dAvg: { hynix: 1_000_000, samsung: 800_000 },
     consensusIntact: null,
     causeNonEarnings: null,
+    qualSource: "user", // 백테스트 픽스처의 정성 값은 확정 입력으로 취급
     ...over,
   };
 }

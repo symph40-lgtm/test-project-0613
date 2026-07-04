@@ -44,9 +44,10 @@ export function computeSetups(inp: Inputs): SetupResult {
   l("L5", "외인 수급(①수준+②감속 필수)", "필수", l5.pass, 0, l5.detail);
 
   const cum3 = cumReturnPct(ctx.hynixDaily, 3, true);
+  const qualSrc = ctx.qualSource === "user" ? "사용자 입력" : ctx.qualSource === "ai" ? "AI 자동 분석" : "입력";
   l("L6", "직전 1~3일 누적 -12% 이상 낙폭", "가점", crashActive, 3, `누적 ${inp.crashCumPct?.toFixed(1) ?? cum3?.toFixed(1) ?? "?"}%`);
-  l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "수동 입력 대기" : "사용자 입력");
-  l("L8", "이익 컨센서스 유지·상향", "가점", ctx.consensusIntact, 2, ctx.consensusIntact === null ? "수동 입력 대기" : "사용자 입력");
+  l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "AI 분석 대기" : qualSrc);
+  l("L8", "이익 컨센서스 유지·상향", "가점", ctx.consensusIntact, 2, ctx.consensusIntact === null ? "AI 분석 대기" : qualSrc);
   l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
   const l10 = ctx.usRates.t10yChangePct !== null && ctx.overnight.nasdaqPct !== null
     ? ctx.usRates.t10yChangePct < -0.5 && ctx.overnight.nasdaqPct > 0.5
@@ -118,7 +119,7 @@ export function computeSetups(inp: Inputs): SetupResult {
     shortBlocked.push(`XS1 준용: 직전 폭락 ${inp.crashCumPct?.toFixed(1)}% — V반등 분기 우선, 인버스 금지`);
   }
   if (ctx.causeNonEarnings === true && ctx.consensusIntact === true) {
-    shortBlocked.push("XS2: 비실적 낙폭 + 컨센서스 상향 구간 — 인버스 금지");
+    shortBlocked.push(`XS2: 비실적 낙폭 + 컨센서스 유지 구간 — 인버스 금지 (${qualSrc})`);
   }
 
   const requiredS = Sh.filter((i) => i.kind === "필수");

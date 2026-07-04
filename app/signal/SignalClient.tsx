@@ -18,6 +18,7 @@ type StateResponse = {
     cause_note: string | null;
     consensus_intact: boolean | null;
     cause_non_earnings: boolean | null;
+    source: "ai" | "user" | null;
   } | null;
   recentFeatures: DailyFeatureRow[];
 };
@@ -506,11 +507,16 @@ function AnnotationForm({ date, annotation, onSaved }: {
 
   return (
     <section className="rounded-[18px] border border-hairline bg-canvas p-5">
-      <h3 className="flex items-center gap-1.5 text-[14px] font-semibold">
-        <NotebookPen size={15} className="text-guard" /> 오늘의 정성 판단 입력 (L7·L8 + 원인 주석 — 학습 피처)
-      </h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="flex items-center gap-1.5 text-[14px] font-semibold">
+          <NotebookPen size={15} className="text-guard" /> 오늘의 정성 판단 (L7·L8 + 원인 주석)
+        </h3>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${annotation?.source === "user" ? "bg-ink text-white" : annotation?.source === "ai" ? "bg-purple-50 text-purple-700" : "bg-pearl text-ink-48"}`}>
+          {annotation?.source === "user" ? "사용자 입력 적용 중" : annotation?.source === "ai" ? "AI 자동 분석 적용 중" : "AI 분석 대기"}
+        </span>
+      </div>
       <p className="mt-1 text-[12px] text-ink-48">
-        자동화할 수 없는 판단입니다. 낙폭 원인과 컨센서스는 셋업 판정(가점·XS2)에 즉시 반영되고, 원인 주석은 학습 데이터로 축적됩니다.
+        매일 AI가 뉴스를 읽고 자동으로 채웁니다 — 입력하지 않아도 됩니다. AI 판단이 다르다고 볼 때만 직접 수정하세요 (사용자 입력이 항상 우선, AI가 덮어쓰지 않음). 판정(가점·XS2)에 즉시 반영됩니다.
       </p>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>

@@ -45,9 +45,10 @@ export type PremarketContext = {
   samsungDaily: DailyBar[];
   k200Daily: DailyBar[];       // KPI200 지수 (선물 일봉 프록시)
   frgn20dAvg: { hynix: number | null; samsung: number | null }; // 외인 20일 평균 순매매량(절대값)
-  // 정성 수동 입력 (daily_features에서 로드)
+  // 정성 판단 (daily_features에서 로드 — AI 자동 분석 또는 사용자 입력)
   consensusIntact: boolean | null;   // L8
   causeNonEarnings: boolean | null;  // L7
+  qualSource: "ai" | "user" | null;  // 정성 판단 출처 (사용자 입력이 항상 우선)
 };
 
 // ── 축1 Bias
@@ -181,4 +182,6 @@ export type DailyFeatureRow = {
   cause_note: string | null;
   consensus_intact: boolean | null;
   cause_non_earnings: boolean | null;
+  annotation_source: "ai" | "user" | null;
+  ai_analyzed_at: string | null;
 };

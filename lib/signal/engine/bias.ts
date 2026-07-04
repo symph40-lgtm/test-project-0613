@@ -48,14 +48,15 @@ export function computeBias(ctx: PremarketContext): BiasResult {
     add("S1", "과열(반전 경계)", "하방", `5일 누적 ${cum5?.toFixed(1) ?? "?"}% · 연속상승 ${upDays}일`);
   }
 
-  // L7·L8 수동 입력 (낙폭 원인 성격 · 이익 컨센서스)
-  if (ctx.causeNonEarnings === null) add("L7", "낙폭 원인(비실적 여부)", "미상", "수동 입력 대기");
-  else if (ctx.causeNonEarnings) add("L7", "낙폭 원인 비실적(수급·지정학 등)", "상방", "펀더멘털 무손상 — 사용자 입력");
-  else add("L7", "낙폭 원인 실적성", "하방", "펀더멘털 훼손 — 사용자 입력");
+  // L7·L8 정성 판단 (AI 자동 분석, 사용자 입력 시 우선)
+  const src = ctx.qualSource === "user" ? "사용자 입력" : ctx.qualSource === "ai" ? "AI 자동 분석" : "입력";
+  if (ctx.causeNonEarnings === null) add("L7", "낙폭 원인(비실적 여부)", "미상", "AI 분석 대기 (직접 입력 가능)");
+  else if (ctx.causeNonEarnings) add("L7", "낙폭 원인 비실적(수급·지정학 등)", "상방", `펀더멘털 무손상 — ${src}`);
+  else add("L7", "낙폭 원인 실적성", "하방", `펀더멘털 훼손 — ${src}`);
 
-  if (ctx.consensusIntact === null) add("L8", "이익 컨센서스", "미상", "수동 입력 대기");
+  if (ctx.consensusIntact === null) add("L8", "이익 컨센서스", "미상", "AI 분석 대기 (직접 입력 가능)");
   else add("L8", "이익 컨센서스", ctx.consensusIntact ? "상방" : "하방",
-    ctx.consensusIntact ? "유지·상향 중 — 사용자 입력" : "하향 중 — 사용자 입력");
+    ctx.consensusIntact ? `유지·상향 중 — ${src}` : `하향 중 — ${src}`);
 
   // C2 리밸런싱 월
   add("C2", "리밸런싱 캘린더", ctx.rebalance === "순풍" ? "상방" : ctx.rebalance === "역풍" ? "하방" : "중립", `${ctx.rebalance} 월`);

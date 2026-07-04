@@ -149,7 +149,7 @@ export async function loadRecentFeatures(limit = 20): Promise<DailyFeatureRow[]>
   return (data as DailyFeatureRow[] | null) ?? [];
 }
 
-// 수동 주석 저장 (annotate API)
+// 수동 주석 저장 (annotate API) — 사용자 입력은 source='user'로 기록돼 AI가 덮어쓰지 않는다
 export async function saveAnnotation(date: string, fields: {
   cause_tag?: string | null;
   cause_note?: string | null;
@@ -159,6 +159,6 @@ export async function saveAnnotation(date: string, fields: {
   const admin = createAdminClient();
   const { error } = await admin
     .from("signal_daily_features")
-    .upsert({ date, ...fields }, { onConflict: "date" });
+    .upsert({ date, ...fields, annotation_source: "user" }, { onConflict: "date" });
   return !error;
 }

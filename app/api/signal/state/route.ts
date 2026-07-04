@@ -10,6 +10,7 @@ import { decide } from "@/lib/signal/engine/decide";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { appendTick, loadTicks, logJudgment, upsertDailyFeatures, loadDailyFeatures, loadRecentFeatures } from "@/lib/signal/store";
 import { maybeSendSignalSms } from "@/lib/signal/alerts";
+import { autoAnnotateIfNeeded } from "@/lib/signal/autoAnnotate";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,14 @@ export async function GET() {
     const { date, minuteOfDay, iso } = kstNow();
     const S = SIGNAL_CONFIG.session;
 
-    // 수동 주석 로드 (L7·L8) → 장전 컨텍스트
+    // AI 자동 정성 분석 (하루 1회, 사용자 입력 있으면 건너뜀) → 주석 로드 (L7·L8) → 장전 컨텍스트
+    await autoAnnotateIfNeeded(date).catch(() => undefined);
     const features = await loadDailyFeatures(date).catch(() => null);
     const [ctx, tick] = await Promise.all([
       buildPremarketContext({
         consensusIntact: features?.consensus_intact ?? null,
         causeNonEarnings: features?.cause_non_earnings ?? null,
+        qualSource: features?.annotation_source ?? null,
       }),
       collectTick(),
     ]);
@@ -70,6 +73,7 @@ export async function GET() {
             cause_note: features.cause_note,
             consensus_intact: features.consensus_intact,
             cause_non_earnings: features.cause_non_earnings,
+            source: features.annotation_source,
           }
         : null,
       recentFeatures: recent,

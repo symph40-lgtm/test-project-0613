@@ -159,6 +159,7 @@ export async function collectTick(): Promise<IntradayTick> {
 export async function buildPremarketContext(manual?: {
   consensusIntact: boolean | null;
   causeNonEarnings: boolean | null;
+  qualSource?: "ai" | "user" | null;
 }): Promise<PremarketContext> {
   const { date } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
@@ -203,6 +204,7 @@ export async function buildPremarketContext(manual?: {
     frgn20dAvg: { hynix: hynixFlow20, samsung: samsungFrgnAvg },
     consensusIntact: manual?.consensusIntact ?? null,
     causeNonEarnings: manual?.causeNonEarnings ?? null,
+    qualSource: manual?.qualSource ?? null,
   };
 }
 
