@@ -12,6 +12,7 @@ export type StockFlow = {
 };
 
 import { getYahooSymbol } from "../positions";
+import { hasKisKeys, fetchKisNightFutures } from "./kis";
 
 // Yahoo 심볼/티커/한글명 → 6자리 한국 종목코드
 export function toKrCode(symbol: string | null, ticker: string): string | null {
@@ -261,6 +262,7 @@ export type Kospi200Futures = {
   changePercent: number | null;
   session: "정규" | "야간" | "마감"; // KST 기준 세션
   stale: boolean;                    // true=정규 마감값에 멈춤(야간 미반영)
+  source: "KIS" | "네이버";          // 시세 출처
   marketStatus: string | null;       // 네이버 OPEN/CLOSE
   tradedAt: string | null;           // 마지막 체결 시각(ISO+09:00)
 };
@@ -313,11 +315,29 @@ export async function fetchKospi200Futures(): Promise<Kospi200Futures | null> {
         if (session === "야간") session = "마감";
       }
     }
+
+    // KIS 야간선물(실시간)이 설정돼 있으면 우선 사용 — 단, 네이버 정규 종가 대비 ±8% 이내일 때만(오설정 방지).
+    if (hasKisKeys() && (session === "야간" || stale)) {
+      const kis = await fetchKisNightFutures().catch(() => null);
+      if (kis && (price === null || Math.abs(kis.price - price) / price < 0.08)) {
+        return {
+          price: kis.price,
+          changePercent: kis.changePercent,
+          session: "야간",
+          stale: false,
+          source: "KIS",
+          marketStatus: "OPEN",
+          tradedAt: now.toISOString(),
+        };
+      }
+    }
+
     return {
       price,
       changePercent: chg,
       session,
       stale,
+      source: "네이버",
       marketStatus: typeof d.marketStatus === "string" ? d.marketStatus : null,
       tradedAt,
     };

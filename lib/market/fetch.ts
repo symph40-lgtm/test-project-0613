@@ -290,8 +290,9 @@ function futuresIndicator(f: Awaited<ReturnType<typeof fetchKospi200Futures>>): 
   if (!f || f.price === null) {
     return { ...base, session: "마감", show: false, price: null, changePercent: null };
   }
-  // 야간엔 정규 마감값에 멈춤 → 라벨/세션으로 명확히 표기(야간선물 값 아님)
-  const label = f.stale ? "코스피200 선물(정규 마감)" : "코스피200 선물";
+  // 라벨: KIS 야간선물(실시간) / 네이버 정규(라이브) / 정규 마감(야간 미반영)
+  const label =
+    f.source === "KIS" ? "코스피200 야간선물(KIS)" : f.stale ? "코스피200 선물(정규 마감)" : "코스피200 선물";
   return { ...base, label, session: f.session, show: true, price: f.price, changePercent: f.changePercent };
 }
 
@@ -315,8 +316,17 @@ export async function fetchMainIndicators(market: MarketData): Promise<MainIndic
     };
   }
 
+  // 나스닥 선물(NQ=F=USTECH) — 24시간 거래. QQQ(현물)와 별개로 항상 표시(밤사이 글로벌 방향 선행).
+  const nasdaqFutInd: MainIndicator = {
+    key: "nasdaqFut", label: "나스닥 선물 (USTECH)", unit: "", digits: 2,
+    mode: "single", session: market.nasdaq.stale ? "마감" : "상시",
+    show: market.nasdaq.changePercent !== null,
+    price: market.nasdaq.price, changePercent: market.nasdaq.changePercent,
+  };
+
   return [
     nasdaqInd,
+    nasdaqFutInd,
     usEquityIndicator("sox", "반도체 (SOXX)", soxx),
     koreanIndexIndicator("kospi", "코스피", market.kospi, now),
     futuresIndicator(fut),
