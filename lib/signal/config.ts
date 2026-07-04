@@ -1,0 +1,118 @@
+// M7 신호 시스템 — 전 파라미터 단일 소스.
+// 마스터 스펙 v2.4의 임계값 + 확장기획서 8.3 초기값. "고정 상수가 아니라 최적화 대상"(2.5.6)이므로
+// 여기 값만 바꾸면 엔진 전체에 반영된다. 확장 모듈은 스펙 원칙대로 기본 OFF (A1 stop_mode만 fixed 기본).
+
+export const SIGNAL_CONFIG = {
+  // ── 세션 시간 (KST 분 단위, 09:00 = 540)
+  session: {
+    premarketMin: 8 * 60 + 30,   // 08:30 장전 브리핑
+    openMin: 9 * 60,             // 09:00 개장
+    observeEndMin: 9 * 60 + 30,  // 09:30 관찰 종료 (진입 금지 구간 끝)
+    entryEndMin: 10 * 60 + 30,   // 10:30 신규 진입 마감 (L4)
+    closeDecideMin: 14 * 60 + 50,// 14:50 C1 마감 증폭 판정
+    exitMin: 15 * 60,            // 15:00 당일 청산 (R3)
+    endMin: 15 * 60 + 30,        // 15:30 장 마감
+  },
+
+  // ── 2축 정렬·셋업 임계값
+  crashCumPct: -12,        // L6/XS1 과대 낙폭 (직전 1~3일 누적)
+  overheatCumPct: 15,      // S1 5일 누적 과열
+  overheatDays: 2,         // S1 연속 상승일
+  gapBigPct: 2,            // X1 갭상승 시초 추격 금지 기준
+  usdkrwHigh: 1500,        // C3 환율 절대 수준 경계
+
+  // ── L5 외인 수급 3요소 (종목 단위 대체 — plan.md 편차 2)
+  foreign: {
+    lookbackDays: 20,      // 일평균 산출 구간
+    paceMaxRatio: 1.2,     // ③상대강도: 당일 매도 페이스 ≤ 20일 평균의 1.2배
+    bufferPct: 10,         // 잠정치 오차 버퍼 ±10% (마스터 5장)
+  },
+
+  // ── 추세일 판별 (T-스코어)
+  trend: {
+    // 가중치 (마스터 4.3). T2는 VWAP 대신 TWAP 근사.
+    weights: { T1: 3, T2: 2, T3: 1, T4: 3, T5: 1, T7: 2, T8: 1 } as Record<string, number>,
+    fullMax: 13,
+    confirmRatio: 8 / 13,  // 추세일 확정: 가용 만점 대비 이 비율 이상
+    weakRatio: 5 / 13,     // 약한 추세 (1/3 비중, 트레일링 -2%)
+    t2SideRatio: 0.8,      // TWAP 편측 시간 비율 ≥ 80%
+    t3PullbackMax: 0.4,    // 되돌림 40% 미만
+    t6MaxFlips: 2,         // 방향 전환 ≤ 2회 (3회 이상 = 횡보일)
+    orbMin: 30,            // Opening Range 구간 (분)
+  },
+
+  // ── DC (방향 지속률) — θ는 최적화 대상 파라미터
+  dc: {
+    barMin: 10,            // 10분봉
+    dc1Theta: 0.6,         // DC1 60%
+    dc2Min: 0.3,           // 효율비 0.30
+  },
+
+  // ── 스코어 컷 (마스터 4.1·4.2)
+  score: {
+    longBonusMax: 11,
+    longCandidate: 5,      // 진입 후보 (1/3 비중)
+    longStrong: 8,         // 강한 신호
+    shortBonusMax: 5,
+    shortCandidate: 2,
+  },
+
+  // ── 리스크 (R1~R8)
+  risk: {
+    stopPct: 3,            // R1 고정 스탑 -3%
+    trailPct: 4,           // R2 트레일링 -4% (설정 변경 가능)
+    weakTrailPct: 2,       // 약한 추세일 타이트 트레일링
+    inverseMaxPct: 5,      // R5 인버스 총자산 상한 (고확신 10)
+    inverseHighConvPct: 10,
+    dailyLossLimitPct: 1,  // R6 계좌 -1%
+  },
+
+  // ── 확장 모듈 (확장기획서 8.3 — 기본 전부 OFF, 값은 매일 기록)
+  ext: {
+    n1: { enabled: false, lookback: 7, nr4Lookback: 4, requireBoth: false },
+    o1: { enabled: false, driveMin: 0.004, testMax: 0.003, crossLimit: 3, windowMin: 30 },
+    b1: { enabled: false, zThreshold: 1.0, lookbackDays: 20, expiryBlackoutDays: 3, smoothMin: 3 },
+    w1: { enabled: false, trendTh: 0.7, distortionBand: [0.45, 0.55] as [number, number], discount: 0.5 },
+    v1: { enabled: false, peakoutDrop: 0.05, holdMin: 30, crashPrereq: -0.03 },
+    a1: { stopMode: "fixed" as "fixed" | "atr", k: 0.7, kTrail: 0.9, minStop: 0.03, maxStop: 0.08 },
+    c1: { enabled: false, dc1Min: 0.6, indexMoveMin: 0.03, extendTo: "15:15" },
+    bonusCapRatio: 0.3,    // 8.5 확장 가점 합산 ≤ T-스코어 총점의 30%
+  },
+
+  // ── 대상 종목·상품 배수
+  symbols: {
+    hynix: "000660",
+    samsung: "005930",
+    leverageMultiple: 2,   // 국내 2배 ETP 기준 (A1 스탑 계산)
+  },
+} as const;
+
+// C1 이벤트 캘린더 — 월 1회 수동 갱신 (YYYY-MM-DD). 마스터 5장 "수동 월 1회 입력" 방식.
+export const EVENT_CALENDAR: { date: string; label: string; binary: boolean }[] = [
+  { date: "2026-07-03", label: "NFP 고용보고서", binary: true },
+  { date: "2026-07-09", label: "선물옵션 만기(쿼드러플위칭 아님)", binary: false },
+  { date: "2026-07-14", label: "미 CPI", binary: true },
+  { date: "2026-07-28", label: "FOMC (7/28~29)", binary: true },
+  { date: "2026-07-29", label: "FOMC 결과 발표", binary: true },
+  { date: "2026-07-30", label: "삼성전자 2분기 실적(확정)", binary: true },
+];
+
+// C2 리밸런싱 월 판정 (마스터 2.1)
+export function rebalanceMonthBias(month: number): "순풍" | "역풍" | "중립" {
+  if ([1, 4, 7, 10].includes(month)) return "순풍";   // 분기 첫째 달
+  if ([2, 5, 8, 11].includes(month)) return "역풍";   // MSCI 리밸런싱 월
+  if ([3, 6, 9, 12].includes(month)) return "역풍";   // 분기말
+  return "중립";
+}
+
+// B1 만기 주간 판정 — 선물옵션 만기(매월 둘째 목요일) D-3 이내면 베이시스 판정 제외
+export function isExpiryBlackout(date: Date, blackoutDays = 3): boolean {
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  // 둘째 목요일 계산
+  const first = new Date(y, m, 1).getDay(); // 0일~6토
+  const firstThu = 1 + ((4 - first + 7) % 7);
+  const secondThu = new Date(y, m, firstThu + 7);
+  const diff = (secondThu.getTime() - date.getTime()) / 86400000;
+  return diff >= 0 && diff <= blackoutDays;
+}
