@@ -40,7 +40,7 @@ export function computeSetups(inp: Inputs): SetupResult {
   l("L3", "상방 방향 형성·유지 확인", "필수", l3, 0,
     trend === null ? "장중 데이터 대기" : `방향 ${trend.dir ?? "-"} · ${trend.grade} · DC1 ${pctOrDash(trend.dc1)}`);
   const inWindow = minuteOfDay >= S.observeEndMin && minuteOfDay <= S.entryEndMin;
-  l("L4", "진입 시간대(09:30~10:30)", "필수", inWindow, 0, minuteToStr(minuteOfDay));
+  l("L4", `진입 시간대(${hm(S.observeEndMin)}~${hm(S.entryEndMin)})`, "필수", inWindow, 0, minuteToStr(minuteOfDay));
   l("L5", "외인 수급(①수준+②감속 필수)", "필수", l5.pass, 0, l5.detail);
 
   const cum3 = cumReturnPct(ctx.hynixDaily, 3, true);
@@ -196,6 +196,9 @@ function fmtQty(v: number): string {
 function pctOrDash(v: number | null): string {
   return v === null ? "-" : `${(v * 100).toFixed(0)}%`;
 }
+function hm(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
 function minuteToStr(m: number): string {
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")} KST`;
+  return `${hm(m)} KST`;
 }

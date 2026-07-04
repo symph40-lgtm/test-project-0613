@@ -120,7 +120,7 @@ export default function SignalClient({ backtest }: { backtest: BacktestResult[] 
               {state?.sms?.sent ? `문자 알림 ${state.sms.sent}건 발송됨`
                 : state?.sms?.skipped === "SMS 채널 없음"
                   ? <>문자 알림을 받으려면 <a href="/positions/risk-line" className="underline">위험선/알림 설정</a>에서 SMS 채널을 인증하세요</>
-                  : "문자 알림: 판정 구간(09:30~10:30)에 행동 가능한 판정 확정 시 1일 1회 발송"}
+                  : "문자 알림: 판정 구간(09:30~13:30)에 행동 가능한 판정 확정 시 1일 1회 발송"}
             </p>
           </section>
 

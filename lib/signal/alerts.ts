@@ -1,4 +1,5 @@
-// M7 신호 SMS 알림 — 판정 구간(09:30~10:30)에 행동 가능한 판정이 확정되면 문자 발송.
+// M7 신호 SMS 알림 — 판정 구간(session.observeEndMin~entryEndMin, 현재 09:30~13:30)에
+// 행동 가능한 판정이 확정되면 문자 발송.
 // 수신자: alert_channels에서 sms 채널 인증(verified) + 동의(consent_given)한 사용자 전체.
 // 중복 방지: alerts 테이블(trigger_key='signal')에 오늘 같은 alertKey가 있으면 재발송 안 함.
 // 알림은 판단 보조일 뿐 매매 지시가 아니다 — 문구에 항상 "검토" 수준으로 표현.

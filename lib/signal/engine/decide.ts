@@ -96,7 +96,7 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
       headline = `추세일 ${trend.dir === "UP" ? "상방" : "하방"} 확정 (T-스코어 ${trend.score.toFixed(1)}/${trend.maxAvailable} · DC1 ${trend.dc1 !== null ? (trend.dc1 * 100).toFixed(0) + "%" : "-"})`;
       action = `${target} 진입 검토 — ${risk.sizeGuide}. 스탑 -${risk.stopFixedPct}%.`;
     } else {
-      headline = `추세일 ${trend.dir === "UP" ? "상방" : "하방"} 진행 중 — 신규 진입 시간 종료(10:30)`;
+      headline = `추세일 ${trend.dir === "UP" ? "상방" : "하방"} 진행 중 — 신규 진입 시간 종료(${hm(S.entryEndMin)})`;
       action = `보유분만 R2 트레일링 -${risk.trailPct}% 관리. 15:00 당일 청산.`;
     }
   } else if (divergence?.status === "이탈") {
@@ -200,4 +200,8 @@ function computeExt(ctx: PremarketContext, ticks: IntradayTick[]): ExtRecord {
 
 function fmt(v: number | null | undefined): string {
   return v == null ? "?" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+function hm(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }

@@ -8,7 +8,7 @@ export const SIGNAL_CONFIG = {
     premarketMin: 8 * 60 + 30,   // 08:30 장전 브리핑
     openMin: 9 * 60,             // 09:00 개장
     observeEndMin: 9 * 60 + 30,  // 09:30 관찰 종료 (진입 금지 구간 끝)
-    entryEndMin: 10 * 60 + 30,   // 10:30 신규 진입 마감 (L4)
+    entryEndMin: 13 * 60 + 30,   // 13:30 신규 진입 마감 (L4 — 원 스펙 10:30에서 사용자 요청으로 연장)
     closeDecideMin: 14 * 60 + 50,// 14:50 C1 마감 증폭 판정
     exitMin: 15 * 60,            // 15:00 당일 청산 (R3)
     endMin: 15 * 60 + 30,        // 15:30 장 마감
