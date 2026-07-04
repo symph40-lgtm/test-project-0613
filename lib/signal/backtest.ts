@@ -229,6 +229,29 @@ export function runBacktest(): BacktestResult[] {
       `T=${j.trend?.score.toFixed(1)}/${j.trend?.maxAvailable} · DC1=${j.trend?.dc1 !== null && j.trend?.dc1 !== undefined ? (j.trend.dc1 * 100).toFixed(0) + "%" : "-"}`);
   }
 
+  // ── 장중 형성 추세 — 초반 왕복(T6 위반) 후 11:00부터 일방향 상승 (지연 추세 감지)
+  {
+    const daily = dailyWithMoves(2_500_000, [0.5, -0.3]);
+    const ctx = makeCtx({ hynixDaily: daily });
+    const ticks = makeTicks(
+      [
+        { from: 540, to: 552, startPct: 0.1, endPct: 0.7 },   // 초반 왕복 (전환 4회)
+        { from: 552, to: 564, startPct: 0.7, endPct: -0.3 },
+        { from: 564, to: 576, startPct: -0.3, endPct: 0.5 },
+        { from: 576, to: 588, startPct: 0.5, endPct: -0.2 },
+        { from: 588, to: 660, startPct: -0.2, endPct: 0.1 },  // 10시~11시 무방향 표류
+        { from: 660, to: 750, startPct: 0.1, endPct: 3.2 },   // 11:00~12:30 일방향 상승 (재형성)
+      ],
+      { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.7, twiiChg: 0.5, hynixFrgn: 120_000 },
+    );
+    const j = decide(ctx, ticks, 750, new Date().toISOString());
+    const okType = j.dayType === "추세일_상방";
+    check("장중형성", "초반 왕복(전환 4회) → 11:00부터 일방향 상승 (12:30 판정)", "횡보일 해제 + 추세일_상방 (지연 추세)",
+      j, okType && (j.trend?.midday?.active ?? false),
+      `dayType=${j.dayType}, 재형성=${j.trend?.midday?.active}, grade=${j.trend?.grade}`,
+      `창 DC1=${j.trend?.midday?.dc1 !== null && j.trend?.midday?.dc1 !== undefined ? (j.trend.midday.dc1 * 100).toFixed(0) + "%" : "-"} · 이동 ${j.trend?.midday?.movePct?.toFixed(1)}%`);
+  }
+
   // ── 횡보일 (특이도 검증 — 오탐 1회가 정탐 2회 이익을 상쇄, 마스터 6장)
   {
     const daily = dailyWithMoves(2_500_000, [0.3, -0.4]);

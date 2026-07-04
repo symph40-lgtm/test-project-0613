@@ -164,6 +164,15 @@ export default function SignalClient({ backtest }: { backtest: BacktestResult[] 
                       DC1 {j.trend.dc1 !== null ? `${(j.trend.dc1 * 100).toFixed(0)}%` : "-"} · DC2 {j.trend.dc2 !== null ? j.trend.dc2.toFixed(2) : "-"} · 전환 {j.trend.flips}회
                     </span>
                   </div>
+                  {j.trend.midday ? (
+                    <p className={`mt-1.5 text-[12px] ${j.trend.midday.active ? "font-medium text-amber-700" : "text-ink-48"}`}>
+                      최근 90분 창: {j.trend.midday.dir === "UP" ? "상방" : j.trend.midday.dir === "DOWN" ? "하방" : "무방향"}
+                      {" · "}DC1 {j.trend.midday.dc1 !== null ? `${(j.trend.midday.dc1 * 100).toFixed(0)}%` : "-"}
+                      {" · "}이동 {j.trend.midday.movePct !== null ? `${j.trend.midday.movePct > 0 ? "+" : ""}${j.trend.midday.movePct.toFixed(1)}%` : "-"}
+                      {" · "}전환 {j.trend.midday.flips ?? "-"}회
+                      {j.trend.midday.active ? " — 장중 추세 형성" : ""}
+                    </p>
+                  ) : null}
                   {/* 정규화 게이지 */}
                   <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-pearl">
                     <div

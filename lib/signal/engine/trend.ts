@@ -52,7 +52,7 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
     sig("T5", "프로그램 매매", false, false, null, "KIS 미연동 — 데이터 없음");
     sig("T8", "거래대금 확장", false, false, null, "실시간 거래대금 소스 없음");
     return {
-      signals, score: 0, maxAvailable: 0, normalized: 0, grade: "비추세", dir: null, flips: 0,
+      signals, score: 0, maxAvailable: 0, normalized: 0, grade: "비추세", dir: null, flips: 0, midday: null,
       dc1: null, dc2: null, openType: null, openCrossCount: null, openMaxAdverse: null,
       extBonus: 0, extNotes: [`시계열 ${pts.length}틱(${source}) — 판정 불가`],
     };
@@ -63,22 +63,29 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
   const orH = orPts.length >= 3 ? Math.max(...orPts.map((p) => p.px)) : null;
   const orL = orPts.length >= 3 ? Math.min(...orPts.map((p) => p.px)) : null;
 
-  // T1 — 시초 레인지 이탈 후 재진입 없음
+  // T1 — 시초 레인지 이탈 유지. "첫 이탈" 고정이 아니라 "현재 레인지 밖 연속 유지 시간"으로 판정 —
+  // 초반 왕복 후 장중에 이탈하는 지연 추세도 포착한다.
   if (orH === null || orL === null || nowMin < S.observeEndMin) {
     sig("T1", "시초 레인지 이탈(ORB)", false, false, null, "09:30 이후 + OR 데이터 필요");
   } else {
     const after = pts.filter((p) => p.min >= S.openMin + T.orbMin);
-    let breakDir: "UP" | "DOWN" | null = null;
-    let reentered = false;
+    let outDir: "UP" | "DOWN" | null = null; // 현재 레인지 밖 방향
+    let outSince = 0;                         // 이탈 시작 분
+    let everBroke = false;
     for (const p of after) {
-      if (breakDir === null) {
-        if (p.px > orH) breakDir = "UP";
-        else if (p.px < orL) breakDir = "DOWN";
-      } else if (p.px <= orH && p.px >= orL) reentered = true;
+      const side: "UP" | "DOWN" | null = p.px > orH ? "UP" : p.px < orL ? "DOWN" : null;
+      if (side === null) outDir = null; // 레인지 재진입 — 유지 시간 리셋
+      else {
+        if (outDir !== side) { outDir = side; outSince = p.min; }
+        everBroke = true;
+      }
     }
-    const pass = breakDir !== null && !reentered;
-    sig("T1", "시초 레인지 이탈(ORB)", true, pass, pass ? breakDir : null,
-      breakDir === null ? "레인지 내부 유지" : `${breakDir === "UP" ? "상단" : "하단"} 이탈${reentered ? " 후 재진입(무효)" : " 유지"}`);
+    const heldMin = outDir !== null ? nowMin - outSince : 0;
+    const pass = outDir !== null && heldMin >= T.t1HoldMin;
+    sig("T1", "시초 레인지 이탈(ORB)", true, pass, pass ? outDir : null,
+      outDir === null
+        ? everBroke ? "이탈 후 재진입 — 유지 리셋" : "레인지 내부 유지"
+        : `${outDir === "UP" ? "상단" : "하단"} 이탈 ${heldMin}분 유지 (기준 ${T.t1HoldMin}분)`);
   }
 
   // T2 — TWAP 편측성 (VWAP 근사 — 거래량 무료 소스 부재)
@@ -165,6 +172,42 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
     dc2 = pathSum > 0 ? Math.abs(last - dayOpen) / pathSum : null;
   }
 
+  // ── 장중 재형성(지연) 추세 — 최근 롤링 창 기준 재평가. 추세는 장 초반에만 형성되는 게 아니라
+  // 초반 왕복 후 중반부터 형성될 수 있다 (사용자 관찰). 창 내 DC1·순이동·전환 횟수로 판정.
+  const MD = T.midday;
+  let midday: { active: boolean; dir: "UP" | "DOWN" | null; dc1: number | null; movePct: number | null; flips: number | null } | null = null;
+  {
+    const winStart = nowMin - MD.windowMin;
+    const winPts = pts.filter((p) => p.min >= winStart);
+    const winBars10 = bars10.filter((b) => b.startMin >= winStart);
+    if (winPts.length >= 10 && winBars10.length >= MD.minBars) {
+      const first = winPts[0].px, lastW = winPts[winPts.length - 1].px;
+      const movePct = ((lastW - first) / first) * 100;
+      const winDir: "UP" | "DOWN" | null = movePct > 0.05 ? "UP" : movePct < -0.05 ? "DOWN" : null;
+      let winDc1: number | null = null;
+      if (winDir !== null) {
+        const sgn = winDir === "UP" ? 1 : -1;
+        winDc1 = winBars10.filter((b) => Math.sign(b.close - b.open) === sgn).length / winBars10.length;
+      }
+      // 창 내 방향 전환 (5분봉, T6과 동일 로직)
+      const winBars5 = resample(winPts, 5);
+      let winFlips = 0, prevSign = 0;
+      for (let i = 1; i < winBars5.length; i++) {
+        const mv = winBars5[i].close - winBars5[i - 1].close;
+        if (Math.abs(mv) < eps) continue;
+        const sg = Math.sign(mv);
+        if (prevSign !== 0 && sg !== prevSign) winFlips++;
+        prevSign = sg;
+      }
+      const active =
+        winDir !== null &&
+        winDc1 !== null && winDc1 >= MD.dc1Theta &&
+        Math.abs(movePct) >= MD.minMovePct &&
+        winFlips <= T.t6MaxFlips;
+      midday = { active, dir: winDir, dc1: winDc1, movePct, flips: winFlips };
+    }
+  }
+
   // ── O1 시가 유형 (확장기획서 2장 — 기록 전용, enabled 시 가점)
   const o1 = computeOpenType(pts);
 
@@ -191,24 +234,34 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
 
   const normalized = maxAvailable > 0 ? score / maxAvailable : 0;
   // 방향: 당일 진행 방향(시가 대비)이 형성됐으면 그것을 우선 — 반전일(7/3형)에서 초반 신호(T7)가
-  // 낡은 방향으로 투표하는 문제 방지. 미형성 시에만 신호 가중 투표.
+  // 낡은 방향으로 투표하는 문제 방지. 미형성 시 장중 재형성 방향 → 신호 가중 투표 순.
   const voteDir: "UP" | "DOWN" | null =
     dirVotes.UP === dirVotes.DOWN ? null : dirVotes.UP > dirVotes.DOWN ? "UP" : "DOWN";
-  const dir: "UP" | "DOWN" | null = dayDir ?? voteDir;
+  const dir: "UP" | "DOWN" | null = dayDir ?? (midday?.active ? midday.dir : null) ?? voteDir;
 
-  // DC 이중 확인 (2.5.6 — DC1 ≥ θ AND DC2 ≥ 기준일 때만 추세일 확정 보조)
-  const dcConfirm = dc1 !== null && dc2 !== null && dc1 >= SIGNAL_CONFIG.dc.dc1Theta && dc2 >= SIGNAL_CONFIG.dc.dc2Min;
+  // 장중 재형성 정합: 창 내 추세가 성립하고 방향이 현재 판정 방향과 일치
+  const middayAligned = midday !== null && midday.active && (dir === null || midday.dir === dir);
+
+  // DC 이중 확인 (2.5.6) — 전일 기준 충족 또는 장중 재형성 창 충족
+  const dcConfirm =
+    (dc1 !== null && dc2 !== null && dc1 >= SIGNAL_CONFIG.dc.dc1Theta && dc2 >= SIGNAL_CONFIG.dc.dc2Min) ||
+    middayAligned;
 
   let grade: TrendResult["grade"];
-  if (t6Violated) grade = "횡보일선언";
+  if (t6Violated && !middayAligned) grade = "횡보일선언";
   else if (normalized >= T.confirmRatio && dcConfirm) grade = "추세일";
-  else if (normalized >= T.weakRatio) grade = "약한추세";
+  else if (normalized >= T.weakRatio || middayAligned) grade = "약한추세";
   else grade = "비추세";
 
+  if (t6Violated && middayAligned) {
+    extNotes.push(
+      `초반 횡보(전환 ${flips}회) 후 장중 재형성 — 최근 ${MD.windowMin}분 DC1 ${midday!.dc1 !== null ? (midday!.dc1 * 100).toFixed(0) + "%" : "-"} · 이동 ${midday!.movePct !== null ? midday!.movePct.toFixed(1) + "%" : "-"}`,
+    );
+  }
   if (source === "하닉") extNotes.push("선물 시세 부족 — 하닉 시계열로 판정(참고 정확도)");
 
   return {
-    signals, score, maxAvailable, normalized, grade, dir, flips,
+    signals, score, maxAvailable, normalized, grade, dir, flips, midday,
     dc1, dc2,
     openType: o1.openType, openCrossCount: o1.crossCount, openMaxAdverse: o1.maxAdverse,
     extBonus, extNotes,

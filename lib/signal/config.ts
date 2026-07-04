@@ -39,6 +39,14 @@ export const SIGNAL_CONFIG = {
     t3PullbackMax: 0.4,    // 되돌림 40% 미만
     t6MaxFlips: 2,         // 방향 전환 ≤ 2회 (3회 이상 = 횡보일)
     orbMin: 30,            // Opening Range 구간 (분)
+    t1HoldMin: 30,         // T1: 레인지 밖 연속 유지 시간 (장중 이탈도 포착)
+    // 장중 재형성(지연) 추세 — 초반 횡보 후 중반부터 방향이 형성되는 날 감지 (사용자 요청)
+    midday: {
+      windowMin: 90,       // 롤링 재평가 창
+      dc1Theta: 0.65,      // 창 내 DC1 기준 (짧은 창이라 전일 기준보다 높게)
+      minMovePct: 1.0,     // 창 내 순이동 최소 % — 미세 드리프트 오탐 방지
+      minBars: 6,          // 창 내 10분봉 최소 개수 (데이터 충분성)
+    },
   },
 
   // ── DC (방향 지속률) — θ는 최적화 대상 파라미터

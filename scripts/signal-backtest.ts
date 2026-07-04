@@ -20,6 +20,7 @@ const smsExpect: Record<string, boolean> = {
   "7/3": true,           // V반등 강한신호 → 레버리지 검토 문자
   "6/17": true,          // 추세일 상방 → 레버리지 검토 문자
   "횡보일": true,        // 매매 금지 문자
+  "장중형성": true,      // 지연 추세 → 레버리지 검토 문자
   "6/9 (a) 시초": false, // X1·XS1 차단 + 반전 대기 — 문자 없어야 함
 };
 console.log("\n── SMS 발송 판정 검증");

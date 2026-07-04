@@ -82,8 +82,8 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
   } else if (trend.grade === "횡보일선언") {
     // 분기 3 — T6 위반
     dayType = "횡보일";
-    headline = `횡보일 선언 — 방향 전환 ${trend.flips}회 (기준 ${SIGNAL_CONFIG.trend.t6MaxFlips}회 초과)`;
-    action = "당일 추세 매매 금지. '안 하는 것'이 시스템의 절반 (2.5.7).";
+    headline = `횡보일 — 방향 전환 ${trend.flips}회 (기준 ${SIGNAL_CONFIG.trend.t6MaxFlips}회 초과)`;
+    action = `당일 추세 매매 금지. '안 하는 것'이 시스템의 절반 (2.5.7). 단, 최근 ${SIGNAL_CONFIG.trend.midday.windowMin}분 창에서 방향이 재형성되면 자동으로 재평가됩니다.`;
   } else if (trend.grade === "추세일" && divergence?.status !== "이탈") {
     // 분기 2 — 추세일 확정
     dayType = trend.dir === "UP" ? "추세일_상방" : "추세일_하방";

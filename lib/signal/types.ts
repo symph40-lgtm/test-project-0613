@@ -73,9 +73,11 @@ export type TrendResult = {
   score: number;           // 충족 가중치 합
   maxAvailable: number;    // 가용 신호 가중치 합
   normalized: number;      // score / maxAvailable (0~1)
-  grade: "추세일" | "약한추세" | "비추세" | "횡보일선언"; // T6 위반 = 횡보일선언
+  grade: "추세일" | "약한추세" | "비추세" | "횡보일선언"; // T6 위반 = 횡보일선언 (장중 재형성 시 해제)
   dir: "UP" | "DOWN" | null;
-  flips: number;           // T6 방향 전환 횟수
+  flips: number;           // T6 방향 전환 횟수 (09:00~10:00)
+  // 장중 재형성(지연) 추세 — 최근 롤링 창(기본 90분) 기준. 초반 횡보 후 중반 형성 추세 감지.
+  midday: { active: boolean; dir: "UP" | "DOWN" | null; dc1: number | null; movePct: number | null; flips: number | null } | null;
   dc1: number | null;      // 실시간 DC1 (10분봉)
   dc2: number | null;
   openType: "drive" | "test_drive" | "auction" | "undetermined" | null; // O1 (기록)
