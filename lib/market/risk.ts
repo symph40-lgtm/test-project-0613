@@ -1,4 +1,5 @@
 import type { MarketData, RiskScores } from "./types";
+import { getMarketSession } from "./session";
 
 // 가중치 정의 (합계 = 1.0)
 const WEIGHTS = {
@@ -65,6 +66,33 @@ export function calculateRiskScores(market: MarketData): RiskScores {
   }
 
   return { rate, forex, oil, semiconductor, supply, bond };
+}
+
+// 한국장 마감 시 정규장 코스피 종가(정지값) 대신 라이브 오버나잇 신호로 코스피 방향을 대체한다.
+//  우선순위: 코스피200 야간선물(라이브) → 나스닥 선물(오버나잇 선행) → 정규장 종가.
+export function effectiveKospiChange(
+  market: MarketData,
+  kospiFut: { changePercent: number | null; stale: boolean } | null,
+): { chg: number | null; proxy: string | null; krOpen: boolean } {
+  const k = getMarketSession().key;
+  const krOpen = k === "regular" || k === "closing";
+  if (krOpen) return { chg: market.kospi.changePercent, proxy: null, krOpen };
+  if (kospiFut && !kospiFut.stale && kospiFut.changePercent != null)
+    return { chg: kospiFut.changePercent, proxy: "코스피200 야간선물", krOpen };
+  if (!market.nasdaq.stale && market.nasdaq.changePercent != null)
+    return { chg: market.nasdaq.changePercent, proxy: "나스닥 선물(오버나잇 선행)", krOpen };
+  return { chg: market.kospi.changePercent, proxy: "정규장 종가", krOpen };
+}
+
+// 현재 시점 라이브 리스크 — 한국장 마감 시 코스피를 오버나잇 신호로 대체해 점수·종합을 재계산.
+export function liveRiskBundle(
+  market: MarketData,
+  kospiFut: { changePercent: number | null; stale: boolean } | null,
+): { scores: RiskScores; composite: number; krOpen: boolean; proxy: string | null } {
+  const eff = effectiveKospiChange(market, kospiFut);
+  const m: MarketData = { ...market, kospi: { ...market.kospi, changePercent: eff.chg } };
+  const scores = calculateRiskScores(m);
+  return { scores, composite: calculateCompositeScore(scores), krOpen: eff.krOpen, proxy: eff.proxy };
 }
 
 export function calculateCompositeScore(scores: RiskScores): number {

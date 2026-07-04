@@ -10,12 +10,14 @@ import type { NewsItem } from "@/lib/news/fetch";
 import type { EarningsEvent } from "@/lib/market/earnings";
 import { getIntradayConsult, type IntradayConsult, getMarketExplain, type MarketExplain, summarizeNews, type NewsSummary } from "./actions";
 import { HoldingCalls } from "../../_components/HoldingCalls";
-import type { Recommendation } from "@/lib/market/recommend";
+import type { HoldingScore } from "@/lib/market/holdingScore";
 import type { OffHoursQuote, MainIndicator } from "@/lib/market/fetch";
 import type { Kospi200Futures } from "@/lib/market/naver-flow";
 import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
 import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
 import { stageAction } from "@/lib/market/risk";
+import { UrgentBanner } from "../../_components/UrgentBanner";
+import { isBigtechAiNews, type UrgentAlert } from "@/lib/market/urgentAlert";
 
 type Sess = string | null;
 type Ind = { price: number | null; changePercent: number | null; session?: Sess; stale?: boolean; sourceNote?: string | null };
@@ -216,11 +218,11 @@ function BondSignalCard({ sig }: { sig: BondSignal }) {
 }
 
 export default function IntradayClient({
-  market, offHours, kospiFut, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news,
+  market, offHours, kospiFut, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news, urgentAlert,
 }: {
   market: MarketBlock; offHours: OffHoursQuote[]; kospiFut: Kospi200Futures | null; bondSignal: BondSignal | null; mainIndicators: MainIndicator[]; composite: number; stage: string; posture: Posture;
   session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
-  earnings: EarningsEvent[]; holdings: Holding[]; recs: Recommendation[]; news: NewsItem[];
+  earnings: EarningsEvent[]; holdings: Holding[]; recs: HoldingScore[]; news: NewsItem[]; urgentAlert: UrgentAlert | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -292,6 +294,9 @@ export default function IntradayClient({
 
   return (
     <PageShell title="장중 시황 요약" width="default">
+      {/* AI 빅테크發 반도체 급등락 긴급 배너 */}
+      <UrgentBanner alert={urgentAlert} className="mb-4" />
+
       {/* 헤더 + 새로고침 */}
       <Card>
         <div className="flex items-start justify-between gap-3">
@@ -491,9 +496,10 @@ export default function IntradayClient({
             {kospiFut && kospiFut.price !== null && (
               <div className="flex items-baseline justify-between border-b border-divider pb-2">
                 <span className="flex items-center gap-1.5 text-[14px] text-ink-48">
-                  코스피200 선물{kospiFut.stale ? " (정규 마감)" : " (FKS200)"}
+                  코스피200 {kospiFut.source === "KIS" ? "야간선물" : "선물"}{kospiFut.source === "KIS" ? "" : kospiFut.stale ? " (정규 마감)" : " (FKS200)"}
                   <span className="rounded bg-ink/10 px-1 py-0.5 text-[10px] text-ink-80">선물</span>
-                  {kospiFut.stale && <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">야간 미반영</span>}
+                  {kospiFut.source === "KIS" && <span className="rounded bg-guard/10 px-1 py-0.5 text-[10px] text-guard">KIS 실시간</span>}
+                  {kospiFut.source !== "KIS" && kospiFut.stale && <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700">야간 미반영</span>}
                 </span>
                 <span className="flex items-baseline gap-2">
                   <SessionTag session={kospiFut.session} />
@@ -688,19 +694,25 @@ export default function IntradayClient({
           })()}
 
           <ul className="space-y-3">
-            {news.map((n, i) => (
-              <li key={i}>
-                <a href={n.link} target="_blank" rel="noopener noreferrer" className="group flex items-start gap-2">
-                  <ExternalLink size={14} className="mt-1 shrink-0 text-ink-48" />
-                  <span>
-                    <span className="text-[15px] leading-snug group-hover:text-guard group-hover:underline">{n.title}</span>
-                    <span className="mt-0.5 block text-[12px] text-ink-48">
-                      {n.source}{n.pubDate ? ` · ${new Date(n.pubDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}` : ""}
+            {news.map((n, i) => {
+              const urgent = isBigtechAiNews(n.title);
+              return (
+                <li key={i}>
+                  <a href={n.link} target="_blank" rel="noopener noreferrer" className="group flex items-start gap-2">
+                    <ExternalLink size={14} className="mt-1 shrink-0 text-ink-48" />
+                    <span>
+                      <span className="text-[15px] leading-snug group-hover:text-guard group-hover:underline">
+                        {urgent && <span className="mr-1 rounded bg-ink px-1 py-0.5 text-[10px] font-bold text-white align-middle">긴급</span>}
+                        {n.title}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] text-ink-48">
+                        {n.source}{n.pubDate ? ` · ${new Date(n.pubDate).toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}` : ""}
+                      </span>
                     </span>
-                  </span>
-                </a>
-              </li>
-            ))}
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         </Card>
       )}

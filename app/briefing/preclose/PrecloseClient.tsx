@@ -10,6 +10,7 @@ import { bookmarkNextBriefing, getEventInsight, getEarningsInsight, type EventIn
 import type { BriefingSnapshot, AiPrecloseOutput } from "@/lib/market/types";
 import type { EconEvent } from "@/lib/calendar/fred";
 import type { EarningsEvent, EarningsFundamentals } from "@/lib/market/earnings";
+import type { EarningsKeyPoint, IndicatorConsensus } from "@/lib/ai/earningsFocus";
 import type { StockFlow } from "@/lib/market/naver-flow";
 
 function flowText(v: number | null): { text: string; cls: string } {
@@ -158,7 +159,21 @@ function FundamentalsBlock({ f }: { f: EarningsFundamentals }) {
   );
 }
 
-function EarningsRow({ e, f }: { e: EarningsEvent; f?: EarningsFundamentals | null }) {
+function KeyPointBlock({ kp }: { kp: EarningsKeyPoint }) {
+  return (
+    <div className="mt-2 rounded-[10px] border border-guard/40 bg-guard/5 p-3">
+      <p className="text-[12px] font-semibold text-guard">★ 이번 실적 핵심 관전 포인트</p>
+      <p className="mt-1 text-[15px] font-semibold text-ink">{kp.metric}</p>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-[13px] text-ink-48">예상치:</span>
+        <span className="text-[14px] font-medium text-ink">{kp.estimate ?? "—(공개 컨센서스 미확인)"}</span>
+      </div>
+      {kp.why && <p className="mt-1 text-[12px] leading-snug text-ink-48">{kp.why}</p>}
+    </div>
+  );
+}
+
+function EarningsRow({ e, f, kp }: { e: EarningsEvent; f?: EarningsFundamentals | null; kp?: EarningsKeyPoint }) {
   const [text, setText] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -179,6 +194,7 @@ function EarningsRow({ e, f }: { e: EarningsEvent; f?: EarningsFundamentals | nu
         </span>
         <span className="shrink-0 text-[13px] tabular-nums text-ink-48">{e.dateKst} (한국시간)</span>
       </div>
+      {kp && <KeyPointBlock kp={kp} />}
       {f && <FundamentalsBlock f={f} />}
       <button onClick={load} disabled={pending} className="mt-1.5 text-[12px] font-medium text-guard disabled:opacity-50">
         {pending ? "분석 중…" : text ? "접기 ▲" : "AI 실적 전망·매매 시사점 보기 ▾"}
@@ -194,15 +210,15 @@ function EarningsRow({ e, f }: { e: EarningsEvent; f?: EarningsFundamentals | nu
 }
 
 function EarningsGroup({
-  title, earnings, fundamentals,
-}: { title: string; earnings: EarningsEvent[]; fundamentals: Record<string, EarningsFundamentals | null> }) {
+  title, earnings, fundamentals, keyPoints,
+}: { title: string; earnings: EarningsEvent[]; fundamentals: Record<string, EarningsFundamentals | null>; keyPoints: Record<string, EarningsKeyPoint> }) {
   if (earnings.length === 0) return null;
   return (
     <div className="mt-3">
       <p className="text-[13px] font-semibold text-ink-48">{title}</p>
       <ul className="mt-1 divide-y divide-divider">
         {earnings.map((e) => (
-          <EarningsRow key={e.symbol} e={e} f={fundamentals[e.symbol]} />
+          <EarningsRow key={e.symbol} e={e} f={fundamentals[e.symbol]} kp={keyPoints[e.symbol]} />
         ))}
       </ul>
     </div>
@@ -225,7 +241,11 @@ export default function PrecloseClient({
   fredConfigured,
   marketSummary,
   eventScenario,
+  eventConsensus = null,
   supplyFlows,
+  keyPoints = {},
+  liveRisk = null,
+  krOpen = true,
 }: {
   snapshot: BriefingSnapshot | null;
   preclose: AiPrecloseOutput | null;
@@ -235,20 +255,25 @@ export default function PrecloseClient({
   fredConfigured: boolean;
   marketSummary: string;
   eventScenario: EventScenario;
+  eventConsensus?: IndicatorConsensus | null;
   supplyFlows: StockFlow[];
+  keyPoints?: Record<string, EarningsKeyPoint>;
+  liveRisk?: number | null;
+  krOpen?: boolean;
 }) {
   const router = useRouter();
   const [booked, setBooked] = useState(false);
   const [isPending, startTransition] = useTransition();
   const ai = snapshot?.ai_output;
-  const riskScore = snapshot?.risk_score ?? 0;
+  // 현재 시점 라이브 리스크 우선(한국장 마감 시 오버나잇 신호 반영). 없으면 스냅샷 값.
+  const riskScore = liveRisk ?? snapshot?.risk_score ?? 0;
 
   return (
     <PageShell title="마감 전 판단" width="default">
       {/* 결론 */}
       <div className="rounded-[18px] bg-tile-1 p-6 text-white sm:p-8">
         <p className="text-[13px] text-body-muted">
-          기준 포지션 · 리스크 {riskScore}점
+          기준 포지션 · 리스크 {riskScore}점 {krOpen ? "· 실시간" : "· 현재(오버나잇 선물 기준)"}
         </p>
         <h2 className="mt-2 text-[28px] font-semibold leading-tight">
           {riskScore >= 65
@@ -290,7 +315,7 @@ export default function PrecloseClient({
           {/* ── 실적 발표 ── */}
           <p className="mt-5 text-[14px] font-semibold">🏢 기업 실적 발표 (반도체·AI)</p>
           {earnings.length > 0 ? (
-            <EarningsGroup title="예정" earnings={earnings} fundamentals={fundamentals} />
+            <EarningsGroup title="예정" earnings={earnings} fundamentals={fundamentals} keyPoints={keyPoints} />
           ) : (
             <p className="mt-1 text-[13px] text-ink-48">향후 일정 내 예정된 주요 실적이 없습니다.</p>
           )}
@@ -330,6 +355,25 @@ export default function PrecloseClient({
               ({eventScenario.date} · {eventScenario.timeKst} 한국시간)
             </span>
           </p>
+          {/* 시장 컨센서스·예측 종합 (뉴스 기반) */}
+          {eventConsensus && (eventConsensus.core || eventConsensus.headline || eventConsensus.forecast) && (
+            <div className="mt-2 rounded-[10px] border border-guard/40 bg-guard/5 p-3">
+              <p className="text-[12px] font-semibold text-guard">시장 컨센서스·예측 종합</p>
+              <div className="mt-1 space-y-0.5 text-[14px]">
+                {eventConsensus.core && (
+                  <p><span className="text-ink-48">근원(Core) 컨센서스: </span><b className="text-ink">{eventConsensus.core}</b></p>
+                )}
+                {eventConsensus.headline && (
+                  <p><span className="text-ink-48">전체 컨센서스: </span><span className="text-ink-80">{eventConsensus.headline}</span></p>
+                )}
+                {eventConsensus.forecast && (
+                  <p><span className="text-ink-48">예측 종합: </span><span className="text-ink-80">{eventConsensus.forecast}</span></p>
+                )}
+              </div>
+              {eventConsensus.note && <p className="mt-1 text-[12px] leading-snug text-ink-48">{eventConsensus.note}</p>}
+              <p className="mt-1 text-[11px] text-ink-48">뉴스 기반 추정치 — 발표 후 실제값으로 확정. 미확인 항목은 비워둡니다.</p>
+            </div>
+          )}
           <ul className="mt-2 divide-y divide-divider">
             {eventScenario.scenarios.map((s) => (
               <li key={s.result} className="flex gap-3 py-2.5">

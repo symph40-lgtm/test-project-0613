@@ -8,17 +8,21 @@ import { ButtonLink, Button } from "../_components/Button";
 import { Tile, ActionList, StateNote } from "../_components/primitives";
 import { stagePosture, stageAction } from "@/lib/market/risk";
 import { HoldingCalls } from "../_components/HoldingCalls";
-import type { Recommendation } from "@/lib/market/recommend";
+import { UrgentBanner } from "../_components/UrgentBanner";
+import type { HoldingScore } from "@/lib/market/holdingScore";
+import type { UrgentAlert } from "@/lib/market/urgentAlert";
 import type { BriefingSnapshot } from "@/lib/market/types";
 
 export default function BriefingClient({
   snapshot,
   hasBookmark,
   recs = [],
+  urgentAlert = null,
 }: {
   snapshot: BriefingSnapshot | null;
   hasBookmark: boolean;
-  recs?: Recommendation[];
+  recs?: HoldingScore[];
+  urgentAlert?: UrgentAlert | null;
 }) {
   const router = useRouter();
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -39,6 +43,11 @@ export default function BriefingClient({
       />
 
       <main className="flex-1">
+        {urgentAlert?.active && (
+          <div className="mx-auto w-full max-w-[820px] px-4 pt-5 sm:px-6">
+            <UrgentBanner alert={urgentAlert} />
+          </div>
+        )}
         {hasBookmark && !bannerDismissed && (
           <div className="flex items-center justify-between gap-3 bg-guard/10 px-5 py-3 text-[14px] text-ink-80">
             <span>

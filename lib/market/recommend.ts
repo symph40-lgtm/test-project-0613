@@ -38,12 +38,13 @@ export function recommendForHolding(
   // 1) 장세(종합 리스크) — 낮을수록 상승 우호. (composite는 당일 급락 오버레이가 반영된 값)
   //    보수적으로: 매수 가점은 리스크가 확실히 낮을 때만, 중립 구간은 넓게.
   const c = ctx.composite;
-  if (c <= 8) { score += 2; reasons.push(`상승장 강세(리스크 ${c})`); }
-  else if (c <= 17) { score += 1; reasons.push(`상승 우호(리스크 ${c})`); }
-  else if (c <= 30) { reasons.push(`중립(리스크 ${c})`); }
-  else if (c <= 44) { score -= 1; reasons.push(`변동장 경계(리스크 ${c})`); }
-  else if (c <= 60) { score -= 2; reasons.push(`하락 방어(리스크 ${c})`); }
-  else { score -= 3; reasons.push(`하락 심화(리스크 ${c})`); }
+  // 리스크는 0(안전·상승우호)~100(위험·하락) 스케일. '리스크 10'은 100점 만점 중 10 = 매우 낮음.
+  if (c <= 8) { score += 2; reasons.push(`상승장 강세(리스크 ${c}/100·매우낮음)`); }
+  else if (c <= 17) { score += 1; reasons.push(`상승 우호(리스크 ${c}/100·낮음)`); }
+  else if (c <= 30) { reasons.push(`중립(리스크 ${c}/100·보통)`); }
+  else if (c <= 44) { score -= 1; reasons.push(`변동장 경계(리스크 ${c}/100·다소높음)`); }
+  else if (c <= 60) { score -= 2; reasons.push(`하락 방어(리스크 ${c}/100·높음)`); }
+  else { score -= 3; reasons.push(`하락 심화(리스크 ${c}/100·매우높음)`); }
 
   // 2) 반도체 섹터 ↔ SOX
   const isSemi = (h.sector ?? "").includes("반도체");
@@ -66,8 +67,12 @@ export function recommendForHolding(
     else if (mkt <= -1) { score -= 1; reasons.push(`시장 약세 ${mkt.toFixed(1)}%`); }
   }
 
-  // 5) 레버리지 — 하락 신호일 때 변동성 증폭 가중
-  if (h.is_leverage && score < 0) { score -= 1; reasons.push("레버리지(변동성 증폭)"); }
+  // 5) 레버리지 — 변동성이 크므로 항상 한 단계 보수적(상승장에서도 일반주보다 낮게),
+  //    하락 국면이면 더 강하게 가중. → 레버리지 ETF가 우량주와 같은 등급으로 뜨지 않게 한다.
+  if (h.is_leverage) {
+    if (score < 0) { score -= 2; reasons.push("레버리지(하락 국면 변동성 가중)"); }
+    else { score -= 1; reasons.push("레버리지(변동성↑·보수적)"); }
+  }
 
   // 6) 위험도
   if (h.risk_level === "취약") { score -= 1; reasons.push("위험도 취약"); }

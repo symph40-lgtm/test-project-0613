@@ -3,30 +3,55 @@ import { createClient } from "@/lib/supabase/server";
 import { generatePreclose } from "@/lib/ai/briefing";
 import { fetchMonthlyUsEvents, hasFredKey, type EconEvent } from "@/lib/calendar/fred";
 import { fetchSemiAiEarnings, fetchEarningsFundamentals, type EarningsFundamentals } from "@/lib/market/earnings";
-import { fetchHoldingsFlow, toKrCode, type StockFlow } from "@/lib/market/naver-flow";
+import { fetchEarningsKeyPoints, fetchIndicatorConsensus, type EarningsKeyPoint, type IndicatorConsensus } from "@/lib/ai/earningsFocus";
+import { fetchHoldingsFlow, toKrCode, type StockFlow, fetchKospi200Futures } from "@/lib/market/naver-flow";
+import { fetchMarketData } from "@/lib/market/fetch";
+import { calculateRiskScores, calculateCompositeScore } from "@/lib/market/risk";
+import { getMarketSession } from "@/lib/market/session";
 import PrecloseClient from "./PrecloseClient";
 import type { AiPrecloseOutput, MarketData, RiskScores } from "@/lib/market/types";
 
 export const dynamic = "force-dynamic";
 
-// 시세 기반 오늘 장 요약 (AI 없이 결정적 생성)
-function buildMarketSummary(m: MarketData | null): string {
+const fmtPct = (v: number | null) => (v === null ? "N/A" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
+
+// 한국장 마감 시, 정규장 종가에 멈춘 코스피 대신 '현재 라이브 오버나잇 신호'로 방향을 대체한다.
+//  우선순위: 코스피200 야간선물(라이브) → 나스닥 선물(오버나잇 선행) → (없으면) 종가.
+type Effective = { kospiEff: number | null; proxyLabel: string | null; krOpen: boolean };
+function effectiveKospi(m: MarketData, kospiFut: Awaited<ReturnType<typeof fetchKospi200Futures>>): Effective {
+  const krOpen = getMarketSession().key === "regular" || getMarketSession().key === "closing";
+  if (krOpen) return { kospiEff: m.kospi.changePercent, proxyLabel: null, krOpen };
+  if (kospiFut && !kospiFut.stale && kospiFut.changePercent != null)
+    return { kospiEff: kospiFut.changePercent, proxyLabel: "코스피200 야간선물", krOpen };
+  if (!m.nasdaq.stale && m.nasdaq.changePercent != null)
+    return { kospiEff: m.nasdaq.changePercent, proxyLabel: "나스닥 선물(오버나잇 선행)", krOpen };
+  return { kospiEff: m.kospi.changePercent, proxyLabel: "정규장 종가", krOpen };
+}
+
+// 시세 기반 오늘 장 요약 — 세션 인지(한국장 마감 시 코스피는 종가로 표기, 방향은 라이브 신호 기준)
+function buildMarketSummary(m: MarketData | null, eff: Effective): string {
   if (!m) return "시장 데이터를 불러오지 못했습니다.";
-  const parts: string[] = [];
-  const push = (label: string, v: number | null) => {
-    if (v !== null) parts.push(`${label} ${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
-  };
-  push("나스닥", m.nasdaq.changePercent);
-  push("반도체(SOX)", m.sox.changePercent);
-  push("코스피", m.kospi.changePercent);
-  const risk = [m.nasdaq.changePercent, m.sox.changePercent, m.kospi.changePercent].filter(
+  const parts: string[] = [`나스닥 ${fmtPct(m.nasdaq.changePercent)}`, `반도체(SOX) ${fmtPct(m.sox.changePercent)}`];
+  // 톤은 라이브 신호로 — 한국장 마감 시 정규장 코스피 종가는 톤 계산에서 제외
+  const toneVals: number[] = [m.nasdaq.changePercent, m.sox.changePercent].filter(
     (v): v is number => v !== null,
   );
-  const avg = risk.length ? risk.reduce((a, b) => a + b, 0) / risk.length : 0;
+  if (eff.krOpen) {
+    parts.push(`코스피 ${fmtPct(m.kospi.changePercent)}`);
+    if (m.kospi.changePercent !== null) toneVals.push(m.kospi.changePercent);
+  } else {
+    parts.push(`코스피 ${fmtPct(m.kospi.changePercent)}(15:30 종가)`);
+  }
+  const avg = toneVals.length ? toneVals.reduce((a, b) => a + b, 0) / toneVals.length : 0;
   const tone = avg > 0.5 ? "위험자산 강세 흐름" : avg < -0.5 ? "위험자산 약세 흐름" : "혼조 흐름";
   const rate = m.treasury10y.price;
   const ratePart = rate !== null ? ` · 미국채 10Y ${rate.toFixed(2)}%` : "";
-  return `${parts.join(", ")}${ratePart}. ${tone}입니다.`;
+  const overnight =
+    !eff.krOpen && eff.proxyLabel && eff.proxyLabel !== "정규장 종가"
+      ? ` · 오버나잇 코스피 선행: ${eff.proxyLabel} ${fmtPct(eff.kospiEff)}`
+      : "";
+  const note = eff.krOpen ? "" : " (코스피는 정규장 종가 — 현재 방향은 미국장·선물 기준)";
+  return `${parts.join(", ")}${ratePart}${overnight}. ${tone}입니다.${note}`;
 }
 
 // 지표 종류별 상회/부합/하회 영향 템플릿
@@ -83,11 +108,21 @@ function buildEventScenario(events: EconEvent[]) {
 }
 
 export default async function PreClosePage() {
-  const [snapshot, econEvents, earnings] = await Promise.all([
+  const [snapshot, econEvents, earnings, liveMarket, liveKospiFut] = await Promise.all([
     getBriefing(),
     fetchMonthlyUsEvents(),
     fetchSemiAiEarnings(35),
+    fetchMarketData(),
+    fetchKospi200Futures(),
   ]);
+
+  // 현재 시점 라이브 리스크 — 한국장 마감 시 정규장 코스피 종가 대신 오버나잇 신호로 코스피를 대체해 재계산.
+  const eff = effectiveKospi(liveMarket, liveKospiFut);
+  const marketForRisk: MarketData = {
+    ...liveMarket,
+    kospi: { ...liveMarket.kospi, changePercent: eff.kospiEff },
+  };
+  const liveRisk = calculateCompositeScore(calculateRiskScores(marketForRisk));
 
   // 예정 실적 기업의 펀더멘털·컨센서스·거버넌스 (발표 전 매수/매도 판단용)
   const fundamentals: Record<string, EarningsFundamentals | null> = {};
@@ -96,6 +131,13 @@ export default async function PreClosePage() {
       fundamentals[e.symbol] = await fetchEarningsFundamentals(e.symbol);
     }),
   );
+
+  // 기업별 '핵심 관전 포인트' — 가까운 실적부터 뉴스+컨센서스로 가장 중요한 지표·예상치 추출
+  const keyPoints: Record<string, EarningsKeyPoint> = await fetchEarningsKeyPoints(
+    earnings.map((e) => ({ symbol: e.symbol, name: e.name, dateKst: e.dateKst })),
+    fundamentals,
+    5,
+  ).catch(() => ({}));
 
   let preclose: AiPrecloseOutput | null = null;
   let supplyFlows: StockFlow[] = [];
@@ -137,8 +179,12 @@ export default async function PreClosePage() {
     }
   }
 
-  const marketSummary = buildMarketSummary((snapshot?.market_data as MarketData) ?? null);
+  const marketSummary = buildMarketSummary(liveMarket, eff);
   const eventScenario = buildEventScenario(econEvents);
+  // 가장 임박한 지표의 시장 컨센서스·예측 종합(뉴스 기반) — 예: 근원 PCE 예상치
+  const eventConsensus: IndicatorConsensus | null = eventScenario
+    ? await fetchIndicatorConsensus(eventScenario.eventName, eventScenario.date).catch(() => null)
+    : null;
 
   return (
     <PrecloseClient
@@ -150,7 +196,11 @@ export default async function PreClosePage() {
       fredConfigured={hasFredKey()}
       marketSummary={marketSummary}
       eventScenario={eventScenario}
+      eventConsensus={eventConsensus}
       supplyFlows={supplyFlows}
+      keyPoints={keyPoints}
+      liveRisk={liveRisk}
+      krOpen={eff.krOpen}
     />
   );
 }

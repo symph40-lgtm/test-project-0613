@@ -68,22 +68,29 @@ export default function EvidenceClient({
   snapshot,
   supplyFlows = [],
   political = null,
+  liveScores = null,
+  liveComposite = null,
+  liveProxy = null,
 }: {
   snapshot: BriefingSnapshot | null;
   supplyFlows?: StockFlow[];
   political?: PoliticalRisk | null;
+  liveScores?: RiskScores | null;
+  liveComposite?: number | null;
+  liveProxy?: string | null;
 }) {
   const router = useRouter();
   const ai = snapshot?.ai_output;
-  const riskScores = snapshot?.risk_scores;
+  // 위험 점수는 현재 라이브 우선(스냅샷은 아침 고정이라 저녁 SOX·선물 하락 미반영)
+  const riskScores = liveScores ?? snapshot?.risk_scores;
   const evidenceScores = riskScores ? riskScoresToEvidence(riskScores) : null;
   // AI 응답에 일부 배열 필드가 누락돼도 페이지가 죽지 않도록 방어
   const coreIssues = ai?.coreIssues ?? [];
   const supplyNotes = ai?.supplyNotes ?? [];
   const issuesDuration = ai?.issuesDuration ?? [];
-  // 가로축(큰 장세 압력) = 실제 종합 리스크 점수 기반 (AI 주관값 대신 데이터 기반)
+  // 가로축(큰 장세 압력) = 실제 종합 리스크 점수 기반 (라이브 우선)
   const dataPressure =
-    snapshot?.risk_score != null ? snapshot.risk_score / 100 : (ai?.pressureLevel ?? 0.5);
+    (liveComposite ?? snapshot?.risk_score) != null ? (liveComposite ?? snapshot!.risk_score!) / 100 : (ai?.pressureLevel ?? 0.5);
   // 정치·정책·지정학 리스크 27% 블렌딩 (데이터 73%) — 정치 점수가 높을수록 압력 ↑
   const pressureLevel = political
     ? dataPressure * (1 - POLITICAL_WEIGHT) + (political.score / 100) * POLITICAL_WEIGHT
@@ -104,6 +111,10 @@ export default function EvidenceClient({
           {/* 위험 점수 */}
           <Card>
             <SectionLabel>위험 점수</SectionLabel>
+            <p className="mb-2 text-[12px] text-ink-48">
+              {liveScores ? "현재 실시간 시세 기준" : "아침 스냅샷 기준"}
+              {liveProxy ? ` · 코스피는 ${liveProxy}로 대체(정규장 마감)` : ""}
+            </p>
             <div className="divide-y divide-divider">
               {evidenceScores.map((s) => (
                 <div key={s.label} className="py-1">
@@ -186,20 +197,24 @@ export default function EvidenceClient({
               )}
               {political.headlines.length > 0 && (
                 <div className="mt-3">
-                  <p className="text-[12px] font-semibold text-ink-48">근거 뉴스</p>
+                  <p className="text-[12px] font-semibold text-ink-48">근거 뉴스 <span className="font-normal">(최근 24시간 · 최신순 · 반도체 영향도 낮은 기사 제외)</span></p>
                   <ul className="mt-1 space-y-1">
-                    {political.headlines.slice(0, 4).map((h, i) => (
-                      <li key={i}>
-                        <a
-                          href={h.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[13px] text-ink-80 hover:text-guard hover:underline"
-                        >
-                          · {h.title} <span className="text-ink-48">({h.source})</span>
-                        </a>
-                      </li>
-                    ))}
+                    {political.headlines.slice(0, 4).map((h, i) => {
+                      const d = h.pubDate ? new Date(h.pubDate) : null;
+                      const dateStr = d ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : null;
+                      return (
+                        <li key={i}>
+                          <a
+                            href={h.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[13px] text-ink-80 hover:text-guard hover:underline"
+                          >
+                            · {dateStr && <span className="text-ink-48 tabular-nums">[{dateStr}]</span>} {h.title} <span className="text-ink-48">({h.source})</span>
+                          </a>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}

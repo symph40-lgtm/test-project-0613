@@ -17,7 +17,7 @@ export type PoliticalRisk = {
   direction: "부담" | "중립" | "우호";
   summary: string;               // 한두 줄 요지
   drivers: string[];             // 핵심 변수 (정책·법안·지정학 등)
-  headlines: { title: string; source: string; link: string }[]; // 근거 뉴스
+  headlines: { title: string; source: string; link: string; pubDate?: string }[]; // 근거 뉴스(날짜 포함)
   macro: MacroSignal[];          // 전쟁→유가→인플레→금리 전이 데이터
   isFallback: boolean;
 };
@@ -98,7 +98,8 @@ const SYSTEM = `당신은 한국 투자자를 위한 매크로·지정학 리스
 1. 급박한 지정학·군사 분쟁(중동 전쟁, 미·이란 충돌, 이스라엘-레바논, 호르무즈 봉쇄, 유가 공급 충격)은 위험회피·유가 급등을 통해 증시에 가장 큰 충격을 주므로 점수에 가장 무겁게 반영한다.
 2. 주어진 뉴스 헤드라인 근거로만 판단하고, 없는 사실을 지어내지 않는다.
 3. 단정 금지, 가능성 표현 사용. 강세·약세 요인을 균형 있게 본다.
-4. 출력은 JSON만. 코드블록 금지.`;
+4. 반도체 영향은 '실제 수요 구조'로 가중하라: 현재 한국 반도체(삼성전자·SK하이닉스)의 핵심 동력은 AI 데이터센터향 HBM·고성능 메모리 수요다. 따라서 (a) 첨단 칩·HBM·반도체 장비에 대한 '직접적 수출통제(미 BIS 등)'와 (b) 빅테크 AI 캡엑스(투자) 둔화는 직접적·구조적 리스크로 무겁게 보되, (c) 소비가전·로봇·범용 수요나 AI 데이터센터와 무관한 중국발 규제처럼 '연관성이 약한 사안'을 '반도체 구조적 압박'으로 과대평가하지 마라. 연결고리가 약하면 영향이 '제한적'이라고 명시하라.
+5. 출력은 JSON만. 코드블록 금지.`;
 
 // 뉴스(지정학)와 매크로(유가·금리·인플레)를 합쳐 종합 점수·방향 산출
 function combine(newsScore: number, macroScore: number): { score: number; direction: PoliticalRisk["direction"] } {
@@ -125,36 +126,61 @@ function fallback(
   };
 }
 
-export async function assessPoliticalRisk(market?: LiveMarket): Promise<PoliticalRisk> {
+export async function assessPoliticalRisk(market?: LiveMarket, maxAgeHours = 24): Promise<PoliticalRisk> {
   // 지정학(전쟁) 우선 + 미국 정책 보조 + 매크로 데이터(유가·금리·인플레)를 병렬 수집
   const [geo, policy, macro] = await Promise.all([
-    fetchNews(GEO_QUERY, 6),
-    fetchNews(POLICY_QUERY, 5),
+    fetchNews(GEO_QUERY, 10),
+    fetchNews(POLICY_QUERY, 8),
     fetchMacroPressure(market),
   ]);
+  // 당일(최근 maxAgeHours) 기사만 — 며칠 지난 옛 기사를 근거로 쓰지 않게. 최신순 정렬.
+  const cutoff = Date.now() - maxAgeHours * 3600 * 1000;
+  const fresh = (n: NewsItem): boolean => {
+    const ts = n.pubDate ? new Date(n.pubDate).getTime() : NaN;
+    return !isNaN(ts) && ts >= cutoff;
+  };
   const seen = new Set<string>();
   const headlines = [...geo, ...policy]
     .filter((n: NewsItem) => {
       const key = n.title.trim();
-      if (!key || seen.has(key)) return false;
+      if (!key || seen.has(key) || !fresh(n)) return false;
       seen.add(key);
       return true;
     })
+    .sort((a, b) => (a.pubDate < b.pubDate ? 1 : a.pubDate > b.pubDate ? -1 : 0))
     .slice(0, 10)
-    .map((n) => ({ title: n.title, source: n.source, link: n.link }));
+    .map((n) => ({ title: n.title, source: n.source, link: n.link, pubDate: n.pubDate }));
 
   if (!hasAiKey() || headlines.length === 0) return fallback(headlines, macro);
 
-  const prompt = `다음은 세계 정세(지정학·전쟁)와 미국 정치·정책 관련 최신 헤드라인입니다(앞쪽이 지정학).
+  // 실제 시세를 함께 제공 — 뉴스 서사가 실데이터와 모순되지 않게(예: 전쟁 뉴스만 보고 '유가 상승' 단정 금지)
+  const macroLine = macro.signals.map((s) => `${s.label} ${s.value}(${s.change})`).join(" · ") || "데이터 없음";
+  const fmtDate = (iso?: string) => {
+    if (!iso) return "날짜미상";
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
 
-${headlines.map((h, i) => `${i + 1}. ${h.title} (${h.source})`).join("\n")}
+  const prompt = `다음은 '최근 ${maxAgeHours}시간 이내' 세계 정세(지정학·전쟁)와 미국 정치·정책 헤드라인입니다(최신순).
 
-이 상황이 현재 증시(코스피·반도체·나스닥)에 주는 리스크를 평가해 JSON으로만 응답하십시오. 급박한 군사·지정학 분쟁과 유가 충격은 가장 무겁게 반영하십시오:
+${headlines.map((h, i) => `${i + 1}. [${fmtDate(h.pubDate)}] ${h.title} (${h.source})`).join("\n")}
+
+## 실시간 시장 데이터 (반드시 우선)
+${macroLine}
+
+## 분석 규칙 (엄수)
+- 뉴스 서사가 위 '실시간 시장 데이터'와 모순되면 안 됩니다. 예: 지정학 긴장 기사가 있어도 **실제 유가가 하락 중(당일 마이너스)이면 '유가 상승'·'상승 압력'·'상승 추세'라고 쓰지 마십시오.** 그 경우 "긴장에도 시장이 공급 차질을 가격에 반영하지 않는다(유가 하락)"로 해석하십시오.
+- 유가·금리 '방향'은 뉴스가 아니라 위 당일 실제 등락률을 근거로 기술하십시오.
+- 오래된 사건을 현재 진행형으로 단정하지 말고, 위 헤드라인 날짜 기준으로 평가하십시오.
+- **영향도 필터링**: 각 헤드라인이 한국 증시(특히 반도체·코스피·나스닥)에 주는 실제 영향도를 high/medium/low로 판정하십시오. 현재 한국 반도체 수요는 AI 데이터센터向 HBM·고성능 메모리에 집중돼 있으므로, 소비가전·로봇·범용 수요나 AI와 무관한 중국발 규제처럼 '연결고리가 약한' 사안은 low로 분류하십시오. summary·drivers는 high/medium 사안만 근거로 삼고, low 사안은 언급하지 마십시오.
+
+이 상황이 현재 증시(코스피·반도체·나스닥)에 주는 리스크를 평가해 JSON으로만 응답하십시오. 급박한 군사·지정학 분쟁은 무겁게 보되, 유가 방향은 실데이터와 일치시키십시오:
 {
   "score": 0~100 정수 (높을수록 증시에 부담),
   "direction": "부담 | 중립 | 우호",
-  "summary": "현재 정치·정책發 증시 리스크 한두 문장",
-  "drivers": ["핵심 변수 1", "핵심 변수 2", "핵심 변수 3"]
+  "summary": "현재 정치·정책發 증시 리스크 한두 문장 (high/medium 사안만, 유가 방향은 실데이터와 일치)",
+  "drivers": ["핵심 변수 1", "핵심 변수 2", "핵심 변수 3"],
+  "material": [영향도 high/medium인 헤드라인 번호만 배열로 (예: [1,3,4]). low(연관성 약함)는 제외]
 }`;
 
   try {
@@ -166,9 +192,15 @@ ${headlines.map((h, i) => `${i + 1}. ${h.title} (${h.source})`).join("\n")}
       messages: [{ role: "user", content: prompt }],
     });
     const text = msg.content[0].type === "text" ? msg.content[0].text : "";
-    const p = parseJsonLoose<{ score: number; direction: PoliticalRisk["direction"]; summary: string; drivers: string[] }>(text);
+    const p = parseJsonLoose<{ score: number; direction: PoliticalRisk["direction"]; summary: string; drivers: string[]; material?: number[] }>(text);
     const newsScore = Math.max(0, Math.min(100, Math.round(Number(p.score ?? 50))));
     const { score, direction } = combine(newsScore, macro.score);
+    // 영향도 high/medium으로 판정된 헤드라인만 근거로 노출(연관성 약한 기사 제외).
+    // 단, 너무 적게 남으면(0~1개) 신뢰도 우려로 원본 상위를 유지.
+    const idx = Array.isArray(p.material)
+      ? p.material.map((n) => Math.round(Number(n)) - 1).filter((i) => i >= 0 && i < headlines.length)
+      : [];
+    const filtered = idx.length >= 2 ? Array.from(new Set(idx)).map((i) => headlines[i]) : headlines;
     return {
       score,
       newsScore,
@@ -176,7 +208,7 @@ ${headlines.map((h, i) => `${i + 1}. ${h.title} (${h.source})`).join("\n")}
       direction,
       summary: String(p.summary ?? "").slice(0, 300),
       drivers: (p.drivers ?? []).slice(0, 5).map((d) => String(d).slice(0, 120)),
-      headlines,
+      headlines: filtered,
       macro: macro.signals,
       isFallback: false,
     };

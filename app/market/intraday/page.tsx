@@ -18,11 +18,12 @@ import {
 } from "@/lib/market/risk";
 import { getMarketSession } from "@/lib/market/session";
 import { fetchKospi200Futures } from "@/lib/market/naver-flow";
-import { recommendForHolding } from "@/lib/market/recommend";
+import { scoreHolding } from "@/lib/market/holdingScore";
 import { fetchAiStanceBias } from "@/lib/ai/insights";
 import { fetchBondSignal } from "@/lib/market/bondSignal";
 import { fetchSemiAiEarnings } from "@/lib/market/earnings";
 import { fetchSemiSectorNews } from "@/lib/news/fetch";
+import { fetchBigtechAiNews, detectUrgentBigtechAlert } from "@/lib/market/urgentAlert";
 import IntradayClient from "./_client";
 
 // 클릭(새로고침) 시 항상 그 시점 실시간 데이터를 가져오도록 동적 렌더링
@@ -68,7 +69,7 @@ export default async function IntradaySummaryPage() {
     { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
   ];
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal, kospiFut] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal, kospiFut, bigtechNews] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchSemiSectorNews(tickers, 15),
@@ -79,6 +80,7 @@ export default async function IntradaySummaryPage() {
     fetchOffHoursIndex(),
     fetchBondSignal(),
     fetchKospi200Futures(),
+    fetchBigtechAiNews(12),
   ]);
 
   const semiCompare = SEMI_COMPARE.map((s) => {
@@ -92,6 +94,13 @@ export default async function IntradaySummaryPage() {
       asOf: q?.asOf ?? null,
       stale: q?.stale ?? false,
     };
+  });
+
+  // AI 빅테크發 반도체 급등락 긴급 감지 — 빅테크 AI 뉴스 + 삼성·하이닉스 당일 ±3% 동시 성립 시 긴급 배너
+  const urgentAlert = detectUrgentBigtechAlert({
+    semis: semiCompare.map((s) => ({ ticker: s.ticker, changePercent: s.changePercent })),
+    news: [...bigtechNews, ...news],
+    threshold: 3,
   });
 
   // 세션 인지형 주요 지표 (나스닥·SOX는 ETF로 정규/애프터/합계 분해)
@@ -150,29 +159,38 @@ export default async function IntradaySummaryPage() {
   // AI Q&A 스탠스 바이어스(reflect=true 최신) — ±2 한정 반영
   const aiStance = await fetchAiStanceBias();
 
-  // 보유 종목별 매매 판단 (7단계 스탠스 + AI 의견 한정 반영)
-  const recs = (positions ?? []).map((p) => {
-    const tickerBias = aiStance?.tickerBias?.[p.ticker];
-    const aiBias = tickerBias ?? aiStance?.marketBias ?? 0;
-    const aiReason = aiStance
-      ? tickerBias !== undefined
-        ? "종목 의견"
-        : aiStance.summary
-          ? `시장 의견: ${aiStance.summary}`.slice(0, 40)
-          : "시장 의견"
-      : null;
-    return recommendForHolding(
-      {
+  void marketDrop; // (보유 점수는 종목별 실데이터로 산출 — 시장 급락은 composite 오버레이에 이미 반영됨)
+  // 보유 종목별 매매 판단 — 애널리스트 6대 기준 실데이터 채점(종목마다 차등) + AI 의견 한정 반영
+  const recs = await Promise.all(
+    (positions ?? []).map((p) => {
+      const q = quoteMap.get(p.ticker);
+      const tickerBias = aiStance?.tickerBias?.[p.ticker];
+      const aiBias = tickerBias ?? aiStance?.marketBias ?? 0;
+      const aiReason = aiStance
+        ? tickerBias !== undefined
+          ? "종목 의견"
+          : aiStance.summary
+            ? `시장 의견: ${aiStance.summary}`.slice(0, 30)
+            : "시장 의견"
+        : null;
+      return scoreHolding({
         ticker: p.ticker,
-        weight: Number(p.weight),
-        is_leverage: p.is_leverage,
+        symbol: q?.symbol ?? null,
+        isLeverage: p.is_leverage,
         sector: p.sector,
-        risk_level: p.risk_level as string | null,
-        changePercent: quoteMap.get(p.ticker)?.changePercent ?? null,
-      },
-      { composite, soxChange: market.sox.changePercent, marketDrop, aiBias, aiReason },
-    );
-  });
+        changePercent: q?.changePercent ?? null,
+        composite,
+        soxChange: market.sox.changePercent,
+        macro: {
+          rateChgPct: market.treasury10y.changePercent,
+          oilChgPct: market.oil.changePercent,
+          dollarChgPct: market.dollarIndex.changePercent,
+        },
+        aiBias,
+        aiReason,
+      });
+    }),
+  );
 
   return (
     <IntradayClient
@@ -201,6 +219,7 @@ export default async function IntradaySummaryPage() {
       holdings={holdings}
       recs={recs}
       news={news}
+      urgentAlert={urgentAlert}
     />
   );
 }
