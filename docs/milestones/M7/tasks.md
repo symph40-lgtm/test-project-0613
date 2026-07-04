@@ -13,9 +13,13 @@
 - [x] T11. `npm run build` 통과 + 검증 시나리오 7/7 pass
 - [x] T12. 커밋
 
+## 추가 구현 (사용자 요청)
+
+- [x] T13. 신호 SMS 알림 — `lib/signal/alerts.ts` (판정 구간 확정 신호 1일 1회, 기존 Aligo·alert_channels 재사용, 015 마이그레이션)
+
 ## 남은 운영 작업 (코드 외)
 
-- [ ] Supabase Dashboard SQL Editor에서 `supabase/migrations/014_signal_system.sql` 적용 (미적용이어도 화면은 동작 — 기록만 안 됨)
+- [ ] Supabase Dashboard SQL Editor에서 `supabase/migrations/014_signal_system.sql` + `015_signal_alert_trigger.sql` 적용 (미적용이어도 화면은 동작 — 기록·문자만 안 됨)
 - [ ] (선택) 외부 크론: 장중 60초 `/api/signal/state`(로그인 세션 필요 — 페이지 열어두기로 대체 가능), 15:40 `/api/cron/signal-eod?secret=<CRON_SECRET>`
 - [ ] `lib/signal/config.ts`의 EVENT_CALENDAR 월 1회 갱신
 - [ ] 확장 모듈 활성화는 60거래일 기록 축적 후 리프트 검증 통과분만 (확장기획서 8.5)

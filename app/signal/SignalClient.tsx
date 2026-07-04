@@ -4,13 +4,14 @@
 // 페이지를 열어두면 장중 틱이 서버에 축적되어 T-신호·DC 판정이 점점 정교해진다.
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, ShieldAlert, Activity, Gauge, GitBranch, Layers, FlaskConical, NotebookPen } from "lucide-react";
+import { RefreshCw, ShieldAlert, Activity, Gauge, GitBranch, Layers, FlaskConical, NotebookPen, MessageSquareText } from "lucide-react";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import type { BacktestResult } from "@/lib/signal/backtest";
 import type { CheckItem, DailyFeatureRow, Judgment } from "@/lib/signal/types";
 
 type StateResponse = {
   judgment: Judgment;
+  sms: { sent: number; skipped: string | null } | null;
   tickCount: number;
   annotation: {
     cause_tag: string | null;
@@ -114,6 +115,13 @@ export default function SignalClient({ backtest }: { backtest: BacktestResult[] 
                 {j.dataNotes.map((n, i) => <li key={i}>ⓘ {n}</li>)}
               </ul>
             ) : null}
+            <p className="mt-2 flex items-center gap-1.5 text-[12px] opacity-60">
+              <MessageSquareText size={13} />
+              {state?.sms?.sent ? `문자 알림 ${state.sms.sent}건 발송됨`
+                : state?.sms?.skipped === "SMS 채널 없음"
+                  ? <>문자 알림을 받으려면 <a href="/positions/risk-line" className="underline">위험선/알림 설정</a>에서 SMS 채널을 인증하세요</>
+                  : "문자 알림: 판정 구간(09:30~10:30)에 행동 가능한 판정 확정 시 1일 1회 발송"}
+            </p>
           </section>
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

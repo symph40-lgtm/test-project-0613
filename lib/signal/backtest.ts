@@ -3,6 +3,7 @@
 // 스펙의 기대 판정과 대조한다. Phase 1 성공 기준: 특이도(횡보일을 횡보일로) 우선 (마스터 6장).
 
 import { decide } from "./engine/decide";
+import { buildSignalAlert } from "./alerts";
 import type { DailyBar, IntradayTick, Judgment, PremarketContext } from "./types";
 
 export type BacktestResult = {
@@ -12,6 +13,7 @@ export type BacktestResult = {
   actual: string;
   pass: boolean;
   detail: string;
+  smsPreview: string | null; // 이 판정 시점에 발송됐을 문자 (판정 구간 아니거나 비대상이면 null)
 };
 
 // ── 픽스처 빌더 ─────────────────────────────────────────────
@@ -108,7 +110,11 @@ export function runBacktest(): BacktestResult[] {
   const check = (
     name: string, scenario: string, expected: string,
     j: Judgment, pass: boolean, actual: string, detail: string,
-  ) => results.push({ name, scenario, expected, actual, pass, detail: `${detail} · 판정 "${j.headline}"` });
+  ) => results.push({
+    name, scenario, expected, actual, pass,
+    detail: `${detail} · 판정 "${j.headline}"`,
+    smsPreview: buildSignalAlert(j)?.text ?? null,
+  });
 
   // ── 6/9 — 이틀 -17% 후 갭 +7.3% (V반등, 인버스 진입 시 대참사)
   {

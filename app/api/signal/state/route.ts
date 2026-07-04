@@ -9,6 +9,7 @@ import { collectTick, buildPremarketContext, kstNow } from "@/lib/signal/data";
 import { decide } from "@/lib/signal/engine/decide";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { appendTick, loadTicks, logJudgment, upsertDailyFeatures, loadDailyFeatures, loadRecentFeatures } from "@/lib/signal/store";
+import { maybeSendSignalSms } from "@/lib/signal/alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -46,18 +47,22 @@ export async function GET() {
 
     const judgment = decide(ctx, ticks, minuteOfDay, iso);
 
-    // 기록 (실패해도 응답은 반환)
+    // 기록 + 신호 SMS (실패해도 응답은 반환. SMS는 판정 구간에 행동 가능 판정 확정 시 1일 1회)
+    let sms: { sent: number; skipped: string | null } | null = null;
     if (isWeekday) {
-      await Promise.all([
+      const [, , smsResult] = await Promise.all([
         logJudgment(judgment).catch(() => undefined),
         upsertDailyFeatures(judgment).catch(() => undefined),
+        maybeSendSignalSms(judgment).catch((): { sent: number; skipped: string | null } => ({ sent: 0, skipped: "발송 오류" })),
       ]);
+      sms = smsResult;
     }
 
     const recent = await loadRecentFeatures(15).catch(() => []);
 
     return NextResponse.json({
       judgment,
+      sms,
       tickCount: ticks.length,
       annotation: features
         ? {
