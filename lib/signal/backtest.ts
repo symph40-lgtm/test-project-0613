@@ -146,7 +146,9 @@ export function runBacktest(): BacktestResult[] {
       `T=${j1015.trend?.score.toFixed(1)}/${j1015.trend?.maxAvailable}`);
   }
 
-  // ── 6/12 — 반등 랠리 후 갭 +8.6% → 초반부터 하락 (페이드 → 인버스)
+  // ── 페이드형 (가상 패턴) — 과열 갭 +8.6% 후 초반부터 일방향 하락
+  // 주의: 원래 스펙 2.5.7이 6/12를 이 패턴으로 기록했으나 실측 결과 오기로 판명(스펙 정정 주석 참조).
+  // 실제 6/12는 아래 "6/12 실측" 케이스. 이 시나리오는 '즉시 페이드' 패턴 자체의 규칙 검증으로 유지.
   {
     const daily = dailyWithMoves(2_400_000, [6, 5, 4]); // 3연속 상승 +15%대 (과열)
     const ctx = makeCtx({
@@ -160,10 +162,41 @@ export function runBacktest(): BacktestResult[] {
       { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: -0.6, twiiChg: -0.5 },
     );
     const j = decide(ctx, ticks, 615, new Date().toISOString());
-    check("6/12", "과열 랠리 후 갭 +8.6% → 초반부터 하락 지속", "추세일_하방 (인버스 추세추종)",
+    check("페이드형(가상)", "과열 갭 +8.6% → 초반부터 하락 지속 (가상 패턴)", "추세일_하방 (인버스 추세추종)",
       j, j.dayType === "추세일_하방",
       `dayType=${j.dayType}`,
       `T=${j.trend?.score.toFixed(1)}/${j.trend?.maxAvailable} · DC1=${j.trend?.dc1 !== null && j.trend?.dc1 !== undefined ? (j.trend.dc1 * 100).toFixed(0) + "%" : "-"}`);
+  }
+
+  // ── 6/12 실측 — 갭 +8.6% 후 시가 부근 유지·등락, 막판(15시경) 급락 (일봉: 고가 +1.0%뿐, 저가 마감)
+  // 진입 창 내 방향 미형성 → 시스템 정답은 "미진입" (막판 급락은 따라갈 수 없는 유형 — 특이도 검증)
+  {
+    const daily = dailyWithMoves(2_050_000, [-4, 2.6]); // 6/10 하락·6/11 소폭 상승 (실측 근사)
+    const ctx = makeCtx({
+      hynixDaily: daily,
+      usdkrw: { level: 1480, changePercent: 0.2 },
+      usRates: { t10yChangePct: 0.4, regime: "안정" },
+      overnight: { nasdaqPct: 0.8, soxPct: 1.5 },
+    });
+    const ticks = makeTicks(
+      [
+        { from: 540, to: 570, startPct: 8.6, endPct: 8.9 },  // 갭 후 소폭 위
+        { from: 570, to: 620, startPct: 8.9, endPct: 8.5 },  // 시가 부근 등락 유지
+        { from: 620, to: 670, startPct: 8.5, endPct: 9.1 },
+        { from: 670, to: 720, startPct: 9.1, endPct: 8.4 },
+        { from: 720, to: 770, startPct: 8.4, endPct: 8.9 },
+        { from: 770, to: 805, startPct: 8.9, endPct: 8.6 },  // 13:25 판정 시점까지 방향 없음 (급락은 15시 — 창 밖)
+      ],
+      { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.3, twiiChg: 0.4 },
+    );
+    const j = decide(ctx, ticks, 805, new Date().toISOString());
+    const noEntry = (j.dayType === "대기" || j.dayType === "횡보일") &&
+      j.setups.long.verdict !== "진입후보" && j.setups.long.verdict !== "강한신호" &&
+      j.setups.short.verdict !== "진입후보";
+    check("6/12 실측", "갭 +8.6% → 시가 부근 유지·등락 (막판 급락 전 13:25 판정)", "미진입 (대기/횡보일 — 안 하는 날)",
+      j, noEntry,
+      `dayType=${j.dayType}, 롱=${j.setups.long.verdict}, 숏=${j.setups.short.verdict}`,
+      `방향 미형성 검증`);
   }
 
   // ── 6/23 — 5연속 상승 +28% 후 전쟁 악재, 초반부터 일방향 하락 (장중 -11.8%)
