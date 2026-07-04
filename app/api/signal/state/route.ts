@@ -1,9 +1,10 @@
 // GET /api/signal/state — 신호 시스템 현재 상태.
 // 흐름: 현재 시세 1틱 수집 → 장중이면 signal_ticks 적재(30초 가드) → 축적 시계열로 엔진 판정
 // → 판정 스냅샷 로그 + daily_features 진행형 upsert → 전체 상태 반환.
-// /signal 페이지가 60초 폴링. 무인 운용 시 외부 크론이 같은 주소를 호출해도 된다(CRON_SECRET 불필요 — 로그인 필요).
+// 인증 2경로: ①로그인 세션 (/signal 페이지 60초 폴링) ②CRON_SECRET (외부 크론 무인 수집 —
+// PC·브라우저를 켜둘 필요 없이 cron-job.org 등이 장중 1분마다 호출하면 데이터가 쌓이고 문자도 발송됨).
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { collectTick, buildPremarketContext, kstNow } from "@/lib/signal/data";
 import { decide } from "@/lib/signal/engine/decide";
@@ -14,11 +15,17 @@ import { autoAnnotateIfNeeded } from "@/lib/signal/autoAnnotate";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  // 로그인 사용자만 (시장 데이터지만 무인 엔드포인트 남용 방지)
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  // 인증: CRON_SECRET(무인 크론) 또는 로그인 세션
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get("authorization");
+  const provided = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : req.nextUrl.searchParams.get("secret");
+  const isCron = Boolean(cronSecret && provided === cronSecret);
+  if (!isCron) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   try {
     const { date, minuteOfDay, iso } = kstNow();
