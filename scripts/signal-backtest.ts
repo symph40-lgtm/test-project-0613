@@ -18,11 +18,12 @@ const smsExpect: Record<string, boolean> = {
   "페이드형(가상)": true, // 추세일 하방 → 인버스 검토 문자
   "6/12 실측": false,     // 방향 미형성 — 미진입, 문자 없어야 함 (특이도)
   "6/23": true,          // 추세일 하방 → 인버스 검토 문자
-  "7/3": true,           // V반등 강한신호 → 레버리지 검토 문자
+  "7/3 실측": true,      // V반등 → 레버리지 검토 문자
   "6/17": true,          // 추세일 상방 → 레버리지 검토 문자
   "횡보일": true,        // 매매 금지 문자
   "장중형성": true,      // 지연 추세 → 레버리지 검토 문자
   "6/9 (a) 시초": false, // X1·XS1 차단 + 반전 대기 — 문자 없어야 함
+  "6/25": false,         // XS1 차단 + 롱도 X1 확인 전 — 문자 없어야 함 (시초 시점)
 };
 console.log("\n── SMS 발송 판정 검증");
 for (const [name, want] of Object.entries(smsExpect)) {

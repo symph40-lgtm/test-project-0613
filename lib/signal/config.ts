@@ -15,7 +15,9 @@ export const SIGNAL_CONFIG = {
   },
 
   // ── 2축 정렬·셋업 임계값
-  crashCumPct: -12,        // L6/XS1 과대 낙폭 (직전 1~3일 누적)
+  // crashCumPct: 스펙 초기값 -12 → -11로 조정 (2026-07-04 실측 검증: XS1 필수 사례인 6/25의
+  // 직전 1~3일 누적 최악이 -11.6%라 -12 기준으론 인버스 차단이 미발동. 스펙 7.2 튜닝 범위 -8~-15 내)
+  crashCumPct: -11,        // L6/XS1 과대 낙폭 (직전 1~3일 누적)
   overheatCumPct: 15,      // S1 5일 누적 과열
   overheatDays: 2,         // S1 연속 상승일
   gapBigPct: 2,            // X1 갭상승 시초 추격 금지 기준

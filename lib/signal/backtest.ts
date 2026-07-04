@@ -117,9 +117,9 @@ export function runBacktest(): BacktestResult[] {
     smsPreview: buildSignalAlert(j)?.text ?? null,
   });
 
-  // ── 6/9 — 이틀 -17% 후 갭 +7.3% (V반등, 인버스 진입 시 대참사)
+  // ── 6/9 — 이틀 -16.9% 후 갭 +7.3% (V반등, 인버스 진입 시 대참사) — 실측: -9.9%·-7.7%, 종가 +15.9%
   {
-    const daily = dailyWithMoves(2_900_000, [-9, -8.8]); // 이틀 누적 약 -17%
+    const daily = dailyWithMoves(2_900_000, [-9.9, -7.7]); // 이틀 누적 -16.9% (실측)
     const ctx = makeCtx({ hynixDaily: daily, causeNonEarnings: true, consensusIntact: true });
     const ticksEarly = makeTicks(
       [{ from: 540, to: 575, startPct: 7.3, endPct: 8.0 }],
@@ -219,9 +219,10 @@ export function runBacktest(): BacktestResult[] {
       `T=${j.trend?.score.toFixed(1)}/${j.trend?.maxAvailable}`);
   }
 
-  // ── 7/3 — 전일 폭락, 갭 -2.8% → 초반 추가 하락 후 반전 상승 지속 (성공사례 원형)
+  // ── 7/3 — 전일 -14.6% 폭락, 무갭(+0.5%) 출발 → 09:59 저점 -6.4% → V반전 후 종일 상승 (실측 분봉 경로)
+  // 반전 후 지속 확인은 10:30~11:00에야 성립 — 진입 창 13:30 연장의 실측 근거. 12:00 판정으로 검증.
   {
-    const daily = dailyWithMoves(2_800_000, [-4, -10]); // 직전 누적 약 -14%
+    const daily = dailyWithMoves(2_650_000, [-3.4, -14.6]); // 7/1 -3.4%, 7/2 -14.6% (실측)
     const ctx = makeCtx({
       hynixDaily: daily,
       causeNonEarnings: true,
@@ -232,32 +233,56 @@ export function runBacktest(): BacktestResult[] {
     });
     const ticks = makeTicks(
       [
-        { from: 540, to: 572, startPct: -2.8, endPct: -5.2 }, // 초반 추가 눌림
-        { from: 572, to: 630, startPct: -5.2, endPct: 3.5 },  // 반전 후 일방향 상승
+        { from: 540, to: 559, startPct: 1.6, endPct: -3.3 },  // 초반 하락 (실측: 09:30 -3.3%)
+        { from: 559, to: 600, startPct: -3.3, endPct: -6.4 }, // 09:59 저점 -6.4%
+        { from: 600, to: 645, startPct: -6.4, endPct: 2.4 },  // V반전 (10:45 +2.4%)
+        { from: 645, to: 720, startPct: 2.4, endPct: 4.4 },   // 상승 지속 (12:00 +4.4%)
       ],
       { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 1.0, twiiChg: 0.9, hynixFrgn: -200_000, hynixInst: 250_000 },
     );
-    const j = decide(ctx, ticks, 628, new Date().toISOString());
+    const j = decide(ctx, ticks, 720, new Date().toISOString());
     const longOk = j.setups.long.verdict === "진입후보" || j.setups.long.verdict === "강한신호";
-    check("7/3", "전일 폭락 + 갭 -2.8% → 반전 후 상승 지속(10:28)", "V반등후보 + 레버리지 진입 후보",
+    check("7/3 실측", "전일 -14.6% + 무갭 → 09:59 저점 -6.4% → V반전 상승 (12:00 판정)", "V반등후보 + 레버리지 진입 후보",
       j, j.dayType === "V반등후보" && longOk,
       `dayType=${j.dayType}, 롱=${j.setups.long.verdict}(가점 ${j.setups.long.bonus})`,
       `DC1=${j.trend?.dc1 !== null && j.trend?.dc1 !== undefined ? (j.trend.dc1 * 100).toFixed(0) + "%" : "-"}`);
   }
 
-  // ── 6/17 — 갭 소폭 하락 → 초반 상승 전환 후 유지 (상승 추세일)
+  // ── 6/25 — 전전일 -12.5% 폭락 후 갭 +11% (XS1 필수 사례 — 직전 누적 최악 실측 -11.6%)
+  // crashCumPct -12였다면 XS1 미발동 → 인버스 진입 → 대참사(종가 +13.1%). 임계값 -11 조정 검증.
+  {
+    const daily = dailyWithMoves(2_450_000, [-12.5, 1.0]); // 6/23 -12.5%, 6/24 +1.0% → 2일 누적 -11.6%
+    const ctx = makeCtx({
+      hynixDaily: daily,
+      usdkrw: { level: 1470, changePercent: 0.1 },
+      usRates: { t10yChangePct: 0.2, regime: "안정" },
+      overnight: { nasdaqPct: 1.0, soxPct: 1.8 },
+    });
+    const ticks = makeTicks(
+      [{ from: 540, to: 590, startPct: 11.0, endPct: 12.0 }],
+      { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.8, twiiChg: 0.6 },
+    );
+    const j = decide(ctx, ticks, 590, new Date().toISOString());
+    const xs1 = j.setups.short.blocked.some((b) => b.includes("XS1"));
+    check("6/25", "전전일 -12.5% 폭락(누적 -11.6%) 후 갭 +11%", "인버스 XS1 차단 (임계값 -11 검증)",
+      j, xs1 && j.setups.short.verdict === "차단",
+      `dayType=${j.dayType}, 숏=${j.setups.short.verdict}, XS1=${xs1}`,
+      `crash=${j.crashContext.cumPct?.toFixed(1)}%`);
+  }
+
+  // ── 6/17 — 갭 -2.0% → 초반 상승 전환 후 유지, 저가=시가 (실측: 장중 +8.0%)
   {
     const daily = dailyWithMoves(2_500_000, [-1, 0.5]); // 평범한 전일
     const ctx = makeCtx({ hynixDaily: daily });
     const ticks = makeTicks(
       [
-        { from: 540, to: 555, startPct: -0.5, endPct: 0.3 },
-        { from: 555, to: 615, startPct: 0.3, endPct: 3.8 },
+        { from: 540, to: 555, startPct: -2.0, endPct: -1.0 },
+        { from: 555, to: 615, startPct: -1.0, endPct: 2.8 },
       ],
       { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.8, twiiChg: 0.6, breadth: 0.78, hynixFrgn: 150_000 },
     );
     const j = decide(ctx, ticks, 615, new Date().toISOString());
-    check("6/17", "갭 소폭 하락 → 초반 상승 전환 후 유지", "추세일_상방 (레버리지 추세추종)",
+    check("6/17", "갭 -2.0% → 초반 상승 전환 후 유지 (실측)", "추세일_상방 (레버리지 추세추종)",
       j, j.dayType === "추세일_상방",
       `dayType=${j.dayType}`,
       `T=${j.trend?.score.toFixed(1)}/${j.trend?.maxAvailable} · DC1=${j.trend?.dc1 !== null && j.trend?.dc1 !== undefined ? (j.trend.dc1 * 100).toFixed(0) + "%" : "-"}`);
