@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
       fetchDailyBars(SIGNAL_CONFIG.symbols.hynix, 5),
     ]);
 
-    // ── 최종 DC1/DC2 (10분봉, 선물 기준 — 틱이 없으면 라벨 미확정)
+    // ── 최종 DC1/DC2 (봉 주기 = config.dc.barMin, 선물 기준 — 틱이 없으면 라벨 미확정)
     const S = SIGNAL_CONFIG.session;
     const pts = ticks
       .filter((t) => t.futPx !== null && t.minuteOfDay >= S.openMin && t.minuteOfDay <= S.endMin)

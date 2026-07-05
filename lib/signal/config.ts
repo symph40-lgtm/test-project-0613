@@ -45,17 +45,20 @@ export const SIGNAL_CONFIG = {
     // 장중 재형성(지연) 추세 — 초반 횡보 후 중반부터 방향이 형성되는 날 감지 (사용자 요청)
     midday: {
       windowMin: 90,       // 롤링 재평가 창
-      dc1Theta: 0.65,      // 창 내 DC1 기준 (짧은 창이라 전일 기준보다 높게)
+      dc1Theta: 0.6,       // 창 내 DC1 기준 (전일 기준보다 높게 — 5분봉 전환에 맞춰 0.65→0.60 보정)
       minMovePct: 1.0,     // 창 내 순이동 최소 % — 미세 드리프트 오탐 방지
-      minBars: 6,          // 창 내 10분봉 최소 개수 (데이터 충분성)
+      minBars: 12,         // 창 내 봉 최소 개수 (5분봉 12개 = 60분 데이터 확보)
     },
   },
 
-  // ── DC (방향 지속률) — θ는 최적화 대상 파라미터
+  // ── DC (방향 지속률) — θ·봉 주기는 최적화 대상 파라미터 (스펙 2.5.6 그리드: 55/60/65/70% × 5/10/15분)
+  // 2026-07-05 사용자 결정: 10분봉 → 5분봉 (판정 확정 최소 대기 30분 → 15분).
+  // 봉이 잘아지면 노이즈 봉 비율이 늘어 같은 추세일도 DC1·DC2가 낮게 나오므로 임계값 비례 보정
+  // (10분봉 60%/0.30 → 5분봉 55%/0.25). 실데이터 축적 후 Stage 3에서 재탐색.
   dc: {
-    barMin: 10,            // 10분봉
-    dc1Theta: 0.6,         // DC1 60%
-    dc2Min: 0.3,           // 효율비 0.30
+    barMin: 5,             // 5분봉
+    dc1Theta: 0.55,        // DC1 55%
+    dc2Min: 0.25,          // 효율비 0.25
   },
 
   // ── 스코어 컷 (마스터 4.1·4.2)
@@ -85,7 +88,7 @@ export const SIGNAL_CONFIG = {
     w1: { enabled: false, trendTh: 0.7, distortionBand: [0.45, 0.55] as [number, number], discount: 0.5 },
     v1: { enabled: false, peakoutDrop: 0.05, holdMin: 30, crashPrereq: -0.03 },
     a1: { stopMode: "fixed" as "fixed" | "atr", k: 0.7, kTrail: 0.9, minStop: 0.03, maxStop: 0.08 },
-    c1: { enabled: false, dc1Min: 0.6, indexMoveMin: 0.03, extendTo: "15:15" },
+    c1: { enabled: false, dc1Min: 0.55, indexMoveMin: 0.03, extendTo: "15:15" }, // dc1Min은 dc.dc1Theta와 동조
     bonusCapRatio: 0.3,    // 8.5 확장 가점 합산 ≤ T-스코어 총점의 30%
   },
 

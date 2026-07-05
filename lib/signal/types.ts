@@ -79,7 +79,7 @@ export type TrendResult = {
   flips: number;           // T6 방향 전환 횟수 (09:00~10:00)
   // 장중 재형성(지연) 추세 — 최근 롤링 창(기본 90분) 기준. 초반 횡보 후 중반 형성 추세 감지.
   midday: { active: boolean; dir: "UP" | "DOWN" | null; dc1: number | null; movePct: number | null; flips: number | null } | null;
-  dc1: number | null;      // 실시간 DC1 (10분봉)
+  dc1: number | null;      // 실시간 DC1 (봉 주기 = config.dc.barMin, 현재 5분봉)
   dc2: number | null;
   openType: "drive" | "test_drive" | "auction" | "undetermined" | null; // O1 (기록)
   openCrossCount: number | null;

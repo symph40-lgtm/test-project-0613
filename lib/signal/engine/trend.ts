@@ -161,14 +161,14 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
       `갭 ${gapPct > 0 ? "+" : ""}${gapPct.toFixed(2)}% · 초반 ${earlyDir > 0 ? "상승" : earlyDir < 0 ? "하락" : "보합"}${match ? " (일치)" : " (역방향 → 반전일 후보)"}`);
   }
 
-  // ── DC1/DC2 (10분봉, 실시간 라벨 — 2.5.6)
-  const bars10 = resample(pts, SIGNAL_CONFIG.dc.barMin).filter((b) => b.startMin >= S.openMin);
+  // ── DC1/DC2 (봉 주기 = config.dc.barMin, 실시간 라벨 — 2.5.6)
+  const barsDc = resample(pts, SIGNAL_CONFIG.dc.barMin).filter((b) => b.startMin >= S.openMin);
   let dc1: number | null = null, dc2: number | null = null;
-  if (bars10.length >= 3 && dayDir !== null) {
+  if (barsDc.length >= 3 && dayDir !== null) {
     const daySign = dayDir === "UP" ? 1 : -1;
-    const same = bars10.filter((b) => Math.sign(b.close - b.open) === daySign).length;
-    dc1 = same / bars10.length;
-    const pathSum = bars10.reduce((s, b) => s + Math.abs(b.close - b.open), 0);
+    const same = barsDc.filter((b) => Math.sign(b.close - b.open) === daySign).length;
+    dc1 = same / barsDc.length;
+    const pathSum = barsDc.reduce((s, b) => s + Math.abs(b.close - b.open), 0);
     dc2 = pathSum > 0 ? Math.abs(last - dayOpen) / pathSum : null;
   }
 
@@ -179,15 +179,15 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
   {
     const winStart = nowMin - MD.windowMin;
     const winPts = pts.filter((p) => p.min >= winStart);
-    const winBars10 = bars10.filter((b) => b.startMin >= winStart);
-    if (winPts.length >= 10 && winBars10.length >= MD.minBars) {
+    const winBarsDc = barsDc.filter((b) => b.startMin >= winStart);
+    if (winPts.length >= 10 && winBarsDc.length >= MD.minBars) {
       const first = winPts[0].px, lastW = winPts[winPts.length - 1].px;
       const movePct = ((lastW - first) / first) * 100;
       const winDir: "UP" | "DOWN" | null = movePct > 0.05 ? "UP" : movePct < -0.05 ? "DOWN" : null;
       let winDc1: number | null = null;
       if (winDir !== null) {
         const sgn = winDir === "UP" ? 1 : -1;
-        winDc1 = winBars10.filter((b) => Math.sign(b.close - b.open) === sgn).length / winBars10.length;
+        winDc1 = winBarsDc.filter((b) => Math.sign(b.close - b.open) === sgn).length / winBarsDc.length;
       }
       // 창 내 방향 전환 (5분봉, T6과 동일 로직)
       const winBars5 = resample(winPts, 5);
