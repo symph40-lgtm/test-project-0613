@@ -1,10 +1,10 @@
 // 한국투자증권(KIS) Developers REST API — 코스피200 '야간선물' 실시간 시세 조회.
-// 네이버가 제공하지 않는 야간 세션(18:00~05:00, CME 연계) 시세를 KIS로 가져온다.
+// 네이버가 제공하지 않는 야간 세션(18:00~05:00, KRX 야간시장·구 CME 연계) 시세를 KIS로 가져온다.
 //
 // 필요한 환경변수(.env.local + Vercel):
 //   KIS_APP_KEY     — KIS Developers에서 발급한 앱 KEY
 //   KIS_APP_SECRET  — 앱 SECRET
-//   KIS_FUT_CODE    — 야간 코스피200 선물 종목코드 (예: "101W09" / "1010..."; HTS·KIS 포털에서 확인)
+//   KIS_FUT_CODE    — (선택) 야간 코스피200 선물 종목코드 수동 지정. 미설정 시 최근월물 자동 산출
 //   KIS_FUT_TRID    — (선택) 시세 조회 tr_id. 기본 "FHMIF10000000"
 //   KIS_BASE        — (선택) 기본 실전 도메인. 모의투자는 ":29443"
 //
@@ -15,7 +15,30 @@ const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:94
 let cachedToken: { token: string; exp: number } | null = null;
 
 export function hasKisKeys(): boolean {
-  return Boolean(process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET && process.env.KIS_FUT_CODE);
+  return Boolean(process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET);
+}
+
+// 야간 코스피200 선물 최근월물 코드 자동 산출 — 월물 교체를 사람이 챙길 필요 없게.
+// KIS 마스터(fo_cme_code.mst) 실측 규칙: "1A01" + 연도 끝자리 + 월물(03/06/09/12)
+//   예: 2026년 9월물 = 1A01609, 2026년 12월물 = 1A01612, 2027년 3월물 = 1A01703
+// 만기 = 분기월 둘째 목요일 — 만기일 당일 저녁(야간)부터는 다음 월물이 최근월.
+export function frontMonthNightFutCode(now = new Date()): string {
+  const kst = new Date(now.getTime() + 9 * 3600 * 1000);
+  let y = kst.getUTCFullYear();
+  let m = kst.getUTCMonth() + 1;
+  // qm은 항상 3/6/9/12 중 하나 — 다음 분기월은 +3 (12월이면 이듬해 3월)
+  const nextQuarter = (mm: number): [number, number] => (mm >= 12 ? [qy + 1, 3] : [qy, mm + 3]);
+
+  // 현재 이후 첫 분기월(3/6/9/12)
+  let qy = y;
+  let qm = [3, 6, 9, 12].find((q) => q >= m) ?? (qy++, 3);
+  if (qm === m) {
+    // 이번 달이 만기월이면 둘째 목요일(만기일)부터 다음 월물
+    const firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); // 0일~6토
+    const secondThu = 1 + ((4 - firstDow + 7) % 7) + 7;
+    if (kst.getUTCDate() >= secondThu) [qy, qm] = nextQuarter(qm);
+  }
+  return `1A01${qy % 10}${String(qm).padStart(2, "0")}`;
 }
 
 async function getToken(): Promise<string | null> {
@@ -47,8 +70,9 @@ export type KisFutures = { price: number; changePercent: number } | null;
 export async function fetchKisNightFutures(): Promise<KisFutures> {
   const appkey = process.env.KIS_APP_KEY;
   const appsecret = process.env.KIS_APP_SECRET;
-  const code = process.env.KIS_FUT_CODE;
-  if (!appkey || !appsecret || !code) return null;
+  // 수동 지정(KIS_FUT_CODE)이 있으면 우선, 없으면 최근월물 자동 산출 (분기 만기 자동 교체)
+  const code = process.env.KIS_FUT_CODE || frontMonthNightFutCode();
+  if (!appkey || !appsecret) return null;
   const token = await getToken();
   if (!token) return null;
   try {
