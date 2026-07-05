@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
         consensusIntact: features?.consensus_intact ?? null,
         causeNonEarnings: features?.cause_non_earnings ?? null,
         qualSource: features?.annotation_source ?? null,
+        macroSurprise: features?.macro_surprise ?? null,
       }),
       collectTick(),
     ]);

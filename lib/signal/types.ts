@@ -40,6 +40,10 @@ export type PremarketContext = {
   rebalance: "순풍" | "역풍" | "중립";                                  // C2
   usdkrw: { level: number | null; changePercent: number | null };       // C3
   usRates: { t10yChangePct: number | null; regime: "상승" | "안정" | "하락" | null }; // C4
+  // 매크로 "추세 중의 변화" 감지용 — 5일 추세와 전일 방향이 반대면 전환 신호 (성공사례 원형: 금리 상승 추세 꺾임)
+  macroTrend: { t10y5dPct: number | null; usdkrw5dPct: number | null };
+  // 경제지표 서프라이즈 방향 (AI가 뉴스에서 판정 — 예: NFP 컨센 11만 vs 실제 5만 = easing)
+  macroSurprise: "easing" | "tightening" | null;
   overnight: { nasdaqPct: number | null; soxPct: number | null };       // C5
   hynixDaily: DailyBar[];      // 최신이 마지막. NR7·ATR·누적낙폭·갭 계산용
   samsungDaily: DailyBar[];
@@ -159,7 +163,13 @@ export type Judgment = {
   setups: SetupResult;
   risk: RiskResult;
   ext: ExtRecord;
-  crashContext: { active: boolean; cumPct: number | null; detail: string }; // 분기1 (XS1 근거)
+  crashContext: {
+    active: boolean;
+    cumPct: number | null;
+    detail: string;
+    // V반등 조기 반전 감지 — 저점 대비 반등 시작 + Bias 상방 강함일 때 지속 확인 전 1/3 비중 선진입 신호
+    earlyRebound?: boolean;
+  }; // 분기1 (XS1 근거)
   dataNotes: string[];         // 미산출 신호 목록 등
 };
 
@@ -182,6 +192,7 @@ export type DailyFeatureRow = {
   cause_note: string | null;
   consensus_intact: boolean | null;
   cause_non_earnings: boolean | null;
+  macro_surprise: "easing" | "tightening" | null;
   annotation_source: "ai" | "user" | null;
   ai_analyzed_at: string | null;
 };

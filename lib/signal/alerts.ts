@@ -60,6 +60,15 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
     };
   }
+  // V반등 조기 반전 — 지속 확인 전 1/3 비중 선진입 (2단계 진입의 1차. 늦으면 수익이 줄어드는 문제 대응)
+  if (j.dayType === "V반등후보" && j.crashContext.earlyRebound) {
+    return {
+      key: "vrebound_early",
+      severity: "high",
+      smsSubject: "진입신호 V반등(조기)",
+      text: `[스탁가드 신호] V반등 조기 반전 감지\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)`,
+    };
+  }
   if (j.dayType === "횡보일") {
     return {
       key: "range_day",

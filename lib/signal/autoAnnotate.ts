@@ -21,6 +21,7 @@ type AiAnnotation = {
   cause_note: string | null;
   cause_non_earnings: boolean | null;
   consensus_intact: boolean | null;
+  macro_surprise: "easing" | "tightening" | null;
 };
 
 export async function autoAnnotateIfNeeded(date: string): Promise<void> {
@@ -68,7 +69,8 @@ ${news.map((n) => `- ${n.title} (${n.source})`).join("\n")}
   "cause_tag": "${CAUSE_TAGS.join(" | ")}" 중 오늘 주가를 지배하는 재료 하나. 뚜렷한 재료가 없으면 null,
   "cause_note": "오늘의 지배 재료를 한 문장(80자 이내)으로. 예: '메타 AI 임대 뉴스로 하닉 급락, 펀더멘털 무관'. 뚜렷한 재료 없으면 null",
   "cause_non_earnings": 최근 하락이 있다면 그 원인이 실적·펀더멘털 훼손이 아닌 수급·지정학·소송 등 외부 요인인가? true/false. 최근 하락이 없거나 판단 불가면 null,
-  "consensus_intact": 뉴스상 증권사 이익 전망(컨센서스)이 유지·상향으로 보이는가? 하향 소식이 있으면 false. 판단할 근거가 없으면 null
+  "consensus_intact": 뉴스상 증권사 이익 전망(컨센서스)이 유지·상향으로 보이는가? 하향 소식이 있으면 false. 판단할 근거가 없으면 null,
+  "macro_surprise": 최근 24시간 내 주요 경제지표(고용·CPI·FOMC 등)가 컨센서스 대비 크게 벗어났는가? 지표 부진·완화적 발언 등 금리인하 방향 서프라이즈면 "easing", 지표 과열·긴축 방향이면 "tightening", 큰 서프라이즈가 없으면 null. (예: NFP 컨센서스 11만인데 실제 5만 = "easing")
 }
 
 주의: 확신이 없으면 null을 써라. 추측으로 true/false를 만들지 마라.`;
@@ -93,6 +95,7 @@ ${news.map((n) => `- ${n.title} (${n.source})`).join("\n")}
         cause_note: typeof parsed.cause_note === "string" ? parsed.cause_note.slice(0, 300) : null,
         cause_non_earnings: typeof parsed.cause_non_earnings === "boolean" ? parsed.cause_non_earnings : null,
         consensus_intact: typeof parsed.consensus_intact === "boolean" ? parsed.consensus_intact : null,
+        macro_surprise: parsed.macro_surprise === "easing" || parsed.macro_surprise === "tightening" ? parsed.macro_surprise : null,
         annotation_source: "ai",
         ai_analyzed_at: new Date().toISOString(),
       },

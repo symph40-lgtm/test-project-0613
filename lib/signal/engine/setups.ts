@@ -49,10 +49,14 @@ export function computeSetups(inp: Inputs): SetupResult {
   l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "AI 분석 대기" : qualSrc);
   l("L8", "이익 컨센서스 유지·상향", "가점", ctx.consensusIntact, 2, ctx.consensusIntact === null ? "AI 분석 대기" : qualSrc);
   l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
-  const l10 = ctx.usRates.t10yChangePct !== null && ctx.overnight.nasdaqPct !== null
-    ? ctx.usRates.t10yChangePct < -0.5 && ctx.overnight.nasdaqPct > 0.5
-    : null;
-  l("L10", "전일 매크로 서프라이즈 완화적", "가점", l10, 2, l10 === null ? "자동 근사 불가" : "금리↓+나스닥↑ 근사");
+  // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응(금리↓+나스닥↑)으로 근사
+  const l10 = ctx.macroSurprise !== null
+    ? ctx.macroSurprise === "easing"
+    : ctx.usRates.t10yChangePct !== null && ctx.overnight.nasdaqPct !== null
+      ? ctx.usRates.t10yChangePct < -0.5 && ctx.overnight.nasdaqPct > 0.5
+      : null;
+  l("L10", "전일 매크로 서프라이즈 완화적", "가점", l10, 2,
+    ctx.macroSurprise !== null ? `지표 서프라이즈 ${ctx.macroSurprise === "easing" ? "완화" : "긴축"} (AI 판정)` : l10 === null ? "자동 근사 불가" : "금리↓+나스닥↑ 근사");
   l("L11", "기대인플레 하락 추세", "가점", null, 1, "데이터 소스 없음 — 수동 확인");
 
   // 금지 X1~X3

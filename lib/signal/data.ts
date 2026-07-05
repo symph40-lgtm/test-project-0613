@@ -160,15 +160,17 @@ export async function buildPremarketContext(manual?: {
   consensusIntact: boolean | null;
   causeNonEarnings: boolean | null;
   qualSource?: "ai" | "user" | null;
+  macroSurprise?: "easing" | "tightening" | null;
 }): Promise<PremarketContext> {
   const { date } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
-  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20] = await Promise.all([
+  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20, macroTrend] = await Promise.all([
     fetchMarketData().catch(() => null),
     fetchDailyBars(hynix, 40),
     fetchDailyBars(samsung, 40),
     fetchDailyBars("KPI200", 40),
     fetchFrgn20dAvg(hynix),
+    fetchMacro5dTrend(),
   ]);
   const samsungFrgnAvg = await fetchFrgn20dAvg(samsung);
 
@@ -194,6 +196,8 @@ export async function buildPremarketContext(manual?: {
       changePercent: market?.usdkrw?.changePercent ?? null,
     },
     usRates: { t10yChangePct: t10, regime },
+    macroTrend,
+    macroSurprise: manual?.macroSurprise ?? null,
     overnight: {
       nasdaqPct: market?.nasdaq?.changePercent ?? null,
       soxPct: market?.sox?.changePercent ?? null,
@@ -206,6 +210,24 @@ export async function buildPremarketContext(manual?: {
     causeNonEarnings: manual?.causeNonEarnings ?? null,
     qualSource: manual?.qualSource ?? null,
   };
+}
+
+// ── 매크로 5일 추세 — "추세 중의 변화" 감지용 (금리·환율이 상승 추세였다가 꺾이는 전환 포착)
+async function fetchMacro5dTrend(): Promise<{ t10y5dPct: number | null; usdkrw5dPct: number | null }> {
+  const trend5d = async (symbol: string): Promise<number | null> => {
+    try {
+      const r = await yf.chart(symbol, { period1: new Date(Date.now() - 14 * 86400000), interval: "1d" });
+      const closes = (r.quotes ?? []).map((q) => q.close).filter((c): c is number => c != null);
+      if (closes.length < 6) return null;
+      const start = closes[closes.length - 6];
+      const end = closes[closes.length - 1];
+      return start > 0 ? ((end - start) / start) * 100 : null;
+    } catch {
+      return null;
+    }
+  };
+  const [t10y5dPct, usdkrw5dPct] = await Promise.all([trend5d("^TNX"), trend5d("KRW=X")]);
+  return { t10y5dPct, usdkrw5dPct };
 }
 
 // ── 외인 순매매 20일 평균(절대값) — L5 ③상대강도의 분모 (마스터 5장 배율 정규화)

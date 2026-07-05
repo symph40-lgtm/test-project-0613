@@ -37,6 +37,26 @@ export function computeBias(ctx: PremarketContext): BiasResult {
       `나스닥 ${fmtPct(nasdaqPct)} · SOX ${fmtPct(soxPct)}`);
   }
 
+  // L10 — 경제지표 서프라이즈 (AI가 뉴스에서 직접 판정 — 컨센서스 대비 발표값의 방향)
+  // 성공사례 원형: NFP 컨센 11만 vs 실제 5만 = easing → 금리인상 우려 후퇴 = 하락 추세 전환의 선행 신호
+  if (ctx.macroSurprise === "easing") add("L10", "지표 서프라이즈 완화적", "상방", "컨센서스 대비 완화 방향 — 매크로 전환 선행 신호");
+  else if (ctx.macroSurprise === "tightening") add("L10", "지표 서프라이즈 긴축적", "하방", "컨센서스 대비 긴축 방향");
+
+  // 매크로 전환 감지 — "추세 중의 변화"가 방향 전환을 선행 (5일 추세와 전일 방향이 반대)
+  const { t10y5dPct, usdkrw5dPct } = ctx.macroTrend;
+  if (t10y5dPct !== null && t10yChangePct !== null) {
+    if (t10y5dPct > 1 && t10yChangePct < -0.5)
+      add("전환", "금리 상승 추세 꺾임", "상방", `5일 +${t10y5dPct.toFixed(1)}% 추세 중 전일 ${t10yChangePct.toFixed(1)}% 반락`);
+    else if (t10y5dPct < -1 && t10yChangePct > 0.5)
+      add("전환", "금리 하락 추세 꺾임", "하방", `5일 ${t10y5dPct.toFixed(1)}% 추세 중 전일 +${t10yChangePct.toFixed(1)}% 반등`);
+  }
+  if (usdkrw5dPct !== null && fx !== null) {
+    if (usdkrw5dPct > 0.7 && fx < -0.2)
+      add("전환", "환율 상승 추세 꺾임", "상방", `5일 +${usdkrw5dPct.toFixed(1)}% 추세 중 전일 ${fx.toFixed(1)}% 반락`);
+    else if (usdkrw5dPct < -0.7 && fx > 0.2)
+      add("전환", "환율 하락 추세 꺾임", "하방", `5일 ${usdkrw5dPct.toFixed(1)}% 추세 중 전일 +${fx.toFixed(1)}% 반등`);
+  }
+
   // 모멘텀 맥락 — 과대 낙폭(L6, 역발상 상방) / 과열(S1, 하방)
   const cum3 = cumReturnPct(ctx.hynixDaily, 3, true);
   if (cum3 !== null && cum3 <= SIGNAL_CONFIG.crashCumPct) {

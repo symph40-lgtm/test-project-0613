@@ -93,6 +93,8 @@ function makeCtx(over: Partial<PremarketContext> & { hynixDaily: DailyBar[] }): 
     rebalance: "중립",
     usdkrw: { level: 1450, changePercent: -0.1 },
     usRates: { t10yChangePct: -0.3, regime: "안정" },
+    macroTrend: { t10y5dPct: null, usdkrw5dPct: null },
+    macroSurprise: null,
     overnight: { nasdaqPct: 0.5, soxPct: 0.8 },
     samsungDaily: over.hynixDaily,
     k200Daily: over.hynixDaily,
@@ -220,7 +222,7 @@ export function runBacktest(): BacktestResult[] {
   }
 
   // ── 7/3 — 전일 -14.6% 폭락, 무갭(+0.5%) 출발 → 09:59 저점 -6.4% → V반전 후 종일 상승 (실측 분봉 경로)
-  // 반전 후 지속 확인은 10:30~11:00에야 성립 — 진입 창 13:30 연장의 실측 근거. 12:00 판정으로 검증.
+  // 성공사례 원형: NFP 서프라이즈(easing) + 금리·환율 상승 추세 꺾임 + 과매도 + 비실적 낙폭
   {
     const daily = dailyWithMoves(2_650_000, [-3.4, -14.6]); // 7/1 -3.4%, 7/2 -14.6% (실측)
     const ctx = makeCtx({
@@ -229,6 +231,8 @@ export function runBacktest(): BacktestResult[] {
       consensusIntact: true,
       usdkrw: { level: 1440, changePercent: -0.4 },
       usRates: { t10yChangePct: -1.5, regime: "하락" },
+      macroTrend: { t10y5dPct: 3.2, usdkrw5dPct: 1.1 }, // 상승 추세였다가 전일 꺾임 (전환 감지)
+      macroSurprise: "easing",                            // NFP 컨센 11만 vs 실제 5만대
       overnight: { nasdaqPct: 1.2, soxPct: 1.5 },
     });
     const ticks = makeTicks(
@@ -246,6 +250,36 @@ export function runBacktest(): BacktestResult[] {
       j, j.dayType === "V반등후보" && longOk,
       `dayType=${j.dayType}, 롱=${j.setups.long.verdict}(가점 ${j.setups.long.bonus})`,
       `DC1=${j.trend?.dc1 !== null && j.trend?.dc1 !== undefined ? (j.trend.dc1 * 100).toFixed(0) + "%" : "-"}`);
+  }
+
+  // ── 7/3 조기 반전 — 저점(09:59 -6.4%) 직후 10:10 시점: 지속 확인 전이지만 Bias 강함 + 반등 시작
+  // → 1/3 비중 선진입 신호 (사용자 실전: -5% 반전 초입 진입 → +24%. 늦으면 수익이 줄어드는 문제 대응)
+  {
+    const daily = dailyWithMoves(2_650_000, [-3.4, -14.6]);
+    const ctx = makeCtx({
+      hynixDaily: daily,
+      causeNonEarnings: true,
+      consensusIntact: true,
+      usdkrw: { level: 1440, changePercent: -0.4 },
+      usRates: { t10yChangePct: -1.5, regime: "하락" },
+      macroTrend: { t10y5dPct: 3.2, usdkrw5dPct: 1.1 },
+      macroSurprise: "easing",
+      overnight: { nasdaqPct: 1.2, soxPct: 1.5 },
+    });
+    const ticks = makeTicks(
+      [
+        { from: 540, to: 559, startPct: 1.6, endPct: -3.3 },
+        { from: 559, to: 600, startPct: -3.3, endPct: -6.4 }, // 09:59 저점
+        { from: 600, to: 610, startPct: -6.4, endPct: -4.0 }, // 반등 시작 (+2.4%p)
+      ],
+      { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 1.0, twiiChg: 0.9 },
+    );
+    const j = decide(ctx, ticks, 610, new Date().toISOString());
+    check("7/3 조기", "저점 직후 10:10 — 반등 +2.4%p 시작, 지속 확인 전", "조기 반전 감지 → 1/3 선진입 신호",
+      j, j.dayType === "V반등후보" && j.crashContext.earlyRebound === true &&
+        j.setups.long.verdict !== "진입후보" && j.setups.long.verdict !== "강한신호",
+      `dayType=${j.dayType}, 조기=${j.crashContext.earlyRebound}, 롱=${j.setups.long.verdict}`,
+      `Bias ${j.bias.dir} 강도${j.bias.strength}`);
   }
 
   // ── 6/25 — 전전일 -12.5% 폭락 후 갭 +11% (XS1 필수 사례 — 직전 누적 최악 실측 -11.6%)

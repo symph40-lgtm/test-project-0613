@@ -22,7 +22,7 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
   // ── 분기 1 — 직전 1~3일 폭락 여부 (V반등 우선, XS1)
   const crashCum = worstCumDeclinePct(ctx.hynixDaily, true);
   const crashActive = crashCum !== null && crashCum <= SIGNAL_CONFIG.crashCumPct;
-  const crashContext = {
+  const crashContext: Judgment["crashContext"] = {
     active: crashActive,
     cumPct: crashCum,
     detail: crashCum === null ? "일봉 데이터 부족" : `하닉 직전 1~3일 최대 누적 ${crashCum.toFixed(1)}% (기준 ${SIGNAL_CONFIG.crashCumPct}%)`,
@@ -72,9 +72,27 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
   } else if (crashActive) {
     // 분기 1 — V반등 셋업 우선, 인버스 금지 (XS1)
     dayType = "V반등후보";
+    // 조기 반전 감지 (2단계 진입의 1단계) — "지속 확인"을 기다리면 늦다는 사용자 요구(성공사례:
+    // -5% 반전 초입 진입 → +24%). Bias가 강하게 상방(서프라이즈·과매도·비실적 정렬)이고
+    // 저점 대비 반등이 시작되면 지속 확인 전에 1/3 비중 선진입 신호. 큰 갭상승 출발(X1)은 제외.
+    const futPts = ticks.filter((t) => t.futChg !== null).map((t) => t.futChg as number);
+    const dayLowPct = futPts.length > 0 ? Math.min(...futPts) : null;
+    const lastPct = futPts.length > 0 ? futPts[futPts.length - 1] : null;
+    const reboundPp = dayLowPct !== null && lastPct !== null ? lastPct - dayLowPct : null;
+    const earlyRebound =
+      phase === "판정" &&
+      bias.dir === "상방" && bias.strength >= 2 &&
+      reboundPp !== null && reboundPp >= 1.5 &&
+      !(gap !== null && gap > SIGNAL_CONFIG.gapBigPct) &&
+      setups.long.verdict !== "진입후보" && setups.long.verdict !== "강한신호";
+    crashContext.earlyRebound = earlyRebound;
+
     if (setups.long.verdict === "진입후보" || setups.long.verdict === "강한신호") {
       headline = `V반등 셋업 ${setups.long.verdict} — 반전 후 진행 확인됨 (가점 ${setups.long.bonus}점)`;
       action = `레버리지 ${risk.sizeGuide}. 스탑 -${risk.stopFixedPct}%${risk.stopAtrPct ? ` (ATR 권장 -${risk.stopAtrPct.toFixed(1)}%)` : ""}.`;
+    } else if (earlyRebound) {
+      headline = `V반등 조기 반전 감지 — 저점 대비 +${reboundPp!.toFixed(1)}%p 반등 시작 (Bias 상방 강도${bias.strength})`;
+      action = `선진입 검토: 레버리지 1/3 비중만 (R7 1차). 스탑 타이트 -${risk.stopFixedPct}%. 지속 확인되면 본진입 신호 발송.`;
     } else {
       headline = `폭락 후 구간 — 반전 대기 (괴리는 진입 신호가 아님, 반전 확인 후)`;
       action = "L3 반전 후 지속 확인까지 관찰. 인버스 절대 금지(XS1).";
