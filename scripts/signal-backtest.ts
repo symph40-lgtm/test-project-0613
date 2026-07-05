@@ -47,8 +47,9 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
 });
 const moveCases: { name: string; tick: IntradayTick; expectKeys: string[] }[] = [
   { name: "하닉 -5.2% (급락 2단계)", tick: mkTick({ hynixChg: -5.2 }), expectKeys: ["move_hynix_d5"] },
-  { name: "하닉 +3.4% 급등 + 선물 -1.8%", tick: mkTick({ hynixChg: 3.4, futChg: -1.8 }), expectKeys: ["move_hynix_u3", "move_fut_d1.5"] },
-  { name: "미돌파 (하닉 -2.9%)", tick: mkTick({ hynixChg: -2.9 }), expectKeys: [] },
+  { name: "하닉 +3.4% 급등 + 선물 -1.8%", tick: mkTick({ hynixChg: 3.4, futChg: -1.8 }), expectKeys: ["move_hynix_u3", "move_fut_d1"] },
+  { name: "선물 -2.3% (2단계)", tick: mkTick({ futChg: -2.3 }), expectKeys: ["move_fut_d2"] },
+  { name: "미돌파 (하닉 -2.9% · 선물 -0.8%)", tick: mkTick({ hynixChg: -2.9, futChg: -0.8 }), expectKeys: [] },
   { name: "장외 시간 (16:30)", tick: mkTick({ hynixChg: -8, minuteOfDay: 990 }), expectKeys: [] },
 ];
 for (const c of moveCases) {
