@@ -76,7 +76,7 @@ async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean
           from: sender,
           text,
           type: isLms ? "LMS" : "SMS",
-          ...(isLms ? { subject: "스탁가드 알림" } : {}),
+          // 제목 없이 발송 (사용자 요청 — subject 생략 시 무제 발송)
         },
       }),
     });
@@ -99,9 +99,8 @@ async function sendViaAligo(phone: string, text: string): Promise<{ ok: boolean;
       sender: process.env.ALIGO_SENDER!,
       receiver: phone,
       msg: text,
-      // 90byte 초과 시 자동으로 LMS 전환
+      // 90byte 초과 시 자동으로 LMS 전환. 제목 없이 발송 (사용자 요청)
       msg_type: text.length > 45 ? "LMS" : "SMS",
-      title: "스탁가드 알림",
     });
 
     const res = await fetch("https://apis.aligo.in/send/", {
