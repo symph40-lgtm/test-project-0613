@@ -3,7 +3,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchMarketData } from "@/lib/market/fetch";
 import { calculateRiskScores, calculateCompositeScore, classifyStage } from "@/lib/market/risk";
 import { sendEmail } from "@/lib/email";
-import { sendSms } from "@/lib/sms";
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -54,8 +53,6 @@ export async function GET(req: NextRequest) {
       byUser.set(ch.user_id, entry);
     }
 
-    const smsText = `[스탁가드] 장중 시황 ${stage} (리스크 ${composite})\n${summaryText}`;
-
     let sent = 0;
     const now = new Date().toISOString();
 
@@ -71,10 +68,8 @@ export async function GET(req: NextRequest) {
         isSent = r.ok || isSent;
       }
 
-      if (contacts.sms) {
-        const r = await sendSms({ to: contacts.sms, text: smsText });
-        isSent = r.ok || isSent;
-      }
+      // 시황 요약은 문자 미발송 (사용자 결정 2026-07-05 — 정보성 요약이라 이메일로 충분,
+      // 하루 3회 고정 발송이라 LMS 요금 절약. 문자는 신호·급락 등 행동 필요 알림 전용)
 
       await admin.from("alerts").insert({
         user_id: userId,
