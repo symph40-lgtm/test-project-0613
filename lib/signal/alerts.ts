@@ -9,7 +9,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSms } from "@/lib/sms";
 import { sendEmail } from "@/lib/email";
-import type { Judgment } from "./types";
+import { SIGNAL_CONFIG } from "./config";
+import type { IntradayTick, Judgment } from "./types";
 
 type SignalAlert = { key: string; severity: "high" | "medium" | "low"; text: string };
 
@@ -61,15 +62,62 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
   return null;
 }
 
-// 발송 실행 — state 라우트에서 판정마다 호출 (내부에서 중복·수신자 판단)
-export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; skipped: string | null }> {
-  const alert = buildSignalAlert(j);
-  if (!alert) return { sent: 0, skipped: "알림 대상 아님" };
+// ── 장중 급변 감지 (순수 함수) — 당일 등락률이 단계(config.moveAlert)를 돌파하면 알림 생성.
+// 판정 구간과 무관하게 장중(09:00~15:45) 전체 감시 — 보유 중 트레일링 점검·급등 확인용.
+// 문자 요금 절약을 위해 90바이트 이내 단문으로 압축 (상세는 이메일·대시보드).
+export function buildMoveAlerts(tick: IntradayTick | undefined): SignalAlert[] {
+  if (!tick) return [];
+  const S = SIGNAL_CONFIG.session;
+  if (tick.minuteOfDay < S.openMin || tick.minuteOfDay > S.endMin + 15) return [];
+  const hhmm = `${String(Math.floor(tick.minuteOfDay / 60)).padStart(2, "0")}:${String(tick.minuteOfDay % 60).padStart(2, "0")}`;
 
+  const targets: { name: string; sym: string; chg: number | null; levels: readonly number[] }[] = [
+    { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: SIGNAL_CONFIG.moveAlert.stockLevels },
+    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: SIGNAL_CONFIG.moveAlert.stockLevels },
+    { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: SIGNAL_CONFIG.moveAlert.futLevels },
+  ];
+
+  const alerts: SignalAlert[] = [];
+  for (const t of targets) {
+    if (t.chg === null || !isFinite(t.chg)) continue;
+    // 돌파한 최고 단계 1개만 (예: -7.2%면 -7 단계. -3·-5는 이미 지난 단계지만 미발송이었다면 이 단계 알림이 커버)
+    const crossed = t.levels.filter((lv) => Math.abs(t.chg as number) >= lv);
+    if (crossed.length === 0) continue;
+    const level = Math.max(...crossed);
+    const dir = (t.chg as number) > 0 ? "급등" : "급락";
+    const sign = (t.chg as number) > 0 ? "+" : "";
+    alerts.push({
+      key: `move_${t.sym}_${(t.chg as number) > 0 ? "u" : "d"}${level}`,
+      severity: Math.abs(t.chg as number) >= t.levels[t.levels.length - 1] ? "high" : "medium",
+      // 단문 (≤90바이트): "[스탁가드] SK하이닉스 급락 -5.2% (10:41) 위험선·트레일링 점검"
+      text: `[스탁가드] ${t.name} ${dir} ${sign}${(t.chg as number).toFixed(1)}% (${hhmm}) ${dir === "급락" ? "위험선·트레일링 점검" : "과열·청산 검토"}`,
+    });
+  }
+  return alerts;
+}
+
+// 급변 알림 발송 — state 라우트에서 틱마다 호출 (단계별 1일 1회 중복 방지)
+export async function maybeSendMoveAlerts(date: string, tick: IntradayTick | undefined): Promise<number> {
+  const alerts = buildMoveAlerts(tick);
+  if (alerts.length === 0) return 0;
+  let sent = 0;
+  for (const alert of alerts) {
+    sent += await dispatchToChannels(date, alert, `장중 급변 — ${alert.text.slice(7, 40)}`);
+  }
+  return sent;
+}
+
+// ── 공용 발송 — alertKey 기준 1일 1회, 인증·동의된 문자+이메일 채널에 발송, alerts에 이력 기록
+async function dispatchToChannels(
+  date: string,
+  alert: SignalAlert,
+  emailSubject?: string,
+  snapshot?: Record<string, unknown>,
+): Promise<number> {
   const admin = createAdminClient();
 
   // 오늘(KST) 이미 발송된 alertKey인지 확인
-  const kstDayStartUtc = new Date(`${j.date}T00:00:00+09:00`).toISOString();
+  const kstDayStartUtc = new Date(`${date}T00:00:00+09:00`).toISOString();
   const { data: sentToday } = await admin
     .from("alerts")
     .select("user_id, message")
@@ -101,7 +149,6 @@ export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; s
   for (const [userId, ch] of byUser) {
     if (alreadyByUser.has(userId)) continue;
     const results: string[] = [];
-    // SMS — 알리고 IP 인증 실패 가능(유동 IP), 실패해도 이메일로 커버
     if (ch.sms) {
       const r = await sendSms({ to: ch.sms, text: alert.text }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`sms:${r.ok ? "ok" : "fail"}`);
@@ -110,7 +157,7 @@ export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; s
     if (ch.email) {
       const r = await sendEmail({
         to: ch.email,
-        subject: alert.text.split("\n")[0], // 첫 줄 = 제목
+        subject: emailSubject ?? alert.text.split("\n")[0],
         text: `${alert.text}\n\n대시보드: https://test-project-0613.vercel.app/signal\n(판단 보조 알림입니다 — 최종 결정과 책임은 본인에게 있습니다)`,
       }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`email:${r.ok ? "ok" : "fail"}`);
@@ -121,11 +168,19 @@ export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; s
       user_id: userId,
       trigger_key: "signal",
       severity: alert.severity,
-      message: { alertKey: alert.key, dayType: j.dayType, text: alert.text, channels: results },
-      market_snapshot: { headline: j.headline, ts: j.ts },
+      message: { alertKey: alert.key, text: alert.text, channels: results },
+      market_snapshot: snapshot ?? null,
       is_sent: anyOk,
       sent_at: anyOk ? new Date().toISOString() : null,
     });
   }
-  return { sent, skipped: sent === 0 ? (byUser.size ? "전원 기발송/실패" : "알림 채널 없음") : null };
+  return sent;
+}
+
+// 발송 실행 — state 라우트에서 판정마다 호출 (내부에서 중복·수신자 판단)
+export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; skipped: string | null }> {
+  const alert = buildSignalAlert(j);
+  if (!alert) return { sent: 0, skipped: "알림 대상 아님" };
+  const sent = await dispatchToChannels(j.date, alert, undefined, { headline: j.headline, dayType: j.dayType, ts: j.ts });
+  return { sent, skipped: sent === 0 ? "기발송 또는 채널 없음" : null };
 }

@@ -2,6 +2,8 @@
 // 엔진(lib/signal/engine)·backtest는 외부 의존성 없는 순수 함수라 DB·API 없이 실행된다.
 
 import { runBacktest } from "../lib/signal/backtest";
+import { buildMoveAlerts } from "../lib/signal/alerts";
+import type { IntradayTick } from "../lib/signal/types";
 
 const results = runBacktest();
 for (const r of results) {
@@ -33,6 +35,29 @@ for (const [name, want] of Object.entries(smsExpect)) {
   const ok = got === want;
   if (!ok) failed++;
   console.log(`[${ok ? "PASS" : "FAIL"}] ${name} — 발송 ${want ? "필요" : "금지"} / 실제 ${got ? "발송" : "미발송"}`);
+}
+
+// 장중 급변 알림 검증 — 단계 돌파·미돌파·장외 시간
+console.log("\n── 급변 알림 검증");
+const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
+  ts: "", minuteOfDay: 650, futPx: null, futChg: null, k200Px: null,
+  hynixPx: null, hynixChg: null, samsungPx: null, samsungChg: null,
+  hynixFrgn: null, samsungFrgn: null, hynixInst: null, samsungInst: null,
+  nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
+});
+const moveCases: { name: string; tick: IntradayTick; expectKeys: string[] }[] = [
+  { name: "하닉 -5.2% (급락 2단계)", tick: mkTick({ hynixChg: -5.2 }), expectKeys: ["move_hynix_d5"] },
+  { name: "하닉 +3.4% 급등 + 선물 -1.8%", tick: mkTick({ hynixChg: 3.4, futChg: -1.8 }), expectKeys: ["move_hynix_u3", "move_fut_d1.5"] },
+  { name: "미돌파 (하닉 -2.9%)", tick: mkTick({ hynixChg: -2.9 }), expectKeys: [] },
+  { name: "장외 시간 (16:30)", tick: mkTick({ hynixChg: -8, minuteOfDay: 990 }), expectKeys: [] },
+];
+for (const c of moveCases) {
+  const got = buildMoveAlerts(c.tick).map((a) => a.key).sort();
+  const want = [...c.expectKeys].sort();
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) failed++;
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 [${want.join(",")}] / 실제 [${got.join(",")}]`);
+  for (const a of buildMoveAlerts(c.tick)) console.log(`  📱 ${a.text}`);
 }
 
 console.log(`\n총 실패 ${failed}건`);

@@ -100,6 +100,12 @@ export const SIGNAL_CONFIG = {
     bonusCapRatio: 0.3,    // 8.5 확장 가점 합산 ≤ T-스코어 총점의 30%
   },
 
+  // ── 장중 급변 알림 (당일 등락률 단계 돌파 시 문자+이메일, 단계별 1일 1회. 장중 전체 감시)
+  moveAlert: {
+    stockLevels: [3, 5, 7, 10],  // 하닉·삼전 ±%
+    futLevels: [1.5, 2.5, 4],    // 코스피200 선물 ±%
+  },
+
   // ── 대상 종목·상품 배수
   symbols: {
     hynix: "000660",
