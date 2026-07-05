@@ -1,16 +1,22 @@
-// SMS 발송 유틸리티 (Aligo)
-// ALIGO_API_KEY / ALIGO_USER_ID / ALIGO_SENDER 환경변수가 모두 설정된 경우 Aligo API 사용,
-// 하나라도 없으면 console.log fallback (개발 모드)
+// SMS 발송 유틸리티 — Solapi(쿨SMS) 우선, 알리고 폴백, 둘 다 없으면 console.log (개발 모드)
 //
-// 발송 전 Aligo 콘솔에서 발신번호 사전등록이 완료되어 있어야 합니다.
-// https://smartsms.aligo.in/
+// Solapi (권장 — 2026-07-05 교체): API Key + Secret HMAC 서명 인증이라 발송 IP 등록이 필요 없음.
+//   알리고는 발송 IP 사전등록제라 유동 IP인 Vercel 서버에서 인증오류(-101)로 발송 불가했음.
+//   필요 env: SOLAPI_API_KEY / SOLAPI_API_SECRET / SOLAPI_SENDER (콘솔에 사전 등록된 발신번호)
+// Aligo (폴백): ALIGO_API_KEY / ALIGO_USER_ID / ALIGO_SENDER — 고정 IP 서버에서만 유효.
+
+import crypto from "crypto";
 
 export function hasSmsProvider(): boolean {
-  return Boolean(
-    process.env.ALIGO_API_KEY &&
-      process.env.ALIGO_USER_ID &&
-      process.env.ALIGO_SENDER,
-  );
+  return hasSolapi() || hasAligo();
+}
+
+function hasSolapi(): boolean {
+  return Boolean(process.env.SOLAPI_API_KEY && process.env.SOLAPI_API_SECRET && process.env.SOLAPI_SENDER);
+}
+
+function hasAligo(): boolean {
+  return Boolean(process.env.ALIGO_API_KEY && process.env.ALIGO_USER_ID && process.env.ALIGO_SENDER);
 }
 
 // 한국 휴대폰 번호 정규화: 하이픈/공백 제거, 010xxxxxxxx 형태
@@ -18,6 +24,13 @@ export function normalizePhone(raw: string): string | null {
   const digits = raw.replace(/\D/g, "");
   if (/^01[016789]\d{7,8}$/.test(digits)) return digits;
   return null;
+}
+
+// EUC-KR 근사 바이트 (한글 2바이트) — 90바이트 초과면 LMS
+function krByteLength(s: string): number {
+  let n = 0;
+  for (const ch of s) n += ch.charCodeAt(0) <= 0x7f ? 1 : 2;
+  return n;
 }
 
 export async function sendSms({
@@ -32,11 +45,53 @@ export async function sendSms({
     return { ok: false, error: "유효한 휴대폰 번호가 아닙니다." };
   }
 
-  if (!hasSmsProvider()) {
-    console.log(`[DEV SMS]\nTo: ${phone}\n\n${text}\n`);
-    return { ok: true };
-  }
+  if (hasSolapi()) return sendViaSolapi(phone, text);
+  if (hasAligo()) return sendViaAligo(phone, text);
 
+  console.log(`[DEV SMS]\nTo: ${phone}\n\n${text}\n`);
+  return { ok: true };
+}
+
+// ── Solapi v4 — HMAC-SHA256 서명 인증
+async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const apiKey = process.env.SOLAPI_API_KEY!;
+    const apiSecret = process.env.SOLAPI_API_SECRET!;
+    const sender = normalizePhone(process.env.SOLAPI_SENDER!) ?? process.env.SOLAPI_SENDER!;
+
+    const date = new Date().toISOString();
+    const salt = crypto.randomBytes(16).toString("hex");
+    const signature = crypto.createHmac("sha256", apiSecret).update(date + salt).digest("hex");
+
+    const isLms = krByteLength(text) > 90;
+    const res = await fetch("https://api.solapi.com/messages/v4/send", {
+      method: "POST",
+      headers: {
+        Authorization: `HMAC-SHA256 apiKey=${apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          to: phone,
+          from: sender,
+          text,
+          type: isLms ? "LMS" : "SMS",
+          ...(isLms ? { subject: "스탁가드 알림" } : {}),
+        },
+      }),
+    });
+
+    const body = (await res.json().catch(() => ({}))) as { statusCode?: string; statusMessage?: string; errorCode?: string; errorMessage?: string };
+    // 성공: HTTP 200 + groupId 반환. 실패: errorCode/errorMessage 또는 4xx
+    if (res.ok && !body.errorCode) return { ok: true };
+    return { ok: false, error: `Solapi 발송 실패: ${body.errorMessage ?? body.statusMessage ?? `HTTP ${res.status}`}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "알 수 없는 오류" };
+  }
+}
+
+// ── Aligo (레거시 폴백 — 등록 IP에서만 동작)
+async function sendViaAligo(phone: string, text: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const body = new URLSearchParams({
       key: process.env.ALIGO_API_KEY!,
