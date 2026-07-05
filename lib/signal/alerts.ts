@@ -6,18 +6,11 @@
 // 중복 방지: alerts 테이블(trigger_key='signal')에 오늘 같은 alertKey가 있으면 재발송 안 함.
 // 알림은 판단 보조일 뿐 매매 지시가 아니다 — 문구에 항상 "검토" 수준으로 표현.
 
-import { createAdminClient } from "@/lib/supabase/admin";
-import { sendSms } from "@/lib/sms";
-import { sendEmail } from "@/lib/email";
+import { dispatchToChannels, type ChannelAlert } from "@/lib/alerts/dispatch";
 import { SIGNAL_CONFIG } from "./config";
 import type { IntradayTick, Judgment } from "./types";
 
-type SignalAlert = {
-  key: string;
-  severity: "high" | "medium" | "low";
-  text: string;
-  smsSubject?: string; // 문자 제목 — 알림 종류 표시 (진입신호·급락트리거 등). 미지정 시 무제
-};
+type SignalAlert = ChannelAlert;
 
 // 판정 → 알림 여부·문구 결정 (없으면 null)
 export function buildSignalAlert(j: Judgment): SignalAlert | null {
@@ -120,85 +113,16 @@ export async function maybeSendMoveAlerts(date: string, tick: IntradayTick | und
   if (alerts.length === 0) return 0;
   let sent = 0;
   for (const alert of alerts) {
-    sent += await dispatchToChannels(date, alert, `장중 급변 — ${alert.text.slice(7, 40)}`);
-  }
-  return sent;
-}
-
-// ── 공용 발송 — alertKey 기준 1일 1회, 인증·동의된 문자+이메일 채널에 발송, alerts에 이력 기록
-async function dispatchToChannels(
-  date: string,
-  alert: SignalAlert,
-  emailSubject?: string,
-  snapshot?: Record<string, unknown>,
-): Promise<number> {
-  const admin = createAdminClient();
-
-  // 오늘(KST) 이미 발송된 alertKey인지 확인
-  const kstDayStartUtc = new Date(`${date}T00:00:00+09:00`).toISOString();
-  const { data: sentToday } = await admin
-    .from("alerts")
-    .select("user_id, message")
-    .eq("trigger_key", "signal")
-    .gte("created_at", kstDayStartUtc);
-  const alreadyByUser = new Set(
-    (sentToday ?? [])
-      .filter((r) => (r.message as { alertKey?: string } | null)?.alertKey === alert.key)
-      .map((r) => r.user_id as string),
-  );
-
-  // 수신자: 인증·동의된 SMS·이메일 채널 (사용자별 묶음)
-  const { data: channels } = await admin
-    .from("alert_channels")
-    .select("user_id, channel_type, contact")
-    .in("channel_type", ["sms", "email"])
-    .eq("verified", true)
-    .eq("consent_given", true);
-  const byUser = new Map<string, { sms?: string; email?: string }>();
-  for (const ch of channels ?? []) {
-    if (!ch.contact) continue;
-    const entry = byUser.get(ch.user_id) ?? {};
-    if (ch.channel_type === "sms") entry.sms = ch.contact;
-    if (ch.channel_type === "email") entry.email = ch.contact;
-    byUser.set(ch.user_id, entry);
-  }
-
-  let sent = 0;
-  for (const [userId, ch] of byUser) {
-    if (alreadyByUser.has(userId)) continue;
-    const results: string[] = [];
-    if (ch.sms) {
-      const r = await sendSms({ to: ch.sms, text: alert.text, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
-      results.push(`sms:${r.ok ? "ok" : "fail"}`);
-      if (r.ok) sent++;
-    }
-    if (ch.email) {
-      const r = await sendEmail({
-        to: ch.email,
-        subject: emailSubject ?? alert.text.split("\n")[0],
-        text: `${alert.text}\n\n대시보드: https://test-project-0613.vercel.app/signal\n(판단 보조 알림입니다 — 최종 결정과 책임은 본인에게 있습니다)`,
-      }).catch(() => ({ ok: false as const, error: "예외" }));
-      results.push(`email:${r.ok ? "ok" : "fail"}`);
-      if (r.ok) sent++;
-    }
-    const anyOk = results.some((s) => s.endsWith("ok"));
-    await admin.from("alerts").insert({
-      user_id: userId,
-      trigger_key: "signal",
-      severity: alert.severity,
-      message: { alertKey: alert.key, text: alert.text, channels: results },
-      market_snapshot: snapshot ?? null,
-      is_sent: anyOk,
-      sent_at: anyOk ? new Date().toISOString() : null,
-    });
+    sent += await dispatchToChannels("signal", date, alert, `장중 급변 — ${alert.text.slice(7, 40)}`);
   }
   return sent;
 }
 
 // 발송 실행 — state 라우트에서 판정마다 호출 (내부에서 중복·수신자 판단)
+// 공용 발송 경로(1일 1회 중복 방지·채널 조회)는 lib/alerts/dispatch.ts로 이동.
 export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; skipped: string | null }> {
   const alert = buildSignalAlert(j);
   if (!alert) return { sent: 0, skipped: "알림 대상 아님" };
-  const sent = await dispatchToChannels(j.date, alert, undefined, { headline: j.headline, dayType: j.dayType, ts: j.ts });
+  const sent = await dispatchToChannels("signal", j.date, alert, undefined, { headline: j.headline, dayType: j.dayType, ts: j.ts });
   return { sent, skipped: sent === 0 ? "기발송 또는 채널 없음" : null };
 }
