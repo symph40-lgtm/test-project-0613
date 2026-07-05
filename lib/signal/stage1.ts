@@ -46,13 +46,15 @@ export type Stage1Report = {
 };
 
 // ── 일봉 프록시 라벨
+// 효율 기준 0.7 (2026-07-05 실측 검증: 분봉이 남은 6일 대조에서 0.55는 7/2(왕복 하락)·7/3(V반전)을
+// 추세일로 과대 집계 — 0.7이면 실측 라벨과 6/6 일치. 반전일은 추세일이 아니라는 분류 체계와도 정합)
 function proxyLabel(b: DailyBar): { label: DayRecord["label"]; intradayPct: number } {
   const intradayPct = ((b.close - b.open) / b.open) * 100;
   const range = b.high - b.low;
   const eff = range > 0 ? Math.abs(b.close - b.open) / range : 0;
   const closePos = range > 0 ? (b.close - b.low) / range : 0.5;
-  if (intradayPct >= 2.5 && eff >= 0.55 && closePos >= 0.75) return { label: "상방추세일", intradayPct };
-  if (intradayPct <= -2.5 && eff >= 0.55 && closePos <= 0.25) return { label: "하방추세일", intradayPct };
+  if (intradayPct >= 2.5 && eff >= 0.7 && closePos >= 0.75) return { label: "상방추세일", intradayPct };
+  if (intradayPct <= -2.5 && eff >= 0.7 && closePos <= 0.25) return { label: "하방추세일", intradayPct };
   return { label: "비추세일", intradayPct };
 }
 
@@ -196,7 +198,7 @@ export async function runStage1(measuredRows?: { date: string; day_label: string
   rows.sort((a, b) => Math.abs(b.liftTrend - 1) - Math.abs(a.liftTrend - 1));
 
   const measured = records.filter((r) => r.labelSource === "실측").length;
-  notes.push(`백필 라벨은 일봉 프록시(일중 ±2.5%·효율 0.55·극단 마감) — 막판 급락일(6/12형)을 추세일로 셀 수 있음. 실측(10분봉 DC1) 라벨이 쌓이면 같은 날짜는 실측이 우선.`);
+  notes.push(`백필 라벨은 일봉 프록시(일중 ±2.5%·효율 0.7·극단 마감) — 분봉이 남은 6일 실측 대조로 검증(6/6 일치). 단 경로를 못 보므로 막판 급락일(6/12형)은 여전히 오분류 가능. 실측(10분봉 DC1) 라벨이 쌓이면 같은 날짜는 실측이 우선.`);
   notes.push(`표본 ${total}일 중 실측 ${measured}일 — 스펙 8.2 기준 Stage 1 신뢰 구간은 실측 60일부터. 그 전까지는 경향 참고용.`);
 
   return {
