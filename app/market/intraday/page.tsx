@@ -21,6 +21,7 @@ import { fetchKospi200Futures } from "@/lib/market/naver-flow";
 import { scoreHolding } from "@/lib/market/holdingScore";
 import { fetchAiStanceBias } from "@/lib/ai/insights";
 import { fetchBondSignal } from "@/lib/market/bondSignal";
+import { fetchUs2yIntraday } from "@/lib/market/rateIntraday";
 import { fetchSemiAiEarnings } from "@/lib/market/earnings";
 import { fetchSemiSectorNews } from "@/lib/news/fetch";
 import { fetchBigtechAiNews, detectUrgentBigtechAlert } from "@/lib/market/urgentAlert";
@@ -69,7 +70,7 @@ export default async function IntradaySummaryPage() {
     { ticker: "웨스턴디지털 (WDC)", symbol: "WDC" },
   ];
 
-  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal, kospiFut, bigtechNews] = await Promise.all([
+  const [market, quotes, news, bondHistory, earnings, bondEtf, semiQuotes, offHours, bondSignal, kospiFut, bigtechNews, us2y] = await Promise.all([
     fetchMarketData(),
     fetchPositionQuotes(quoteInputs),
     fetchSemiSectorNews(tickers, 15),
@@ -81,6 +82,7 @@ export default async function IntradaySummaryPage() {
     fetchBondSignal(),
     fetchKospi200Futures(),
     fetchBigtechAiNews(12),
+    fetchUs2yIntraday(),
   ]);
 
   const semiCompare = SEMI_COMPARE.map((s) => {
@@ -214,6 +216,7 @@ export default async function IntradaySummaryPage() {
       session={session}
       bondHistory={bondHistory}
       bondEtf={bondEtf}
+      us2y={us2y}
       semiCompare={semiCompare}
       earnings={earnings}
       holdings={holdings}

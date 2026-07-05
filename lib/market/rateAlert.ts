@@ -158,7 +158,11 @@ export function evaluateRateAlerts(samples: RateSample[], cfg: RateAlertConfig):
 }
 
 // ── 시세 조회 — 네이버 채권 API (실시간·무지연). FRED는 1~2영업일 지연이라 부적합.
-export type BondYieldQuote = { value: number | null; tradedAt: string | null };
+export type BondYieldQuote = {
+  value: number | null;
+  tradedAt: string | null;
+  change: number | null; // 전일 대비 (%p)
+};
 
 async function fetchNaverBond(reutersCode: string): Promise<BondYieldQuote> {
   try {
@@ -166,15 +170,17 @@ async function fetchNaverBond(reutersCode: string): Promise<BondYieldQuote> {
       headers: { "User-Agent": "Mozilla/5.0" },
       cache: "no-store",
     });
-    if (!res.ok) return { value: null, tradedAt: null };
-    const j = (await res.json()) as { closePrice?: string; localTradedAt?: string };
+    if (!res.ok) return { value: null, tradedAt: null, change: null };
+    const j = (await res.json()) as { closePrice?: string; localTradedAt?: string; fluctuations?: string };
     const v = parseFloat(j.closePrice ?? "");
+    const chg = parseFloat(j.fluctuations ?? "");
     return {
       value: isNaN(v) || v <= 0 || v >= 20 ? null : v,
       tradedAt: j.localTradedAt ?? null,
+      change: isNaN(chg) ? null : chg,
     };
   } catch {
-    return { value: null, tradedAt: null };
+    return { value: null, tradedAt: null, change: null };
   }
 }
 
@@ -191,8 +197,8 @@ export async function fetchUs10yYield(): Promise<BondYieldQuote> {
     const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
     const q = await yf.quote("^TNX");
     const p = q.regularMarketPrice;
-    return { value: typeof p === "number" && p > 0 && p < 20 ? p : null, tradedAt: null };
+    return { value: typeof p === "number" && p > 0 && p < 20 ? p : null, tradedAt: null, change: null };
   } catch {
-    return { value: null, tradedAt: null };
+    return { value: null, tradedAt: null, change: null };
   }
 }

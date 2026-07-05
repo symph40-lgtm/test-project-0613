@@ -14,6 +14,7 @@ import type { HoldingScore } from "@/lib/market/holdingScore";
 import type { OffHoursQuote, MainIndicator } from "@/lib/market/fetch";
 import type { Kospi200Futures } from "@/lib/market/naver-flow";
 import type { BondSignal, TriggerStatus } from "@/lib/market/bondSignal";
+import type { Us2yIntraday, Us2yPoint } from "@/lib/market/rateIntraday";
 import { STANCE7_META, type Stance7 } from "@/lib/market/stance";
 import { stageAction } from "@/lib/market/risk";
 import { UrgentBanner } from "../../_components/UrgentBanner";
@@ -218,10 +219,10 @@ function BondSignalCard({ sig }: { sig: BondSignal }) {
 }
 
 export default function IntradayClient({
-  market, offHours, kospiFut, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, semiCompare, earnings, holdings, recs, news, urgentAlert,
+  market, offHours, kospiFut, bondSignal, mainIndicators, composite, stage, posture, session, bondHistory, bondEtf, us2y, semiCompare, earnings, holdings, recs, news, urgentAlert,
 }: {
   market: MarketBlock; offHours: OffHoursQuote[]; kospiFut: Kospi200Futures | null; bondSignal: BondSignal | null; mainIndicators: MainIndicator[]; composite: number; stage: string; posture: Posture;
-  session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; semiCompare: SemiCmp[];
+  session: Session; bondHistory: BondPoint[]; bondEtf: BondEtf; us2y: Us2yIntraday; semiCompare: SemiCmp[];
   earnings: EarningsEvent[]; holdings: Holding[]; recs: HoldingScore[]; news: NewsItem[]; urgentAlert: UrgentAlert | null;
 }) {
   const router = useRouter();
@@ -559,6 +560,9 @@ export default function IntradayClient({
           vixChange: market.vix.changePercent,
         }}
       />
+
+      {/* 미국 2년물 금리 — 30분 단위 그래프·표 + 알람 조건 */}
+      <Us2yCard data={us2y} />
 
       {/* 채권·금리 실데이터 매도 시그널 */}
       {bondSignal && <BondSignalCard sig={bondSignal} />}
@@ -1040,6 +1044,153 @@ function PriceSparkline({ points, unit = "" }: { points: BondPoint[]; unit?: str
         <span>{points[points.length - 1].date} · {unit}{last.toFixed(2)}</span>
       </div>
     </div>
+  );
+}
+
+// ── 미국 2년물 금리 (30분 단위) — 금리 급등락 문자 알람(docs/rate-alert.md)의 감시 대상 시각화
+function kstTime(iso: string, withDate = false): string {
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return iso;
+  const kst = new Date(t + 9 * 3600 * 1000).toISOString(); // KST = UTC+9
+  const md = `${kst.slice(5, 7)}/${kst.slice(8, 10)}`;
+  const hm = kst.slice(11, 16);
+  return withDate ? `${md} ${hm}` : hm;
+}
+
+// %p 단위 변동 표기 (금리 변동은 %가 아니라 %p)
+function fmtDeltaPp(v: number | null, digits = 3): string {
+  if (v === null) return "—";
+  return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%p`;
+}
+
+// 30분 금리 차트 — 기준선(level)을 점선으로 함께 표시
+function Rate30mChart({ points, level }: { points: Us2yPoint[]; level: number }) {
+  const W = 320, H = 72, P = 4;
+  const vals = points.map((p) => p.value);
+  // 기준선이 항상 보이도록 도메인에 포함
+  const min = Math.min(...vals, level) - 0.005;
+  const max = Math.max(...vals, level) + 0.005;
+  const range = max - min || 1;
+  const yOf = (v: number) => P + (1 - (v - min) / range) * (H - P * 2);
+  const stepX = (W - P * 2) / Math.max(points.length - 1, 1);
+  const coords = points.map((p, i) => [P + i * stepX, yOf(p.value)] as const);
+  const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const first = points[0], last = points[points.length - 1];
+  const rising = last.value >= first.value;
+  const levelY = yOf(level);
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 72 }}>
+        {/* 알람 기준선 */}
+        <line x1={P} y1={levelY} x2={W - P} y2={levelY} stroke="#a16207" strokeWidth="1" strokeDasharray="4 3" />
+        <polyline points={coords.map(([x, y]) => `${x},${y}`).join(" ")} fill="none"
+          stroke={rising ? "#dc2626" : "#2563eb"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={`${path} L${coords[coords.length - 1][0]},${H - P} L${coords[0][0]},${H - P} Z`}
+          fill={rising ? "#dc262611" : "#2563eb11"} />
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] text-ink-48">
+        <span>{kstTime(first.ts, true)} · {first.value.toFixed(3)}%</span>
+        <span className="text-yellow-700">--- 기준선 {level}%</span>
+        <span>{kstTime(last.ts, true)} · {last.value.toFixed(3)}%</span>
+      </div>
+    </div>
+  );
+}
+
+export function Us2yCard({ data }: { data: Us2yIntraday }) {
+  const [showTable, setShowTable] = useState(false);
+  const { points, cfg } = data;
+  const cur = data.current ?? (points.length > 0 ? points[points.length - 1].value : null);
+  const aboveLevel = cur !== null && cur >= cfg.level2y;
+  const estCount = points.filter((p) => p.source === "환산").length;
+  const spiked = (p: Us2yPoint) =>
+    (p.d30 !== null && Math.abs(p.d30) >= cfg.delta30m) || (p.d60 !== null && Math.abs(p.d60) >= cfg.delta1h);
+
+  return (
+    <Card className="mt-4">
+      <SectionLabel>미국 2년물 금리 (30분 단위)</SectionLabel>
+
+      {/* 현재값 + 전일 대비 + 기준선 대비 */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-[20px] font-semibold tabular-nums">
+          {cur !== null ? `${cur.toFixed(3)}%` : "—"}
+        </span>
+        <span className={`text-[13px] tabular-nums ${colorOf(data.change)}`}>
+          전일 대비 {fmtDeltaPp(data.change)}
+        </span>
+        {cur !== null && (
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${aboveLevel ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"}`}>
+            기준선 {cfg.level2y}% {aboveLevel ? "위 — 매도 경계" : "아래"}
+          </span>
+        )}
+        {data.tradedAt && (
+          <span className="text-[11px] text-ink-48">체결 {kstTime(data.tradedAt, true)} KST</span>
+        )}
+      </div>
+
+      {/* 30분 그래프 */}
+      {points.length >= 2 ? (
+        <Rate30mChart points={points} level={cfg.level2y} />
+      ) : (
+        <p className="mt-2 text-[13px] text-ink-48">30분 시계열을 불러오지 못했습니다 (선물·샘플 데이터 없음).</p>
+      )}
+
+      {/* 문자 알람 조건 — 이 카드가 감시하는 기준 */}
+      <p className="mt-2 text-[12px] leading-snug text-ink-48">
+        문자 알람 조건: 30분 ±{cfg.delta30m}%p 또는 1시간 ±{cfg.delta1h}%p 급변(급등=매도·급락=매수 검토),
+        기준선 {cfg.level2y}% 돌파/이탈 · 10년물 {cfg.level10y}% 돌파. 임계값은 RATE_ALERT_* 환경변수로 조정.
+      </p>
+
+      {/* 표로 보기 토글 — 30분 단위 수치 표 */}
+      {points.length > 0 && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowTable((v) => !v)}
+            className="flex items-center gap-1 text-[13px] text-guard"
+          >
+            {showTable ? "표 접기 ▲" : "30분 단위 표로 보기 ▼"}
+          </button>
+          {showTable && (
+            <div className="mt-2 overflow-hidden rounded-[10px] border border-hairline">
+              <table className="w-full text-[13px]">
+                <thead className="bg-pearl text-[12px] text-ink-48">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">시각 (KST)</th>
+                    <th className="px-3 py-2 text-right font-medium">금리</th>
+                    <th className="px-3 py-2 text-right font-medium">30분 변동</th>
+                    <th className="px-3 py-2 text-right font-medium">1시간 변동</th>
+                    <th className="px-3 py-2 text-right font-medium">출처</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-divider">
+                  {[...points].reverse().slice(0, 24).map((p) => (
+                    <tr key={p.ts} className={spiked(p) ? "bg-yellow-50" : undefined}>
+                      <td className="px-3 py-1.5">{kstTime(p.ts, true)}{spiked(p) ? " ⚠" : ""}</td>
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${p.value >= cfg.level2y ? "font-semibold text-red-600" : ""}`}>
+                        {p.value.toFixed(3)}%
+                      </td>
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${colorOf(p.d30)} ${p.d30 !== null && Math.abs(p.d30) >= cfg.delta30m ? "font-semibold" : ""}`}>
+                        {fmtDeltaPp(p.d30)}
+                      </td>
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${colorOf(p.d60)} ${p.d60 !== null && Math.abs(p.d60) >= cfg.delta1h ? "font-semibold" : ""}`}>
+                        {fmtDeltaPp(p.d60)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-[12px] text-ink-48">{p.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <p className="mt-2 text-[12px] text-ink-48">
+        실측은 네이버 실시간 금리(10분 수집), 환산은 CME 2년물 선물(ZT=F) 기반 추정입니다
+        {estCount > 0 ? ` (현재 실측 ${points.length - estCount}·환산 ${estCount}구간)` : ""}.
+        ⚠ = 급변 임계값 돌파 구간. 금리 급등은 성장주·반도체에 하방 압력으로 작용합니다.
+      </p>
+    </Card>
   );
 }
 

@@ -84,6 +84,15 @@
 - `scripts/rate-alert-analyze.ts` — 임계값 근거 분석 (데이터 창이 지나면 EVENT_DAYS·PERIOD를 바꿔 재분석)
 - `scripts/rate-alert-test.ts` — 판정 로직 회귀 검증 14종 (로직 수정 후 반드시 실행)
 
+### 화면 (시장·알림·분석 > 장중 시황 요약 > 매크로·금리)
+
+- `lib/market/rateIntraday.ts` — 30분 시계열 조립: 실측(rate_samples) 버킷 우선,
+  빈 구간은 ZT=F 30분봉 환산(계수 -0.475, 현재 실측 금리에 앵커링)으로 보강.
+  주말·휴장 직후에도 보이도록 벽시계 창이 아니라 '최근 60개 봉' 기준.
+- `app/market/intraday/_client.tsx`의 `Us2yCard` — 채권 동향 카드 아래 배치.
+  현재값·전일 대비·기준선(4.125) 대비 배지 + 30분 그래프(기준선 점선) +
+  30분 단위 표(시각 KST·금리·30분/1시간 변동·출처, 임계값 돌파 구간 ⚠ 강조) + 알람 조건 요약.
+
 ## 7. 가동 절차 (남은 수동 단계)
 
 1. Supabase Dashboard SQL Editor에서 `supabase/migrations/018_rate_alert.sql` 실행
