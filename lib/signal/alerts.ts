@@ -1,11 +1,14 @@
-// M7 신호 SMS 알림 — 판정 구간(session.observeEndMin~entryEndMin, 현재 09:30~13:30)에
-// 행동 가능한 판정이 확정되면 문자 발송.
-// 수신자: alert_channels에서 sms 채널 인증(verified) + 동의(consent_given)한 사용자 전체.
+// M7 신호 알림 — 판정 구간(session.observeEndMin~entryEndMin, 현재 09:30~13:30)에
+// 행동 가능한 판정이 확정되면 발송.
+// 채널: SMS(알리고) + 이메일(Resend) 병행 — 알리고는 발송 IP 사전등록제라 유동 IP인 Vercel에서
+// 인증오류(-101)로 실패할 수 있음(2026-07-05 확인). 이메일은 IP 제한이 없어 확실한 채널.
+// 수신자: alert_channels에서 각 채널 인증(verified) + 동의(consent_given)한 사용자 전체.
 // 중복 방지: alerts 테이블(trigger_key='signal')에 오늘 같은 alertKey가 있으면 재발송 안 함.
 // 알림은 판단 보조일 뿐 매매 지시가 아니다 — 문구에 항상 "검토" 수준으로 표현.
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSms } from "@/lib/sms";
+import { sendEmail } from "@/lib/email";
 import type { Judgment } from "./types";
 
 type SignalAlert = { key: string; severity: "high" | "medium" | "low"; text: string };
@@ -78,28 +81,51 @@ export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; s
       .map((r) => r.user_id as string),
   );
 
-  // 수신자: 인증·동의된 SMS 채널
+  // 수신자: 인증·동의된 SMS·이메일 채널 (사용자별 묶음)
   const { data: channels } = await admin
     .from("alert_channels")
-    .select("user_id, contact")
-    .eq("channel_type", "sms")
+    .select("user_id, channel_type, contact")
+    .in("channel_type", ["sms", "email"])
     .eq("verified", true)
     .eq("consent_given", true);
+  const byUser = new Map<string, { sms?: string; email?: string }>();
+  for (const ch of channels ?? []) {
+    if (!ch.contact) continue;
+    const entry = byUser.get(ch.user_id) ?? {};
+    if (ch.channel_type === "sms") entry.sms = ch.contact;
+    if (ch.channel_type === "email") entry.email = ch.contact;
+    byUser.set(ch.user_id, entry);
+  }
 
   let sent = 0;
-  for (const ch of channels ?? []) {
-    if (!ch.contact || alreadyByUser.has(ch.user_id)) continue;
-    const r = await sendSms({ to: ch.contact, text: alert.text }).catch(() => ({ ok: false as const }));
+  for (const [userId, ch] of byUser) {
+    if (alreadyByUser.has(userId)) continue;
+    const results: string[] = [];
+    // SMS — 알리고 IP 인증 실패 가능(유동 IP), 실패해도 이메일로 커버
+    if (ch.sms) {
+      const r = await sendSms({ to: ch.sms, text: alert.text }).catch(() => ({ ok: false as const, error: "예외" }));
+      results.push(`sms:${r.ok ? "ok" : "fail"}`);
+      if (r.ok) sent++;
+    }
+    if (ch.email) {
+      const r = await sendEmail({
+        to: ch.email,
+        subject: alert.text.split("\n")[0], // 첫 줄 = 제목
+        text: `${alert.text}\n\n대시보드: https://test-project-0613.vercel.app/signal\n(판단 보조 알림입니다 — 최종 결정과 책임은 본인에게 있습니다)`,
+      }).catch(() => ({ ok: false as const, error: "예외" }));
+      results.push(`email:${r.ok ? "ok" : "fail"}`);
+      if (r.ok) sent++;
+    }
+    const anyOk = results.some((s) => s.endsWith("ok"));
     await admin.from("alerts").insert({
-      user_id: ch.user_id,
+      user_id: userId,
       trigger_key: "signal",
       severity: alert.severity,
-      message: { alertKey: alert.key, dayType: j.dayType, text: alert.text },
+      message: { alertKey: alert.key, dayType: j.dayType, text: alert.text, channels: results },
       market_snapshot: { headline: j.headline, ts: j.ts },
-      is_sent: r.ok,
-      sent_at: r.ok ? new Date().toISOString() : null,
+      is_sent: anyOk,
+      sent_at: anyOk ? new Date().toISOString() : null,
     });
-    if (r.ok) sent++;
   }
-  return { sent, skipped: sent === 0 ? (channels?.length ? "전원 기발송/실패" : "SMS 채널 없음") : null };
+  return { sent, skipped: sent === 0 ? (byUser.size ? "전원 기발송/실패" : "알림 채널 없음") : null };
 }
