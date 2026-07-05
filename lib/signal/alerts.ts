@@ -12,7 +12,12 @@ import { sendEmail } from "@/lib/email";
 import { SIGNAL_CONFIG } from "./config";
 import type { IntradayTick, Judgment } from "./types";
 
-type SignalAlert = { key: string; severity: "high" | "medium" | "low"; text: string };
+type SignalAlert = {
+  key: string;
+  severity: "high" | "medium" | "low";
+  text: string;
+  smsSubject?: string; // 문자 제목 — 알림 종류 표시 (진입신호·급락트리거 등). 미지정 시 무제
+};
 
 // 판정 → 알림 여부·문구 결정 (없으면 null)
 export function buildSignalAlert(j: Judgment): SignalAlert | null {
@@ -31,6 +36,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "trend_up",
       severity: "high",
+      smsSubject: "진입신호 레버리지",
       text: weak
         ? `[스탁가드 신호] 상방 약한 추세${late} (${stat})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
         : `[스탁가드 신호] 추세일 상방 확정${late} (${stat})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
@@ -40,6 +46,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "trend_down",
       severity: "high",
+      smsSubject: "진입신호 인버스",
       text: weak
         ? `[스탁가드 신호] 하방 약한 추세${late} (${stat})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
         : `[스탁가드 신호] 추세일 하방 확정${late} (${stat})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산`,
@@ -49,6 +56,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "vrebound_long",
       severity: "high",
+      smsSubject: "진입신호 V반등",
       text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
     };
   }
@@ -56,6 +64,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "range_day",
       severity: "low",
+      smsSubject: "매매금지 횡보일",
       text: `[스탁가드 신호] 횡보일 선언 (방향 전환 ${j.trend?.flips ?? "?"}회)\n당일 추세 매매 금지 — '안 하는 것'이 절반입니다.`,
     };
   }
@@ -150,7 +159,7 @@ async function dispatchToChannels(
     if (alreadyByUser.has(userId)) continue;
     const results: string[] = [];
     if (ch.sms) {
-      const r = await sendSms({ to: ch.sms, text: alert.text }).catch(() => ({ ok: false as const, error: "예외" }));
+      const r = await sendSms({ to: ch.sms, text: alert.text, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`sms:${r.ok ? "ok" : "fail"}`);
       if (r.ok) sent++;
     }

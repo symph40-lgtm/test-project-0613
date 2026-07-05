@@ -33,27 +33,31 @@ function krByteLength(s: string): number {
   return n;
 }
 
+// subject를 주면 제목 있는 장문(LMS)으로 발송 (진입신호·급락트리거 등 종류 표시용),
+// 없으면 제목 없이 발송 — 단문이면 SMS 요금.
 export async function sendSms({
   to,
   text,
+  subject,
 }: {
   to: string;
   text: string;
+  subject?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const phone = normalizePhone(to);
   if (!phone) {
     return { ok: false, error: "유효한 휴대폰 번호가 아닙니다." };
   }
 
-  if (hasSolapi()) return sendViaSolapi(phone, text);
-  if (hasAligo()) return sendViaAligo(phone, text);
+  if (hasSolapi()) return sendViaSolapi(phone, text, subject);
+  if (hasAligo()) return sendViaAligo(phone, text, subject);
 
-  console.log(`[DEV SMS]\nTo: ${phone}\n\n${text}\n`);
+  console.log(`[DEV SMS]\nTo: ${phone}${subject ? `\nSubject: ${subject}` : ""}\n\n${text}\n`);
   return { ok: true };
 }
 
 // ── Solapi v4 — HMAC-SHA256 서명 인증
-async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean; error?: string }> {
+async function sendViaSolapi(phone: string, text: string, subject?: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const apiKey = process.env.SOLAPI_API_KEY!;
     const apiSecret = process.env.SOLAPI_API_SECRET!;
@@ -63,7 +67,8 @@ async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean
     const salt = crypto.randomBytes(16).toString("hex");
     const signature = crypto.createHmac("sha256", apiSecret).update(date + salt).digest("hex");
 
-    const isLms = krByteLength(text) > 90;
+    // 제목이 있으면 LMS 강제 (SMS는 제목 미지원), 없으면 길이에 따라 자동
+    const isLms = Boolean(subject) || krByteLength(text) > 90;
     const res = await fetch("https://api.solapi.com/messages/v4/send", {
       method: "POST",
       headers: {
@@ -76,7 +81,7 @@ async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean
           from: sender,
           text,
           type: isLms ? "LMS" : "SMS",
-          // 제목 없이 발송 (사용자 요청 — subject 생략 시 무제 발송)
+          ...(subject ? { subject } : {}), // 제목은 요청된 알림 종류만 (미지정 시 무제)
         },
       }),
     });
@@ -91,7 +96,7 @@ async function sendViaSolapi(phone: string, text: string): Promise<{ ok: boolean
 }
 
 // ── Aligo (레거시 폴백 — 등록 IP에서만 동작)
-async function sendViaAligo(phone: string, text: string): Promise<{ ok: boolean; error?: string }> {
+async function sendViaAligo(phone: string, text: string, subject?: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const body = new URLSearchParams({
       key: process.env.ALIGO_API_KEY!,
@@ -99,8 +104,9 @@ async function sendViaAligo(phone: string, text: string): Promise<{ ok: boolean;
       sender: process.env.ALIGO_SENDER!,
       receiver: phone,
       msg: text,
-      // 90byte 초과 시 자동으로 LMS 전환. 제목 없이 발송 (사용자 요청)
-      msg_type: text.length > 45 ? "LMS" : "SMS",
+      // 90byte 초과 시 자동으로 LMS 전환. 제목은 지정된 알림 종류만
+      msg_type: subject || text.length > 45 ? "LMS" : "SMS",
+      ...(subject ? { title: subject } : {}),
     });
 
     const res = await fetch("https://apis.aligo.in/send/", {

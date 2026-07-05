@@ -1,4 +1,4 @@
-// SMS 발송 테스트 유틸 — `npx tsx scripts/send-test-sms.ts 01012345678`
+// SMS 발송 테스트 유틸 — `npx tsx scripts/send-test-sms.ts 01012345678 [제목]`
 // .env.local을 수동 로드한 뒤 lib/sms.ts(Solapi 우선)로 실발송한다. 제공사 교체·키 갱신 후 검증용.
 
 import fs from "fs";
@@ -18,9 +18,11 @@ async function main() {
     process.exit(1);
   }
 
+  const subject = process.argv[3];
   const { sendSms } = await import("../lib/sms");
   const r = await sendSms({
     to,
+    subject,
     text: `[스탁가드 신호] 문자 채널 테스트 (Solapi)\n판정 구간(09:30~13:30) 확정 신호가 이 번호로 발송됩니다.`,
   });
   console.log(r.ok ? "발송 성공" : `발송 실패: ${r.error}`);

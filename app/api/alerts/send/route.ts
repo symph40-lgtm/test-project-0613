@@ -102,9 +102,19 @@ export async function POST(req: NextRequest) {
     }
 
     if (smsChannel?.contact) {
-      // SMS는 길이 제한이 있어 핵심만 발송
-      const smsText = `[스탁가드] ${msg.subject}\n${trigger.reason}`;
-      const result = await sendSms({ to: smsChannel.contact, text: smsText });
+      // SMS는 길이 제한이 있어 핵심만 발송. 제목으로 트리거 종류 표시 (사용자 요청)
+      const subjectByTrigger: Record<string, string> = {
+        low: "위험선 도달",
+        drop5: "급락트리거 미국발",
+        futures: "급락트리거 선물",
+        rebound: "반등실패 경보",
+      };
+      const smsText = `${msg.subject}\n${trigger.reason}`;
+      const result = await sendSms({
+        to: smsChannel.contact,
+        text: smsText,
+        subject: subjectByTrigger[trigger.trigger_key] ?? "스탁가드 경보",
+      });
       isSent = result.ok || isSent;
     }
 
