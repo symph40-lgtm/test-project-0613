@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, ShieldAlert, Activity, Gauge, GitBranch, Layers, FlaskConical, NotebookPen, MessageSquareText } from "lucide-react";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import type { BacktestResult } from "@/lib/signal/backtest";
+import type { Stage1Report } from "@/lib/signal/stage1";
 import type { CheckItem, DailyFeatureRow, Judgment } from "@/lib/signal/types";
 
 type StateResponse = {
@@ -39,7 +40,7 @@ const DAY_TYPE_STYLE: Record<string, string> = {
 
 const CAUSE_TAGS = ["전쟁·지정학", "관세·규제", "실적", "수급", "소송", "AI뉴스", "매크로", "기타"];
 
-export default function SignalClient({ backtest }: { backtest: BacktestResult[] }) {
+export default function SignalClient({ backtest, stage1 }: { backtest: BacktestResult[]; stage1: Stage1Report | null }) {
   const [state, setState] = useState<StateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -345,6 +346,48 @@ export default function SignalClient({ backtest }: { backtest: BacktestResult[] 
               </table>
             </div>
           </section>
+
+          {/* ── Stage 1 학습 분석 (3개월 백필 + 실측 병합) */}
+          {stage1 ? (
+            <section className="rounded-[18px] border border-hairline bg-canvas p-5">
+              <h3 className="flex items-center gap-1.5 text-[14px] font-semibold">
+                <FlaskConical size={15} className="text-guard" /> 학습 분석 Stage 1 — 추세일의 선행 조건 (마스터 8.2)
+              </h3>
+              <p className="mt-1 text-[12px] text-ink-48">
+                표본 {stage1.totalDays}일 (실측 {stage1.measured} · 일봉 프록시 {stage1.proxied}) ·
+                기저율: 상방추세일 {(stage1.baseUp * 100).toFixed(0)}% / 하방추세일 {(stage1.baseDown * 100).toFixed(0)}% / 비추세일 {(stage1.baseRange * 100).toFixed(0)}%
+              </p>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-[13px] tabular-nums">
+                  <thead>
+                    <tr className="border-b border-hairline text-[11px] uppercase tracking-wide text-ink-48">
+                      <th className="py-2 pr-3">아침 조건 (전일까지 + 당일 갭)</th>
+                      <th className="py-2 pr-3">표본</th>
+                      <th className="py-2 pr-3">상방추세</th>
+                      <th className="py-2 pr-3">하방추세</th>
+                      <th className="py-2 pr-3">비추세</th>
+                      <th className="py-2">추세일 리프트</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stage1.rows.map((r) => (
+                      <tr key={r.feature} className="border-b border-hairline/60">
+                        <td className="py-1.5 pr-3">{r.feature}</td>
+                        <td className="py-1.5 pr-3">{r.n}일</td>
+                        <td className={`py-1.5 pr-3 ${r.pUp > stage1.baseUp * 1.3 ? "font-semibold text-red-600" : ""}`}>{(r.pUp * 100).toFixed(0)}%</td>
+                        <td className={`py-1.5 pr-3 ${r.pDown > stage1.baseDown * 1.3 ? "font-semibold text-blue-600" : ""}`}>{(r.pDown * 100).toFixed(0)}%</td>
+                        <td className="py-1.5 pr-3">{(r.pRange * 100).toFixed(0)}%</td>
+                        <td className={`py-1.5 font-medium ${r.liftTrend >= 1.2 ? "text-red-600" : r.liftTrend <= 0.8 ? "text-ink-48" : ""}`}>×{r.liftTrend.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ul className="mt-3 space-y-1 text-[12px] text-ink-48">
+                {stage1.notes.map((n, i) => <li key={i}>ⓘ {n}</li>)}
+              </ul>
+            </section>
+          ) : null}
 
           {/* ── 최근 기록 (daily_features) */}
           <section className="rounded-[18px] border border-hairline bg-canvas p-5">

@@ -139,6 +139,18 @@ export async function loadDailyFeatures(date: string): Promise<DailyFeatureRow |
   return (data as DailyFeatureRow | null) ?? null;
 }
 
+// 라벨 확정된 날짜 목록 (Stage 1 분석에서 실측 라벨 병합용)
+export async function loadLabeledDays(limit = 150): Promise<{ date: string; day_label: string | null }[]> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("signal_daily_features")
+    .select("date, day_label")
+    .not("day_label", "is", null)
+    .order("date", { ascending: false })
+    .limit(limit);
+  return (data as { date: string; day_label: string | null }[] | null) ?? [];
+}
+
 export async function loadRecentFeatures(limit = 20): Promise<DailyFeatureRow[]> {
   const admin = createAdminClient();
   const { data } = await admin

@@ -5,6 +5,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { runBacktest } from "@/lib/signal/backtest";
+import { runStage1, type Stage1Report } from "@/lib/signal/stage1";
+import { loadLabeledDays } from "@/lib/signal/store";
 import SignalClient from "./SignalClient";
 
 export const dynamic = "force-dynamic";
@@ -18,5 +20,14 @@ export default async function SignalPage() {
 
   const backtest = runBacktest();
 
-  return <SignalClient backtest={backtest} />;
+  // Stage 1 — 3개월 백필(프록시 라벨) + 실측 라벨 병합 크로스탭 (실패해도 페이지는 뜸)
+  let stage1: Stage1Report | null = null;
+  try {
+    const measured = await loadLabeledDays().catch(() => []);
+    stage1 = await runStage1(measured);
+  } catch {
+    stage1 = null;
+  }
+
+  return <SignalClient backtest={backtest} stage1={stage1} />;
 }

@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
       fetchDailyBars(SIGNAL_CONFIG.symbols.hynix, 5),
     ]);
 
-    // ── 최종 DC1/DC2 (봉 주기 = config.dc.barMin, 선물 기준 — 틱이 없으면 라벨 미확정)
+    // ── 최종 DC1/DC2 — 학습 라벨은 dcLabel(10분봉·스펙 원값) 기준. 실시간 게이트(dc, 5분봉)와 분리
+    // — 라벨 잣대를 고정해야 과거·미래 데이터가 같은 기준으로 비교된다 (사용자 결정 2026-07-05).
     const S = SIGNAL_CONFIG.session;
     const pts = ticks
       .filter((t) => t.futPx !== null && t.minuteOfDay >= S.openMin && t.minuteOfDay <= S.endMin)
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
 
     let dc1: number | null = null, dc2: number | null = null;
     if (pts.length >= 10) {
-      const barMin = SIGNAL_CONFIG.dc.barMin;
+      const barMin = SIGNAL_CONFIG.dcLabel.barMin;
       const bars = new Map<number, { open: number; close: number }>();
       for (const p of pts) {
         const b = Math.floor((p.min - S.openMin) / barMin);
@@ -60,10 +61,10 @@ export async function GET(req: NextRequest) {
     const gap = today ? gapPct(hynixDaily) : null;
     const range = today ? ((today.high - today.low) / today.open) * 100 : null;
 
-    // 3클래스 라벨 (2.5.6): DC1 ≥ θ AND DC2 ≥ 기준 동시 충족 + 방향
+    // 3클래스 라벨 (2.5.6): DC1 ≥ θ AND DC2 ≥ 기준 동시 충족 + 방향 (dcLabel 기준)
     let dayLabel: string | null = null;
     if (dc1 !== null && dc2 !== null) {
-      const trendDay = dc1 >= SIGNAL_CONFIG.dc.dc1Theta && dc2 >= SIGNAL_CONFIG.dc.dc2Min;
+      const trendDay = dc1 >= SIGNAL_CONFIG.dcLabel.dc1Theta && dc2 >= SIGNAL_CONFIG.dcLabel.dc2Min;
       const dir = pts[pts.length - 1].px > pts[0].px ? "상방추세일" : "하방추세일";
       dayLabel = trendDay ? dir : "비추세일";
     }
