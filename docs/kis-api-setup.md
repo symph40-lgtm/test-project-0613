@@ -14,8 +14,10 @@
    - **실전투자** 선택 → 계좌번호 선택 + 약관 동의 → 신청
    - 승인 후 **APP Key / APP Secret** 발급 (마이페이지 > API신청 내역에서 재확인 가능)
 3. **야간선물 종목코드** — `KIS_FUT_CODE`
-   - "(야간)코스피200 선물" 최근월물 코드 (예: `101W09` 형식, 월물 교체 시 갱신 필요)
-   - HTS/MTS 종목 검색 또는 포털의 종목정보 파일에서 확인
+   - KRX 야간시장(2025-06 도입, 구 CME/Eurex 연계) 코스피200 선물 최근월물 코드
+   - **2026-07-05 설정: `1A01609`** (2026년 9월물). 야간 코드는 `1A016` + 월물(09/12/03/06) 형식
+   - **분기 만기(9월물은 2026-09 둘째 목요일) 무렵 다음 월물로 갱신 필요** — 다음은 `1A01612`(12월물)
+   - 확인 방법: KIS 마스터 파일 `https://new.real.download.dws.co.kr/common/master/fo_cme_code.mst.zip`에서 KOSPI200 검색
 4. **환경변수 등록**
    - Vercel: Settings > Environment Variables에 `KIS_APP_KEY` `KIS_APP_SECRET` `KIS_FUT_CODE` 추가 → **Redeploy**
    - 로컬: `.env.local`에 같은 3줄 추가

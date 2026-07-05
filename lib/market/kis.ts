@@ -66,15 +66,16 @@ export async function fetchKisNightFutures(): Promise<KisFutures> {
       next: { revalidate: 30 },
     });
     if (!r.ok) return null;
-    const j = (await r.json()) as { output?: Record<string, unknown> };
-    const o = j.output ?? {};
+    // 실측(2026-07-05): FHMIF10000000 응답은 output이 아니라 output1(선물)/output2·3(업종지수) 구조
+    const j = (await r.json()) as { output1?: Record<string, unknown>; output?: Record<string, unknown> };
+    const o = j.output1 ?? j.output ?? {};
     const num = (v: unknown): number => {
       const n = typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : typeof v === "number" ? v : NaN;
       return isFinite(n) ? n : NaN;
     };
     // 선물 현재가/전일대비율 — 응답 필드명이 환경에 따라 다를 수 있어 여러 후보를 시도
     const price = num(o.futs_prpr ?? o.stck_prpr ?? o.prpr ?? o.last);
-    let chg = num(o.prdy_ctrt ?? o.prdy_vrss_ctrt);
+    let chg = num(o.futs_prdy_ctrt ?? o.prdy_ctrt ?? o.prdy_vrss_ctrt);
     if (!isFinite(chg)) chg = 0;
     // 부호 필드(prdy_vrss_sign: 1·2=상승, 4·5=하락)가 있으면 반영
     const sign = String(o.prdy_vrss_sign ?? "");
