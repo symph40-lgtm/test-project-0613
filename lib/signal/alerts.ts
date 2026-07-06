@@ -73,53 +73,102 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
   return null;
 }
 
-// ── 장중 급변 감지 (순수 함수) — 당일 등락률이 단계(config.moveAlert)를 돌파하면 알림 생성.
+// ── 장중 급변 감지 (순수 함수) — 오늘 틱 시계열을 받아 두 종류 알림 생성:
+//  ① 절대 단계: 당일 등락률(전일 종가 대비)이 단계(stockLevels·futLevels)를 돌파
+//  ② 반전 스윙: 당일 고점 대비 반락폭 / 저점 대비 반등폭이 단계(±SwingLevels)를 돌파 —
+//     +1.5%→-1.1% 같은 반전은 등락률(-1.1%)만으론 안 보임 (사용자 요청 2026-07-06)
 // 판정 구간과 무관하게 장중(09:00~15:45) 전체 감시 — 보유 중 트레일링 점검·급등 확인용.
 // 문자 요금 절약을 위해 90바이트 이내 단문으로 압축 (상세는 이메일·대시보드).
-export function buildMoveAlerts(tick: IntradayTick | undefined): SignalAlert[] {
+export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
+  const tick = ticks.length > 0 ? ticks[ticks.length - 1] : undefined;
   if (!tick) return [];
   const S = SIGNAL_CONFIG.session;
+  const M = SIGNAL_CONFIG.moveAlert;
   if (tick.minuteOfDay < S.openMin || tick.minuteOfDay > S.endMin + 15) return [];
   const hhmm = `${String(Math.floor(tick.minuteOfDay / 60)).padStart(2, "0")}:${String(tick.minuteOfDay % 60).padStart(2, "0")}`;
 
-  const targets: { name: string; sym: string; chg: number | null; levels: readonly number[] }[] = [
-    { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: SIGNAL_CONFIG.moveAlert.stockLevels },
-    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: SIGNAL_CONFIG.moveAlert.stockLevels },
-    { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: SIGNAL_CONFIG.moveAlert.futLevels },
+  const targets: {
+    name: string; sym: string; chg: number | null;
+    levels: readonly number[]; swingLevels: readonly number[];
+    series: (t: IntradayTick) => number | null;
+  }[] = [
+    { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: M.stockLevels, swingLevels: M.stockSwingLevels, series: (t) => t.hynixChg },
+    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: M.stockLevels, swingLevels: M.stockSwingLevels, series: (t) => t.samsungChg },
+    { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: M.futLevels, swingLevels: M.futSwingLevels, series: (t) => t.futChg },
   ];
 
   const alerts: SignalAlert[] = [];
   for (const t of targets) {
     if (t.chg === null || !isFinite(t.chg)) continue;
-    // 돌파한 최고 단계 1개만 (예: -7.2%면 -7 단계. -3·-5는 이미 지난 단계지만 미발송이었다면 이 단계 알림이 커버)
-    const crossed = t.levels.filter((lv) => Math.abs(t.chg as number) >= lv);
-    if (crossed.length === 0) continue;
-    const level = Math.max(...crossed);
-    const dir = (t.chg as number) > 0 ? "급등" : "급락";
-    const sign = (t.chg as number) > 0 ? "+" : "";
-    const isTop = Math.abs(t.chg as number) >= t.levels[t.levels.length - 1];
-    // 급등은 청산 신호가 아니다 — 시스템 철학상 상방 추세 후보(레버리지 검토·인버스 금지, 마스터 4장).
-    // '과열'은 며칠 연속 상승 뒤 반전 셋업(S1) 조건이지 장중 급등이 아님 (사용자 지적 2026-07-06).
-    // 최고 단계 급등만 추격 진입 자제를 덧붙인다.
-    const guide =
-      dir === "급락"
-        ? "위험선·트레일링 점검"
-        : isTop
-          ? "추세 확인·추격 진입 자제"
-          : "상방추세 점검·보유시 트레일링 상향";
-    alerts.push({
-      key: `move_${t.sym}_${(t.chg as number) > 0 ? "u" : "d"}${level}`,
-      severity: isTop ? "high" : "medium",
-      // 단문 (≤90바이트): "[스탁가드] 코스피200선물 급등 +2.0% (09:09) 상방추세 점검·보유시 트레일링 상향"
-      text: `[스탁가드] ${t.name} ${dir} ${sign}${(t.chg as number).toFixed(1)}% (${hhmm}) ${guide}`,
-    });
+    const cur = t.chg;
+
+    // ① 절대 단계 — 돌파한 최고 단계 1개만 (예: -7.2%면 -7 단계)
+    const crossed = t.levels.filter((lv) => Math.abs(cur) >= lv);
+    if (crossed.length > 0) {
+      const level = Math.max(...crossed);
+      const dir = cur > 0 ? "급등" : "급락";
+      const sign = cur > 0 ? "+" : "";
+      const isTop = Math.abs(cur) >= t.levels[t.levels.length - 1];
+      // 급등은 청산 신호가 아니다 — 시스템 철학상 상방 추세 후보(레버리지 검토·인버스 금지, 마스터 4장).
+      // '과열'은 며칠 연속 상승 뒤 반전 셋업(S1) 조건이지 장중 급등이 아님 (사용자 지적 2026-07-06).
+      const guide =
+        dir === "급락"
+          ? "위험선·트레일링 점검"
+          : isTop
+            ? "추세 확인·추격 진입 자제"
+            : "상방추세 점검·보유시 트레일링 상향";
+      alerts.push({
+        key: `move_${t.sym}_${cur > 0 ? "u" : "d"}${level}`,
+        severity: isTop ? "high" : "medium",
+        // 단문 (≤90바이트): "[스탁가드] 코스피200선물 급등 +2.0% (09:09) 상방추세 점검·보유시 트레일링 상향"
+        text: `[스탁가드] ${t.name} ${dir} ${sign}${cur.toFixed(1)}% (${hhmm}) ${guide}`,
+      });
+    }
+
+    // ② 반전 스윙 — 당일 고점/저점 대비 (오늘 틱 전체에서 극값 산출)
+    const chgs = ticks.map(t.series).filter((v): v is number => v !== null && isFinite(v));
+    if (chgs.length < 2) continue;
+    const hi = Math.max(...chgs);
+    const lo = Math.min(...chgs);
+
+    // 고점 대비 반락 — 고점이 최소치 이상 반대편(위)에 있었을 때만 '반전'으로 인정
+    const downSwing = hi - cur;
+    if (hi >= M.swingMinExtreme) {
+      const sCrossed = t.swingLevels.filter((lv) => downSwing >= lv);
+      if (sCrossed.length > 0) {
+        const level = Math.max(...sCrossed);
+        const isTop = downSwing >= t.swingLevels[t.swingLevels.length - 1];
+        alerts.push({
+          key: `swing_${t.sym}_d${level}`,
+          severity: isTop ? "high" : "medium",
+          // "[스탁가드] 코스피200선물 반락 고점+1.5%→-1.1% (-2.6%p) 위험선·트레일링 점검"
+          text: `[스탁가드] ${t.name} 반락 고점${hi > 0 ? "+" : ""}${hi.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (-${downSwing.toFixed(1)}%p) 위험선·트레일링 점검`,
+        });
+      }
+    }
+
+    // 저점 대비 반등 — 저점이 최소치 이상 아래에 있었을 때만
+    const upSwing = cur - lo;
+    if (lo <= -M.swingMinExtreme) {
+      const sCrossed = t.swingLevels.filter((lv) => upSwing >= lv);
+      if (sCrossed.length > 0) {
+        const level = Math.max(...sCrossed);
+        const isTop = upSwing >= t.swingLevels[t.swingLevels.length - 1];
+        alerts.push({
+          key: `swing_${t.sym}_u${level}`,
+          severity: isTop ? "high" : "medium",
+          // "[스탁가드] 코스피200선물 반등 저점-2.0%→-1.0% (+1.0%p) 추세 전환 확인"
+          text: `[스탁가드] ${t.name} 반등 저점${lo.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (+${upSwing.toFixed(1)}%p) 추세 전환 확인`,
+        });
+      }
+    }
   }
   return alerts;
 }
 
 // 급변 알림 발송 — state 라우트에서 틱마다 호출 (단계별 1일 1회 중복 방지)
-export async function maybeSendMoveAlerts(date: string, tick: IntradayTick | undefined): Promise<number> {
-  const alerts = buildMoveAlerts(tick);
+export async function maybeSendMoveAlerts(date: string, ticks: IntradayTick[]): Promise<number> {
+  const alerts = buildMoveAlerts(ticks);
   if (alerts.length === 0) return 0;
   let sent = 0;
   for (const alert of alerts) {

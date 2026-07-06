@@ -65,8 +65,9 @@ export async function GET(req: NextRequest) {
         logJudgment(judgment).catch(() => undefined),
         upsertDailyFeatures(judgment).catch(() => undefined),
         maybeSendSignalSms(judgment).catch((): { sent: number; skipped: string | null } => ({ sent: 0, skipped: "발송 오류" })),
-        // 장중 급변 알림 — 하닉·삼전 ±3/5/7/10%, 선물 ±1.5/2.5/4% 단계 돌파 시 (단계별 1일 1회)
-        maybeSendMoveAlerts(date, ticks[ticks.length - 1]).catch(() => 0),
+        // 장중 급변 알림 — 절대 단계(하닉·삼전 ±3/5/7/10%, 선물 ±1/2/3/4%) +
+        // 반전 스윙(당일 고점 대비 반락·저점 대비 반등, 단계별 1일 1회)
+        maybeSendMoveAlerts(date, ticks).catch(() => 0),
       ]);
       sms = smsResult;
     }

@@ -46,20 +46,36 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
   hynixFrgn: null, samsungFrgn: null, hynixInst: null, samsungInst: null,
   nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
 });
-const moveCases: { name: string; tick: IntradayTick; expectKeys: string[] }[] = [
-  { name: "하닉 -5.2% (급락 2단계)", tick: mkTick({ hynixChg: -5.2 }), expectKeys: ["move_hynix_d5"] },
-  { name: "하닉 +3.4% 급등 + 선물 -1.8%", tick: mkTick({ hynixChg: 3.4, futChg: -1.8 }), expectKeys: ["move_hynix_u3", "move_fut_d1"] },
-  { name: "선물 -2.3% (2단계)", tick: mkTick({ futChg: -2.3 }), expectKeys: ["move_fut_d2"] },
-  { name: "미돌파 (하닉 -2.9% · 선물 -0.8%)", tick: mkTick({ hynixChg: -2.9, futChg: -0.8 }), expectKeys: [] },
-  { name: "장외 시간 (16:30)", tick: mkTick({ hynixChg: -8, minuteOfDay: 990 }), expectKeys: [] },
+const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
+  { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
+  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1"] },
+  { name: "선물 -2.3% (2단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d2"] },
+  { name: "미돌파 (하닉 -2.9% · 선물 -0.8%)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: [] },
+  { name: "장외 시간 (16:30)", ticks: [mkTick({ hynixChg: -8, minuteOfDay: 990 })], expectKeys: [] },
+  // 반전 스윙 (2026-07-06 사용자 요청 — 고점 대비 반락 / 저점 대비 반등)
+  {
+    name: "선물 반락 +1.5%→-1.1% (고점 대비 -2.6%p)",
+    ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 }), mkTick({ futChg: -1.1 })],
+    expectKeys: ["move_fut_d1", "swing_fut_d2.5"],
+  },
+  {
+    name: "선물 반등 -2.4%→-0.8% (저점 대비 +1.6%p, 절대 단계 미돌파)",
+    ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -2.4 }), mkTick({ futChg: -0.8 })],
+    expectKeys: ["swing_fut_u1.5"],
+  },
+  {
+    name: "일방향 하락은 반전 아님 (고점 +0.1%)",
+    ticks: [mkTick({ futChg: 0.1 }), mkTick({ futChg: -1.2 }), mkTick({ futChg: -1.6 })],
+    expectKeys: ["move_fut_d1"],
+  },
 ];
 for (const c of moveCases) {
-  const got = buildMoveAlerts(c.tick).map((a) => a.key).sort();
+  const got = buildMoveAlerts(c.ticks).map((a) => a.key).sort();
   const want = [...c.expectKeys].sort();
   const ok = JSON.stringify(got) === JSON.stringify(want);
   if (!ok) failed++;
   console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 [${want.join(",")}] / 실제 [${got.join(",")}]`);
-  for (const a of buildMoveAlerts(c.tick)) console.log(`  📱 ${a.text}`);
+  for (const a of buildMoveAlerts(c.ticks)) console.log(`  📱 ${a.text}`);
 }
 
 console.log(`\n총 실패 ${failed}건`);
