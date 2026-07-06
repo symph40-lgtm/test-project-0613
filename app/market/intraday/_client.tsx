@@ -1144,10 +1144,10 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
         <p className="mt-2 text-[13px] text-ink-48">30분 시계열을 불러오지 못했습니다 (선물·샘플 데이터 없음).</p>
       )}
 
-      {/* 문자 알람 조건 — 이 카드가 감시하는 기준 */}
+      {/* 문자 알람 조건 — 이 카드가 감시하는 기준 (단계 행동 사다리는 사용자 지정) */}
       <p className="mt-2 text-[12px] leading-snug text-ink-48">
         문자 알람 조건: 30분 ±{cfg.delta30m}%p 또는 1시간 ±{cfg.delta1h}%p 급변(급등=매도·급락=매수 검토),
-        단계선 {cfg.levels2y.map((lv, i) => `${lv}(${["경고", "위험", "최고위험"][Math.min(i, 2)]})`).join(" · ")} 돌파/해제
+        단계선 {cfg.levels2y.map((lv, i) => `${lv}(${["경고·주식 1/3 감축", "위험·주식 2/3 매도", "최고위험·전량 매도"][Math.min(i, 2)]})`).join(" · ")} 돌파/해제
         · 10년물 {cfg.level10y}% 돌파. 임계값은 RATE_ALERT_* 환경변수로 조정.
       </p>
 

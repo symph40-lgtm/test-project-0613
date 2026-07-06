@@ -18,10 +18,15 @@ export type RateAlertConfig = {
   level10y: number;   // 10년물 절대 레벨 (%)
 };
 
-// 단계 이름 — levels2y 인덱스 순 (마지막 초과분은 전부 최고위험)
+// 단계 이름·행동 지침 — levels2y 인덱스 순 (마지막 초과분은 전부 최고위험)
+// 행동 사다리는 사용자 지정(2026-07-07): 경고=주식 1/3 감축, 위험=2/3 매도, 최고위험=전량 매도
 export const LEVEL2Y_GRADES = ["경고", "위험", "최고위험"] as const;
+export const LEVEL2Y_ACTIONS = ["주식 1/3 감축", "주식 2/3 매도", "전량 매도"] as const;
 export function grade2yName(idx: number): string {
   return LEVEL2Y_GRADES[Math.min(idx, LEVEL2Y_GRADES.length - 1)];
+}
+export function grade2yAction(idx: number): string {
+  return LEVEL2Y_ACTIONS[Math.min(idx, LEVEL2Y_ACTIONS.length - 1)];
 }
 
 function envNum(name: string, fallback: number): number {
@@ -45,7 +50,7 @@ export function rateAlertConfig(): RateAlertConfig {
   return {
     delta30m: envNum("RATE_ALERT_2Y_DELTA_30M", 0.03),
     delta1h: envNum("RATE_ALERT_2Y_DELTA_1H", 0.03),
-    levels2y: envLevels("RATE_ALERT_2Y_LEVELS", [4.14, 4.15, 4.16]),
+    levels2y: envLevels("RATE_ALERT_2Y_LEVELS", [4.135, 4.15, 4.16]),
     level10y: envNum("RATE_ALERT_10Y_LEVEL", 4.45),
   };
 }
@@ -143,13 +148,14 @@ export function evaluateRateAlerts(samples: RateSample[], cfg: RateAlertConfig):
     if (sCur > sPrev) {
       const level = levels[sCur - 1];
       const grade = grade2yName(sCur - 1);
+      const action = grade2yAction(sCur - 1);
       hits.push({
         key: `rate2y_lvl_u${level}`,
         severity: sCur - 1 === 0 ? "medium" : "high",
         smsSubject: `금리 ${grade}단계`,
-        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${level} 돌파 — ${grade}단계 매도 검토`,
-        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — ${level}% 돌파 (${grade}단계, 매도 검토)`,
-        snapshot: { y2: cur.y2, prevY2: prevFresh?.y2 ?? null, level, grade, levels },
+        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${level} 돌파 — ${grade}단계·${action} 검토`,
+        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — ${level}% 돌파 (${grade}단계 · ${action} 검토)`,
+        snapshot: { y2: cur.y2, prevY2: prevFresh?.y2 ?? null, level, grade, action, levels },
       });
     }
     if (sCur < sPrev) {
