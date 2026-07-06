@@ -48,31 +48,31 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
 });
 const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
   { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
-  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1.5"] },
-  { name: "선물 -2.3% (1.5단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d1.5"] },
+  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1.4"] },
+  { name: "선물 -2.3% (2.1단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d2.1"] },
   { name: "선물 -0.8% (첫 감지선 0.7)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: ["move_fut_d0.7"] },
   { name: "미돌파 (하닉 -2.9% · 선물 -0.5%)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.5 })], expectKeys: [] },
   { name: "장외 시간 (16:30)", ticks: [mkTick({ hynixChg: -8, minuteOfDay: 990 })], expectKeys: [] },
-  // 반전 스윙 (2026-07-06 사용자 요청 — 고점 대비 반락 / 저점 대비 반등)
+  // 반전 스윙 (2026-07-06 사용자 요청 — 고점 대비 반락 / 저점 대비 반등, 0.7%p 등간격)
   {
     name: "선물 반락 +1.5%→-1.1% (고점 대비 -2.6%p)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 }), mkTick({ futChg: -1.1 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_d2"],
+    expectKeys: ["move_fut_d0.7", "swing_fut_d2.1"],
   },
   {
     name: "선물 반락 조기 경고 +1.5%→+0.4% (고점 대비 -1.1%p, 아직 플러스권)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 })],
-    expectKeys: ["swing_fut_d1"],
+    expectKeys: ["swing_fut_d0.7"],
   },
   {
     name: "선물 반등 -2.4%→-0.8% (저점 대비 +1.6%p)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -2.4 }), mkTick({ futChg: -0.8 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_u1"],
+    expectKeys: ["move_fut_d0.7", "swing_fut_u1.4"],
   },
   {
     name: "일방향 하락은 반전 아님 (고점 +0.1%)",
     ticks: [mkTick({ futChg: 0.1 }), mkTick({ futChg: -1.2 }), mkTick({ futChg: -1.6 })],
-    expectKeys: ["move_fut_d1.5"],
+    expectKeys: ["move_fut_d1.4"],
   },
 ];
 for (const c of moveCases) {
