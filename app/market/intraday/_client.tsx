@@ -1063,13 +1063,14 @@ function fmtDeltaPp(v: number | null, digits = 3): string {
   return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%p`;
 }
 
-// 30분 금리 차트 — 기준선(level)을 점선으로 함께 표시
-function Rate30mChart({ points, level }: { points: Us2yPoint[]; level: number }) {
+// 30분 금리 차트 — 단계 기준선(경고→최고위험)을 점선으로 함께 표시
+const LEVEL_LINE_COLORS = ["#a16207", "#ea580c", "#dc2626"]; // 경고·위험·최고위험
+function Rate30mChart({ points, levels }: { points: Us2yPoint[]; levels: number[] }) {
   const W = 320, H = 72, P = 4;
   const vals = points.map((p) => p.value);
-  // 기준선이 항상 보이도록 도메인에 포함
-  const min = Math.min(...vals, level) - 0.005;
-  const max = Math.max(...vals, level) + 0.005;
+  // 첫 단계(경고선)는 항상 보이게 도메인에 포함 — 위 단계는 시세가 근접할 때 자연히 보임
+  const min = Math.min(...vals, ...(levels.length ? [levels[0]] : [])) - 0.005;
+  const max = Math.max(...vals, ...(levels.length ? [levels[0]] : [])) + 0.005;
   const range = max - min || 1;
   const yOf = (v: number) => P + (1 - (v - min) / range) * (H - P * 2);
   const stepX = (W - P * 2) / Math.max(points.length - 1, 1);
@@ -1077,12 +1078,16 @@ function Rate30mChart({ points, level }: { points: Us2yPoint[]; level: number })
   const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
   const first = points[0], last = points[points.length - 1];
   const rising = last.value >= first.value;
-  const levelY = yOf(level);
   return (
     <div className="mt-2">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 72 }}>
-        {/* 알람 기준선 */}
-        <line x1={P} y1={levelY} x2={W - P} y2={levelY} stroke="#a16207" strokeWidth="1" strokeDasharray="4 3" />
+        {/* 단계 기준선 — 차트 범위 안에 들어온 것만 */}
+        {levels.map((lv, i) =>
+          lv >= min && lv <= max ? (
+            <line key={lv} x1={P} y1={yOf(lv)} x2={W - P} y2={yOf(lv)}
+              stroke={LEVEL_LINE_COLORS[Math.min(i, LEVEL_LINE_COLORS.length - 1)]} strokeWidth="1" strokeDasharray="4 3" />
+          ) : null,
+        )}
         <polyline points={coords.map(([x, y]) => `${x},${y}`).join(" ")} fill="none"
           stroke={rising ? "#dc2626" : "#2563eb"} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         <path d={`${path} L${coords[coords.length - 1][0]},${H - P} L${coords[0][0]},${H - P} Z`}
@@ -1090,7 +1095,7 @@ function Rate30mChart({ points, level }: { points: Us2yPoint[]; level: number })
       </svg>
       <div className="mt-1 flex justify-between text-[11px] text-ink-48">
         <span>{kstTime(first.ts, true)} · {first.value.toFixed(3)}%</span>
-        <span className="text-yellow-700">--- 기준선 {level}%</span>
+        <span className="text-yellow-700">--- 단계선 {levels.join(" / ")}%</span>
         <span>{kstTime(last.ts, true)} · {last.value.toFixed(3)}%</span>
       </div>
     </div>
@@ -1101,7 +1106,11 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
   const [showTable, setShowTable] = useState(false);
   const { points, cfg } = data;
   const cur = data.current ?? (points.length > 0 ? points[points.length - 1].value : null);
-  const aboveLevel = cur !== null && cur >= cfg.level2y;
+  // 현재 단계: 넘어선 레벨 수 (0=단계 아래, 1=경고, 2=위험, 3=최고위험)
+  const gradeIdx = cur !== null ? cfg.levels2y.filter((L) => cur >= L).length : 0;
+  const gradeName = gradeIdx === 0 ? null : ["경고", "위험", "최고위험"][Math.min(gradeIdx - 1, 2)];
+  const gradeStyle =
+    gradeIdx >= 3 ? "bg-red-600 text-white" : gradeIdx === 2 ? "bg-red-50 text-red-600" : gradeIdx === 1 ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600";
   const estCount = points.filter((p) => p.source === "환산").length;
   const spiked = (p: Us2yPoint) =>
     (p.d30 !== null && Math.abs(p.d30) >= cfg.delta30m) || (p.d60 !== null && Math.abs(p.d60) >= cfg.delta1h);
@@ -1119,8 +1128,8 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
           전일 대비 {fmtDeltaPp(data.change)}
         </span>
         {cur !== null && (
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${aboveLevel ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"}`}>
-            기준선 {cfg.level2y}% {aboveLevel ? "위 — 매도 경계" : "아래"}
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${gradeStyle}`}>
+            {gradeName ? `${gradeName}단계 (${cfg.levels2y[gradeIdx - 1]}% 위) — 매도 경계` : `단계선 ${cfg.levels2y[0]}% 아래 — 안전권`}
           </span>
         )}
         {data.tradedAt && (
@@ -1130,7 +1139,7 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
 
       {/* 30분 그래프 */}
       {points.length >= 2 ? (
-        <Rate30mChart points={points} level={cfg.level2y} />
+        <Rate30mChart points={points} levels={cfg.levels2y} />
       ) : (
         <p className="mt-2 text-[13px] text-ink-48">30분 시계열을 불러오지 못했습니다 (선물·샘플 데이터 없음).</p>
       )}
@@ -1138,7 +1147,8 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
       {/* 문자 알람 조건 — 이 카드가 감시하는 기준 */}
       <p className="mt-2 text-[12px] leading-snug text-ink-48">
         문자 알람 조건: 30분 ±{cfg.delta30m}%p 또는 1시간 ±{cfg.delta1h}%p 급변(급등=매도·급락=매수 검토),
-        기준선 {cfg.level2y}% 돌파/이탈 · 10년물 {cfg.level10y}% 돌파. 임계값은 RATE_ALERT_* 환경변수로 조정.
+        단계선 {cfg.levels2y.map((lv, i) => `${lv}(${["경고", "위험", "최고위험"][Math.min(i, 2)]})`).join(" · ")} 돌파/해제
+        · 10년물 {cfg.level10y}% 돌파. 임계값은 RATE_ALERT_* 환경변수로 조정.
       </p>
 
       {/* 표로 보기 토글 — 30분 단위 수치 표 */}
@@ -1166,7 +1176,7 @@ export function Us2yCard({ data }: { data: Us2yIntraday }) {
                   {[...points].reverse().slice(0, 24).map((p) => (
                     <tr key={p.ts} className={spiked(p) ? "bg-yellow-50" : undefined}>
                       <td className="px-3 py-1.5">{kstTime(p.ts, true)}{spiked(p) ? " ⚠" : ""}</td>
-                      <td className={`px-3 py-1.5 text-right tabular-nums ${p.value >= cfg.level2y ? "font-semibold text-red-600" : ""}`}>
+                      <td className={`px-3 py-1.5 text-right tabular-nums ${cfg.levels2y.length > 0 && p.value >= cfg.levels2y[0] ? "font-semibold text-red-600" : ""}`}>
                         {p.value.toFixed(3)}%
                       </td>
                       <td className={`px-3 py-1.5 text-right tabular-nums ${colorOf(p.d30)} ${p.d30 !== null && Math.abs(p.d30) >= cfg.delta30m ? "font-semibold" : ""}`}>

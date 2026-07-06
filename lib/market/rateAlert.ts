@@ -2,7 +2,9 @@
 //
 // 조건 (모두 OR, 알림 키별 1일 1회):
 //  - 급변: 30분 변동 ≥ ±Δ30 또는 1시간 변동 ≥ ±Δ1h → 급등=매도 검토 / 급락=매수 검토
-//  - 레벨: 2년물이 기준(기본 4.125%)을 상향 돌파=매도 검토 / 하향 이탈=매수 검토
+//  - 단계 레벨: 2년물이 4.14(경고)/4.15(위험)/4.16(최고위험) 돌파 시 알림, 내려오면 해제 알림.
+//    (원래 4.125 단일 기준이었으나 금리가 그 주변에서 진동해 노이즈만 발생 — 사용자 요청으로
+//     2026-07-07 제거하고 단계형으로 교체)
 //  - 10년물: 기준(기본 4.45%) 상향 돌파 → 고PER 압박 경고
 // 임계값 근거: scripts/rate-alert-analyze.ts 실측 (6/5·6/18·6/30·7/1 이벤트 4일 전부 감지).
 //
@@ -10,15 +12,32 @@
 // 크론이 10분 간격으로 돌아야 30분 변동을 ±10분 정확도로 잡는다.
 
 export type RateAlertConfig = {
-  delta30m: number; // 2년물 30분 변동 임계값 (%p)
-  delta1h: number;  // 2년물 1시간 변동 임계값 (%p)
-  level2y: number;  // 2년물 절대 레벨 (%)
-  level10y: number; // 10년물 절대 레벨 (%)
+  delta30m: number;   // 2년물 30분 변동 임계값 (%p)
+  delta1h: number;    // 2년물 1시간 변동 임계값 (%p)
+  levels2y: number[]; // 2년물 단계 레벨 (%, 오름차순 — 경고→위험→최고위험)
+  level10y: number;   // 10년물 절대 레벨 (%)
 };
+
+// 단계 이름 — levels2y 인덱스 순 (마지막 초과분은 전부 최고위험)
+export const LEVEL2Y_GRADES = ["경고", "위험", "최고위험"] as const;
+export function grade2yName(idx: number): string {
+  return LEVEL2Y_GRADES[Math.min(idx, LEVEL2Y_GRADES.length - 1)];
+}
 
 function envNum(name: string, fallback: number): number {
   const v = parseFloat(process.env[name] ?? "");
   return isNaN(v) ? fallback : v;
+}
+
+function envLevels(name: string, fallback: number[]): number[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const arr = raw
+    .split(",")
+    .map((s) => parseFloat(s.trim()))
+    .filter((v) => !isNaN(v) && v > 0 && v < 20)
+    .sort((a, b) => a - b);
+  return arr.length > 0 ? arr : fallback;
 }
 
 // 환경변수로 조정 가능 (기본값은 2026-06~07 실측 분석 기준 — docs/rate-alert.md 2장)
@@ -26,7 +45,7 @@ export function rateAlertConfig(): RateAlertConfig {
   return {
     delta30m: envNum("RATE_ALERT_2Y_DELTA_30M", 0.03),
     delta1h: envNum("RATE_ALERT_2Y_DELTA_1H", 0.03),
-    level2y: envNum("RATE_ALERT_2Y_LEVEL", 4.125),
+    levels2y: envLevels("RATE_ALERT_2Y_LEVELS", [4.14, 4.15, 4.16]),
     level10y: envNum("RATE_ALERT_10Y_LEVEL", 4.45),
   };
 }
@@ -111,29 +130,38 @@ export function evaluateRateAlerts(samples: RateSample[], cfg: RateAlertConfig):
       });
     }
 
-    // ── 2년물 레벨 돌파 (완만하지만 지속적인 상승/하락 커버)
-    // 돌파 '순간'만 발동. 직전 샘플이 없으면(첫 가동·24h+ 공백) 현재 상태를 1회 알림.
-    const prevY2 = prevFresh?.y2 ?? null;
-    const crossedUp = cur.y2 >= cfg.level2y && (prevY2 === null || prevY2 < cfg.level2y);
-    const crossedDown = cur.y2 < cfg.level2y && (prevY2 === null ? false : prevY2 >= cfg.level2y);
-    if (crossedUp) {
+    // ── 2년물 단계 레벨 (완만하지만 지속적인 상승 커버 — 4.14 경고 / 4.15 위험 / 4.16 최고위험)
+    // 상태 기계: 현재가 몇 번째 단계 위인지(state = 넘어선 레벨 수)를 직전 샘플과 비교해
+    // 올라가면 해당 단계 돌파 알림, 내려오면 해제 알림. 한 번에 여러 단계를 건너뛰면
+    // 최종 단계 1건만 발송 (문자 폭주 방지). 직전 샘플이 없으면(첫 가동) 0단계에서 출발 —
+    // 현재 이미 단계 위면 그 단계 돌파 알림 1회.
+    const levels = cfg.levels2y;
+    const stateOf = (v: number) => levels.filter((L) => v >= L).length;
+    const sCur = stateOf(cur.y2);
+    const sPrev = prevFresh?.y2 != null ? stateOf(prevFresh.y2) : 0;
+
+    if (sCur > sPrev) {
+      const level = levels[sCur - 1];
+      const grade = grade2yName(sCur - 1);
       hits.push({
-        key: "rate2y_level_up",
-        severity: "medium",
-        smsSubject: "금리 기준선 돌파",
-        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${cfg.level2y} 상향돌파 매도 검토`,
-        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — 기준선 ${cfg.level2y}% 상향 돌파 (매도 검토)`,
-        snapshot: { y2: cur.y2, prevY2, level: cfg.level2y },
+        key: `rate2y_lvl_u${level}`,
+        severity: sCur - 1 === 0 ? "medium" : "high",
+        smsSubject: `금리 ${grade}단계`,
+        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${level} 돌파 — ${grade}단계 매도 검토`,
+        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — ${level}% 돌파 (${grade}단계, 매도 검토)`,
+        snapshot: { y2: cur.y2, prevY2: prevFresh?.y2 ?? null, level, grade, levels },
       });
     }
-    if (crossedDown) {
+    if (sCur < sPrev) {
+      const level = levels[sCur]; // 이제 이 레벨 아래로 내려옴
+      const grade = grade2yName(sCur);
       hits.push({
-        key: "rate2y_level_down",
+        key: `rate2y_lvl_d${level}`,
         severity: "medium",
-        smsSubject: "금리 기준선 이탈",
-        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${cfg.level2y} 하향이탈 매수 검토`,
-        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — 기준선 ${cfg.level2y}% 하향 이탈 (매수 검토)`,
-        snapshot: { y2: cur.y2, prevY2, level: cfg.level2y },
+        smsSubject: "금리단계 해제",
+        text: `[스탁가드] 미2년 ${fmt(cur.y2, 3)}% 기준 ${level} 하향이탈 — ${grade}단계 해제`,
+        emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — ${level}% 하향 이탈 (${grade}단계 해제)`,
+        snapshot: { y2: cur.y2, prevY2: prevFresh?.y2 ?? null, level, grade, levels },
       });
     }
   }
