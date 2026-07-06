@@ -97,11 +97,21 @@ export function buildMoveAlerts(tick: IntradayTick | undefined): SignalAlert[] {
     const level = Math.max(...crossed);
     const dir = (t.chg as number) > 0 ? "급등" : "급락";
     const sign = (t.chg as number) > 0 ? "+" : "";
+    const isTop = Math.abs(t.chg as number) >= t.levels[t.levels.length - 1];
+    // 급등은 청산 신호가 아니다 — 시스템 철학상 상방 추세 후보(레버리지 검토·인버스 금지, 마스터 4장).
+    // '과열'은 며칠 연속 상승 뒤 반전 셋업(S1) 조건이지 장중 급등이 아님 (사용자 지적 2026-07-06).
+    // 최고 단계 급등만 추격 진입 자제를 덧붙인다.
+    const guide =
+      dir === "급락"
+        ? "위험선·트레일링 점검"
+        : isTop
+          ? "추세 확인·추격 진입 자제"
+          : "상방추세 점검·보유시 트레일링 상향";
     alerts.push({
       key: `move_${t.sym}_${(t.chg as number) > 0 ? "u" : "d"}${level}`,
-      severity: Math.abs(t.chg as number) >= t.levels[t.levels.length - 1] ? "high" : "medium",
-      // 단문 (≤90바이트): "[스탁가드] SK하이닉스 급락 -5.2% (10:41) 위험선·트레일링 점검"
-      text: `[스탁가드] ${t.name} ${dir} ${sign}${(t.chg as number).toFixed(1)}% (${hhmm}) ${dir === "급락" ? "위험선·트레일링 점검" : "과열·청산 검토"}`,
+      severity: isTop ? "high" : "medium",
+      // 단문 (≤90바이트): "[스탁가드] 코스피200선물 급등 +2.0% (09:09) 상방추세 점검·보유시 트레일링 상향"
+      text: `[스탁가드] ${t.name} ${dir} ${sign}${(t.chg as number).toFixed(1)}% (${hhmm}) ${guide}`,
     });
   }
   return alerts;
