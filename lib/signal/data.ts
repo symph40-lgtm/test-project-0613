@@ -100,18 +100,31 @@ export async function fetchBreadth(): Promise<{ up: number; down: number; breadt
   }
 }
 
-// ── 크로스마켓 (D1 니케이 선물 · D3 대만 자취안 · D2 나스닥 선물 기록)
+// ── 크로스마켓 (D1 니케이 현물 · D3 대만 자취안 · D2 나스닥 선물 기록)
+// D1 니케이는 현물 ^N225 사용 — NKD=F(CME 달러선물)는 등락률 기준이 '전일 CME 정산가'라
+// 주말·미국 야간 변동이 섞여 당일 현물과 어긋남 (실측: 현물 -0.48%일 때 +1.32% 표시,
+// 사용자 지적 2026-07-06). 일본은 KST와 동일 시간대(09:00~15:45)라 한국 장중엔 현물이 항상 산다.
+// 현물 지수는 휴장일에 어제 등락률이 남으므로 '오늘(KST) 체결'일 때만 사용 — 아니면 null(판정 유보).
 export async function fetchCrossMarkets(): Promise<{ nikkeiChg: number | null; twiiChg: number | null; nqChg: number | null }> {
-  const one = async (symbol: string): Promise<number | null> => {
+  const one = async (symbol: string, requireToday = false): Promise<number | null> => {
     try {
       const q = await yf.quote(symbol);
       const v = q.regularMarketChangePercent;
-      return typeof v === "number" && isFinite(v) ? v : null;
+      if (typeof v !== "number" || !isFinite(v)) return null;
+      if (requireToday) {
+        const t = q.regularMarketTime;
+        const ms = t instanceof Date ? t.getTime() : typeof t === "number" ? t * 1000 : null;
+        if (ms === null) return null;
+        const dayKst = (x: number) => new Date(x + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        if (dayKst(ms) !== dayKst(Date.now())) return null; // 휴장·개장 전 — 어제 등락률 오용 방지
+      }
+      return v;
     } catch {
       return null;
     }
   };
-  const [nikkeiChg, twiiChg, nqChg] = await Promise.all([one("NKD=F"), one("^TWII"), one("NQ=F")]);
+  // NQ=F(D2)는 24시간 선물 기록용 — 전일 정산 대비가 표준이라 그대로 둔다
+  const [nikkeiChg, twiiChg, nqChg] = await Promise.all([one("^N225", true), one("^TWII", true), one("NQ=F")]);
   return { nikkeiChg, twiiChg, nqChg };
 }
 
