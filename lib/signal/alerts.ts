@@ -6,6 +6,7 @@
 // 중복 방지: alerts 테이블(trigger_key='signal')에 오늘 같은 alertKey가 있으면 재발송 안 함.
 // 알림은 판단 보조일 뿐 매매 지시가 아니다 — 문구에 항상 "검토" 수준으로 표현.
 
+import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels, type ChannelAlert } from "@/lib/alerts/dispatch";
 import { SIGNAL_CONFIG } from "./config";
 import type { IntradayTick, Judgment } from "./types";
@@ -193,11 +194,41 @@ export function buildReversalAlert(j: Judgment): SignalAlert | null {
       };
 }
 
-// 모멘텀 신호 발송 — state 라우트에서 판정마다 호출 (방향별 1일 1회 중복 방지)
+// 모멘텀 신호 발송 — state 라우트에서 판정마다 호출.
+// 발송 정책 (사용자 확정 2026-07-07): 같은 방향(추세)은 하루 최대 maxPerDirPerDay회
+// (최초 rev_up + 추가분 rev_up_2·rev_up_3), 반복 사이 최소 repeatCooldownMin분 간격 —
+// 조건이 수 분간 연속 성립해도 1분 간격 연속 발송이 되지 않게.
 export async function maybeSendReversalAlert(j: Judgment): Promise<number> {
   const alert = buildReversalAlert(j);
   if (!alert) return 0;
-  return dispatchToChannels("signal", j.date, alert, `분봉 모멘텀 — ${alert.text.slice(10, 45)}`, {
+  const R = SIGNAL_CONFIG.reversal;
+
+  // 오늘 이 방향으로 이미 나간 회차·마지막 발송 시각 (사용자 무관 — 키 집합 기준)
+  const admin = createAdminClient();
+  const kstDayStartUtc = new Date(`${j.date}T00:00:00+09:00`).toISOString();
+  const { data } = await admin
+    .from("alerts")
+    .select("created_at, message")
+    .eq("trigger_key", "signal")
+    .gte("created_at", kstDayStartUtc);
+  const sentKeys = new Map<string, number>(); // alertKey → 마지막 발송 epoch ms
+  for (const r of data ?? []) {
+    const k = (r.message as { alertKey?: string } | null)?.alertKey;
+    if (k && (k === alert.key || k.startsWith(`${alert.key}_`))) {
+      const t = Date.parse(r.created_at as string);
+      sentKeys.set(k, Math.max(sentKeys.get(k) ?? 0, t));
+    }
+  }
+  const n = sentKeys.size; // 오늘 이 방향 발송 회차
+  if (n >= R.maxPerDirPerDay) return 0;
+  if (n > 0 && Date.now() - Math.max(...sentKeys.values()) < R.repeatCooldownMin * 60000) return 0;
+
+  const keyed: SignalAlert = {
+    ...alert,
+    key: n === 0 ? alert.key : `${alert.key}_${n + 1}`,
+    text: n === 0 ? alert.text : `${alert.text} (${n + 1}차)`,
+  };
+  return dispatchToChannels("signal", j.date, keyed, `분봉 모멘텀 — ${keyed.text.slice(10, 45)}`, {
     reversal: j.ext.reversal,
     dayType: j.dayType,
     ts: j.ts,

@@ -299,7 +299,9 @@ c1:  {enabled: false, dc1_min: 0.60, index_move_min: 0.03, extend_to: "15:15"}
 7. 5분봉 7개 합 ≥ 3.2%
 
 **판정·발송**: 상승 → 레버리지 검토 / 하락 → 인버스 검토. 양방향 동시 성립 시 |변동|이 큰
-쪽 하나만. 방향별 1일 1회 문자(`rev_up`·`rev_down`), 문자에 직전 30분 흐름을 참고 표기.
+쪽 하나만. 같은 방향(추세)은 **하루 최대 3회**(최초 + 추가 2회, 사용자 확정 — 2·3차 문자엔
+"(n차)" 표기), 반복 사이 최소 10분 간격(`config.reversal.repeatCooldownMin`).
+문자에 직전 30분 흐름을 참고 표기.
 5분봉은 완성된 봉만 사용(진행 봉 진동 방지 — T6과 동일 원칙).
 구현: `lib/signal/engine/reversal.ts`(순수) + `lib/signal/alerts.ts` buildReversalAlert.
 검증: `scripts/signal-backtest.ts` RV1 섹션 (조건 7종·XS1 게이트).
