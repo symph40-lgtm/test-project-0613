@@ -8,6 +8,7 @@ import { computeBias } from "./bias";
 import { computeTrend } from "./trend";
 import { computeSetups } from "./setups";
 import { computeRisk } from "./risk";
+import { detectReversal } from "./reversal";
 import { gapPct as calcGap, nr7Flags, worstCumDeclinePct } from "./daily";
 
 const S = SIGNAL_CONFIG.session;
@@ -213,6 +214,7 @@ function computeExt(ctx: PremarketContext, ticks: IntradayTick[]): ExtRecord {
     basisSlope,
     basisBlackout: isExpiryBlackout(new Date(ctx.date), SIGNAL_CONFIG.ext.b1.expiryBlackoutDays),
     vkospiPeak: null, // 무료 소스 부재 (plan.md)
+    reversal: detectReversal(ticks), // RV1 하닉 분봉 반전 (사용자 지정 — 문자는 alerts.ts에서)
   };
 }
 

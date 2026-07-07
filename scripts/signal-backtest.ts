@@ -2,8 +2,9 @@
 // 엔진(lib/signal/engine)·backtest는 외부 의존성 없는 순수 함수라 DB·API 없이 실행된다.
 
 import { runBacktest } from "../lib/signal/backtest";
-import { buildMoveAlerts } from "../lib/signal/alerts";
-import type { IntradayTick } from "../lib/signal/types";
+import { buildMoveAlerts, buildReversalAlert } from "../lib/signal/alerts";
+import { detectReversal } from "../lib/signal/engine/reversal";
+import type { IntradayTick, Judgment } from "../lib/signal/types";
 
 const results = runBacktest();
 for (const r of results) {
@@ -83,6 +84,52 @@ for (const c of moveCases) {
   console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 [${want.join(",")}] / 실제 [${got.join(",")}]`);
   for (const a of buildMoveAlerts(c.ticks)) console.log(`  📱 ${a.text}`);
 }
+
+// RV1 하닉 분봉 반전 검증 (사용자 지정 2026-07-07 — 1분/5분봉 반전 조건 + XS1 게이트)
+console.log("\n── RV1 분봉 반전 검증");
+// 하닉 등락률 시계열 → 1분 틱 배열
+const hynixSeries = (fn: (min: number) => number, from: number, to: number): IntradayTick[] => {
+  const out: IntradayTick[] = [];
+  for (let min = from; min <= to; min++) out.push(mkTick({ minuteOfDay: min, hynixChg: Number(fn(min).toFixed(2)) }));
+  return out;
+};
+const revCases: { name: string; ticks: IntradayTick[]; expect: string }[] = [
+  {
+    // 30분 이상 -0.1%/분 하락 후 1분 만에 +0.9 반등 → 조건 1 (1분봉 ≥0.8)
+    name: "하락 추세 중 1분봉 +0.9 반전 → UP",
+    ticks: hynixSeries((m) => (m <= 590 ? -0.1 * (m - 540) : -4.1), 540, 591),
+    expect: "UP/1분봉",
+  },
+  {
+    // +0.1%/분 상승 후 15분간 완만 하락 — 5분봉 3개 합 -2.55 → 조건 4 (≥2.2)
+    name: "상승 추세 중 5분봉 3개 합 -2.5 반전 → DOWN",
+    ticks: hynixSeries((m) => (m <= 584 ? 0.1 * (m - 540) : 4.4 - 0.17 * (m - 584)), 540, 600),
+    expect: "DOWN/5분봉3개",
+  },
+  {
+    // 추세 없이(보합) 1분봉 +0.9 — '추세 중의 반전'이 아님 → 무판정
+    name: "무추세 급등은 반전 아님",
+    ticks: hynixSeries((m) => (m <= 590 ? 0 : 0.9), 540, 591),
+    expect: "없음",
+  },
+];
+for (const c of revCases) {
+  const hit = detectReversal(c.ticks);
+  const got = hit ? `${hit.dir}/${hit.cond.split(" ")[0]}` : "없음";
+  const ok = got === c.expect;
+  if (!ok) failed++;
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 ${c.expect} / 실제 ${got}${hit ? ` (${hit.cond}, 직전 ${hit.preMovePct}%p)` : ""}`);
+}
+// XS1 게이트 — 폭락 분기 활성 시 하락 반전(인버스) 문자 차단, 해제 시 발송
+const downHit = detectReversal(revCases[1].ticks);
+const fakeJ = (crash: boolean): Judgment =>
+  ({ ext: { reversal: downHit }, phase: "판정", crashContext: { active: crash }, date: "2026-07-07", ts: "", dayType: "대기" }) as unknown as Judgment;
+const blockedOk = buildReversalAlert(fakeJ(true)) === null;
+const sentAlert = buildReversalAlert(fakeJ(false));
+const sentOk = sentAlert?.key === "rev_down";
+if (!blockedOk || !sentOk) failed++;
+console.log(`[${blockedOk && sentOk ? "PASS" : "FAIL"}] XS1 게이트 — 폭락 중 인버스 차단 ${blockedOk} · 평시 발송 ${sentOk}`);
+if (sentAlert) console.log(`  📱 ${sentAlert.text}`);
 
 console.log(`\n총 실패 ${failed}건`);
 process.exit(failed > 0 ? 1 : 0);

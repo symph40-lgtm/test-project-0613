@@ -10,7 +10,7 @@ import { collectTick, buildPremarketContext, kstNow } from "@/lib/signal/data";
 import { decide } from "@/lib/signal/engine/decide";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { appendTick, loadTicks, logJudgment, upsertDailyFeatures, loadDailyFeatures, loadRecentFeatures } from "@/lib/signal/store";
-import { maybeSendSignalSms, maybeSendMoveAlerts } from "@/lib/signal/alerts";
+import { maybeSendSignalSms, maybeSendMoveAlerts, maybeSendReversalAlert } from "@/lib/signal/alerts";
 import { autoAnnotateIfNeeded } from "@/lib/signal/autoAnnotate";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +68,8 @@ export async function GET(req: NextRequest) {
         // 장중 급변 알림 — 절대 단계(하닉·삼전 ±3/5/7/10%, 선물 ±0.7% 등간격) +
         // 반전 스윙(당일 고점 대비 반락·저점 대비 반등 0.7%p 등간격, 단계별 1일 1회)
         maybeSendMoveAlerts(date, ticks).catch(() => 0),
+        // RV1 하닉 분봉 반전 진입신호 — 상승=레버리지·하락=인버스, 즉시 문자 (방향별 1일 1회)
+        maybeSendReversalAlert(judgment).catch(() => 0),
       ]);
       sms = smsResult;
     }

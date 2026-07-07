@@ -281,6 +281,29 @@ c1:  {enabled: false, dc1_min: 0.60, index_move_min: 0.03, extend_to: "15:15"}
 
 ---
 
+## 9. RV1 — 하닉 분봉 반전 판정 (사용자 직접 지정, 2026-07-07 — 예외적으로 즉시 활성)
+
+사용자가 직접 정의한 규칙이라 60일 검증 규약의 예외로 **즉시 활성 + 즉시 문자 발송**한다
+(단, 하드 블록 우선 원칙은 유지 — 폭락 분기 활성 시 하락 반전의 인버스 문자는 XS1로 차단).
+
+**전제**: 하닉이 직전 추세 중일 것 — 반전 창 시작 이전 30분 순변화 ≥ 0.8%p (방향 무관, 오탐 방지).
+
+**반전 조건** (반대 방향으로 아래 중 하나, 수치는 전일 종가 대비 등락률 차 %p — `config.reversal`):
+1. 1분봉 1개 종가 반전 ≥ 0.8%
+2. 1분봉 3개 합 ≥ 1.0%
+3. 5분봉 1개 ≥ 1.0%
+4. 5분봉 3개 합 ≥ 2.2%
+5. 5분봉 5개 합 ≥ 2.7%
+6. 5분봉 7개 합 ≥ 3.2%
+
+**판정·발송**: 상승 반전 → 레버리지 검토 / 하락 반전 → 인버스 검토. 방향별 1일 1회 문자
+(`rev_up`·`rev_down`). 5분봉은 완성된 봉만 사용(진행 봉 진동 방지 — T6과 동일 원칙).
+구현: `lib/signal/engine/reversal.ts`(순수) + `lib/signal/alerts.ts` buildReversalAlert.
+검증: `scripts/signal-backtest.ts` RV1 섹션. 2026-07-07 실틱 재현 — 09:19 상승 반전
+(1분봉 3개 +1.5%p, 직전 -3.8%p)을 실제 반등 시작점에서 포착.
+
+---
+
 ## 부록. 참고 문헌·자료
 - Toby Crabel, *Day Trading with Short Term Price Patterns and Opening Range Breakout* — N1, ORB의 원전
 - James Dalton, *Mind Over Markets* — O1 시가 유형 분류의 원전

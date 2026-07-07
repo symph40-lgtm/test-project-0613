@@ -299,6 +299,11 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
               <ExtCell label="V1 VKOSPI" value="소스 없음 (KIS 확장 대기)" on={false} />
               <ExtCell label="A1 ATR 스탑" value={j.risk.stopAtrPct !== null ? `-${j.risk.stopAtrPct.toFixed(1)}% (mode: ${j.risk.stopMode})` : "-"} on={j.risk.stopMode === "atr"} />
               <ExtCell label="C1 마감 증폭" value={j.risk.closeExtendSuggested ? "조건 성립 (기록만)" : "미성립"} on={j.risk.closeExtendSuggested} />
+              <ExtCell
+                label="RV1 분봉 반전 (즉시 문자)"
+                value={j.ext.reversal ? `${j.ext.reversal.dir === "UP" ? "상승 반전 → 레버리지" : "하락 반전 → 인버스"} · ${j.ext.reversal.cond}` : "미성립"}
+                on={j.ext.reversal !== null}
+              />
             </div>
           </section>
 
