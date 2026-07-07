@@ -221,7 +221,9 @@ export async function maybeSendReversalAlert(j: Judgment): Promise<number> {
   }
   const n = sentKeys.size; // 오늘 이 방향 발송 회차
   if (n >= R.maxPerDirPerDay) return 0;
-  if (n > 0 && Date.now() - Math.max(...sentKeys.values()) < R.repeatCooldownMin * 60000) return 0;
+  // 반복 간격: 1차→2차 10분, 2차→3차 5분 (배열 초과분은 마지막 값)
+  const cooldownMin = R.repeatCooldownMins[Math.min(n - 1, R.repeatCooldownMins.length - 1)] ?? 0;
+  if (n > 0 && Date.now() - Math.max(...sentKeys.values()) < cooldownMin * 60000) return 0;
 
   const keyed: SignalAlert = {
     ...alert,
