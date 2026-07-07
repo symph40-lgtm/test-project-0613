@@ -177,13 +177,14 @@ export async function buildPremarketContext(manual?: {
 }): Promise<PremarketContext> {
   const { date } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
-  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20, macroTrend] = await Promise.all([
+  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20, macroTrend, us2y] = await Promise.all([
     fetchMarketData().catch(() => null),
     fetchDailyBars(hynix, 40),
     fetchDailyBars(samsung, 40),
     fetchDailyBars("KPI200", 40),
     fetchFrgn20dAvg(hynix),
     fetchMacro5dTrend(),
+    fetchUs2yDaily(),
   ]);
   const samsungFrgnAvg = await fetchFrgn20dAvg(samsung);
 
@@ -195,10 +196,11 @@ export async function buildPremarketContext(manual?: {
     when: (e.date === date ? "당일" : "익일") as "당일" | "익일",
   }));
 
-  // C4 미 금리 레짐 (10년물 전일 변동 기준 3분류)
-  const t10 = market?.treasury10y?.changePercent ?? null;
+  // C4 미 금리 레짐 — 2년물 전일 변화(%p) 기준 3분류 (사용자 개정 2026-07-07: 10년물→2년물.
+  // ±0.03%p는 rate-alert 실측 분석과 동일 눈금 — 평상시 일중 99%가 0.022%p 이하)
+  const y2 = us2y.changePp;
   const regime: "상승" | "안정" | "하락" | null =
-    t10 === null ? null : t10 > 0.5 ? "상승" : t10 < -0.5 ? "하락" : "안정";
+    y2 === null ? null : y2 > 0.03 ? "상승" : y2 < -0.03 ? "하락" : "안정";
 
   return {
     date,
@@ -208,8 +210,8 @@ export async function buildPremarketContext(manual?: {
       level: market?.usdkrw?.price ?? null,
       changePercent: market?.usdkrw?.changePercent ?? null,
     },
-    usRates: { t10yChangePct: t10, regime },
-    macroTrend,
+    usRates: { changePp: y2, regime },
+    macroTrend: { rate5dPp: us2y.fiveDayPp, usdkrw5dPct: macroTrend.usdkrw5dPct },
     macroSurprise: manual?.macroSurprise ?? null,
     overnight: {
       nasdaqPct: market?.nasdaq?.changePercent ?? null,
@@ -225,22 +227,40 @@ export async function buildPremarketContext(manual?: {
   };
 }
 
-// ── 매크로 5일 추세 — "추세 중의 변화" 감지용 (금리·환율이 상승 추세였다가 꺾이는 전환 포착)
-async function fetchMacro5dTrend(): Promise<{ t10y5dPct: number | null; usdkrw5dPct: number | null }> {
-  const trend5d = async (symbol: string): Promise<number | null> => {
-    try {
-      const r = await yf.chart(symbol, { period1: new Date(Date.now() - 14 * 86400000), interval: "1d" });
-      const closes = (r.quotes ?? []).map((q) => q.close).filter((c): c is number => c != null);
-      if (closes.length < 6) return null;
-      const start = closes[closes.length - 6];
-      const end = closes[closes.length - 1];
-      return start > 0 ? ((end - start) / start) * 100 : null;
-    } catch {
-      return null;
-    }
-  };
-  const [t10y5dPct, usdkrw5dPct] = await Promise.all([trend5d("^TNX"), trend5d("KRW=X")]);
-  return { t10y5dPct, usdkrw5dPct };
+// ── 매크로 5일 추세 — "추세 중의 변화" 감지용 (환율이 상승 추세였다가 꺾이는 전환 포착)
+async function fetchMacro5dTrend(): Promise<{ usdkrw5dPct: number | null }> {
+  try {
+    const r = await yf.chart("KRW=X", { period1: new Date(Date.now() - 14 * 86400000), interval: "1d" });
+    const closes = (r.quotes ?? []).map((q) => q.close).filter((c): c is number => c != null);
+    if (closes.length < 6) return { usdkrw5dPct: null };
+    const start = closes[closes.length - 6];
+    const end = closes[closes.length - 1];
+    return { usdkrw5dPct: start > 0 ? ((end - start) / start) * 100 : null };
+  } catch {
+    return { usdkrw5dPct: null };
+  }
+}
+
+// ── 미 2년물 일봉 (네이버 US2YT=RR — 실시간 금리 소스의 일간 이력)
+// C4 레짐(전일 변화)·매크로 전환 감지(5일 추세)용. 값은 %p (금리 절대 레벨의 차).
+async function fetchUs2yDaily(): Promise<{ changePp: number | null; fiveDayPp: number | null }> {
+  try {
+    const res = await fetch(
+      "https://m.stock.naver.com/front-api/marketIndex/prices?category=bond&reutersCode=US2YT=RR&page=1&pageSize=10",
+      { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" },
+    );
+    if (!res.ok) return { changePp: null, fiveDayPp: null };
+    const j = (await res.json()) as { result?: { closePrice: string }[] };
+    const closes = (j.result ?? [])
+      .map((r) => parseFloat(r.closePrice))
+      .filter((v) => !isNaN(v) && v > 0 && v < 20); // 최신이 먼저
+    if (closes.length < 2) return { changePp: null, fiveDayPp: null };
+    const changePp = Number((closes[0] - closes[1]).toFixed(4));
+    const fiveDayPp = closes.length >= 6 ? Number((closes[0] - closes[5]).toFixed(4)) : null;
+    return { changePp, fiveDayPp };
+  } catch {
+    return { changePp: null, fiveDayPp: null };
+  }
 }
 
 // ── 외인 순매매 20일 평균(절대값) — L5 ③상대강도의 분모 (마스터 5장 배율 정규화)

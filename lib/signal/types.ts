@@ -39,12 +39,15 @@ export type PremarketContext = {
   events: { label: string; binary: boolean; when: "당일" | "익일" }[]; // C1
   rebalance: "순풍" | "역풍" | "중립";                                  // C2
   usdkrw: { level: number | null; changePercent: number | null };       // C3
-  usRates: { t10yChangePct: number | null; regime: "상승" | "안정" | "하락" | null }; // C4
+  // C4 — 미 2년물 금리 (사용자 개정 2026-07-07: 10년물→2년물, 값은 %p). 소스: 네이버 US2YT=RR 일봉
+  usRates: { changePp: number | null; regime: "상승" | "안정" | "하락" | null };
   // 매크로 "추세 중의 변화" 감지용 — 5일 추세와 전일 방향이 반대면 전환 신호 (성공사례 원형: 금리 상승 추세 꺾임)
-  macroTrend: { t10y5dPct: number | null; usdkrw5dPct: number | null };
+  // rate5dPp = 미 2년물 5일 순변화 (%p)
+  macroTrend: { rate5dPp: number | null; usdkrw5dPct: number | null };
   // 경제지표 서프라이즈 방향 (AI가 뉴스에서 판정 — 예: NFP 컨센 11만 vs 실제 5만 = easing)
   macroSurprise: "easing" | "tightening" | null;
-  overnight: { nasdaqPct: number | null; soxPct: number | null };       // C5
+  // 밤사이 미국장 — Bias에서는 제외(사용자 개정 2026-07-07), 셋업 L10 근사·S2 매크로 악화 판정에만 사용
+  overnight: { nasdaqPct: number | null; soxPct: number | null };
   hynixDaily: DailyBar[];      // 최신이 마지막. NR7·ATR·누적낙폭·갭 계산용
   samsungDaily: DailyBar[];
   k200Daily: DailyBar[];       // KPI200 지수 (선물 일봉 프록시)
@@ -59,7 +62,8 @@ export type PremarketContext = {
 export type BiasResult = {
   dir: "상방" | "하방" | "중립";
   strength: 0 | 1 | 2 | 3;
-  factors: { code: string; label: string; dir: "상방" | "하방" | "중립" | "미상"; detail: string }[];
+  // weight: 방향 결정 가중치 (기본 1 — 지표 서프라이즈 등 정성 이벤트는 2, 사용자 개정 2026-07-07)
+  factors: { code: string; label: string; dir: "상방" | "하방" | "중립" | "미상"; detail: string; weight?: number }[];
 };
 
 // ── T-신호 개별 결과

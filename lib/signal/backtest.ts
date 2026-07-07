@@ -92,8 +92,8 @@ function makeCtx(over: Partial<PremarketContext> & { hynixDaily: DailyBar[] }): 
     events: [],
     rebalance: "중립",
     usdkrw: { level: 1450, changePercent: -0.1 },
-    usRates: { t10yChangePct: -0.3, regime: "안정" },
-    macroTrend: { t10y5dPct: null, usdkrw5dPct: null },
+    usRates: { changePp: -0.01, regime: "안정" },
+    macroTrend: { rate5dPp: null, usdkrw5dPct: null },
     macroSurprise: null,
     overnight: { nasdaqPct: 0.5, soxPct: 0.8 },
     samsungDaily: over.hynixDaily,
@@ -156,7 +156,7 @@ export function runBacktest(): BacktestResult[] {
     const ctx = makeCtx({
       hynixDaily: daily,
       usdkrw: { level: 1490, changePercent: 0.5 },
-      usRates: { t10yChangePct: 1.2, regime: "상승" },
+      usRates: { changePp: 0.05, regime: "상승" },
       overnight: { nasdaqPct: -0.8, soxPct: -1.2 },
     });
     const ticks = makeTicks(
@@ -177,7 +177,7 @@ export function runBacktest(): BacktestResult[] {
     const ctx = makeCtx({
       hynixDaily: daily,
       usdkrw: { level: 1480, changePercent: 0.2 },
-      usRates: { t10yChangePct: 0.4, regime: "안정" },
+      usRates: { changePp: 0.01, regime: "안정" },
       overnight: { nasdaqPct: 0.8, soxPct: 1.5 },
     });
     const ticks = makeTicks(
@@ -207,7 +207,7 @@ export function runBacktest(): BacktestResult[] {
     const ctx = makeCtx({
       hynixDaily: daily,
       usdkrw: { level: 1500, changePercent: 0.8 },
-      usRates: { t10yChangePct: 0.9, regime: "상승" },
+      usRates: { changePp: 0.04, regime: "상승" },
       overnight: { nasdaqPct: -1.5, soxPct: -2.0 },
     });
     const ticks = makeTicks(
@@ -230,8 +230,8 @@ export function runBacktest(): BacktestResult[] {
       causeNonEarnings: true,
       consensusIntact: true,
       usdkrw: { level: 1440, changePercent: -0.4 },
-      usRates: { t10yChangePct: -1.5, regime: "하락" },
-      macroTrend: { t10y5dPct: 3.2, usdkrw5dPct: 1.1 }, // 상승 추세였다가 전일 꺾임 (전환 감지)
+      usRates: { changePp: -0.05, regime: "하락" },
+      macroTrend: { rate5dPp: 0.12, usdkrw5dPct: 1.1 }, // 상승 추세였다가 전일 꺾임 (전환 감지)
       macroSurprise: "easing",                            // NFP 컨센 11만 vs 실제 5만대
       overnight: { nasdaqPct: 1.2, soxPct: 1.5 },
     });
@@ -261,8 +261,8 @@ export function runBacktest(): BacktestResult[] {
       causeNonEarnings: true,
       consensusIntact: true,
       usdkrw: { level: 1440, changePercent: -0.4 },
-      usRates: { t10yChangePct: -1.5, regime: "하락" },
-      macroTrend: { t10y5dPct: 3.2, usdkrw5dPct: 1.1 },
+      usRates: { changePp: -0.05, regime: "하락" },
+      macroTrend: { rate5dPp: 0.12, usdkrw5dPct: 1.1 },
       macroSurprise: "easing",
       overnight: { nasdaqPct: 1.2, soxPct: 1.5 },
     });
@@ -289,7 +289,7 @@ export function runBacktest(): BacktestResult[] {
     const ctx = makeCtx({
       hynixDaily: daily,
       usdkrw: { level: 1470, changePercent: 0.1 },
-      usRates: { t10yChangePct: 0.2, regime: "안정" },
+      usRates: { changePp: 0.01, regime: "안정" },
       overnight: { nasdaqPct: 1.0, soxPct: 1.8 },
     });
     const ticks = makeTicks(

@@ -31,11 +31,13 @@ export function computeSetups(inp: Inputs): SetupResult {
   const l = push(L);
 
   l("L1", "Bias 상방", "필수", bias.dir === "상방", 0, `축1 ${bias.dir} 강도${bias.strength}`);
+  // L2 금리·환율 — 셋업 필수에서 제외 (사용자 개정 2026-07-07: Bias C3·C4에서 이미 반영,
+  // 셋업에서 또 요구하면 이중 계산). 참고 표기용 행으로만 유지 (가점 0점·판정 미참여).
   const fxOk = ctx.usdkrw.changePercent !== null ? ctx.usdkrw.changePercent <= 0.1 : null;
   const rateOk = ctx.usRates.regime !== null ? ctx.usRates.regime !== "상승" : null;
-  l("L2", "금리·환율 안정", "필수",
-    fxOk === null || rateOk === null ? null : fxOk && rateOk, 0,
-    `환율 ${fmtB(fxOk)} · 금리 ${fmtB(rateOk)}`);
+  l("L2", "금리·환율 (Bias 반영 — 판정 제외)", "가점",
+    null, 0,
+    `환율 ${fmtB(fxOk)} · 금리(2Y) ${fmtB(rateOk)} — 참고 표기`);
   const l3 = trend === null ? null : trend.dir === "UP" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
   l("L3", "상방 방향 형성·유지 확인", "필수", l3, 0,
     trend === null ? "장중 데이터 대기" : `방향 ${trend.dir ?? "-"} · ${trend.grade} · DC1 ${pctOrDash(trend.dc1)}`);
@@ -49,11 +51,11 @@ export function computeSetups(inp: Inputs): SetupResult {
   l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "AI 분석 대기" : qualSrc);
   l("L8", "이익 컨센서스 유지·상향", "가점", ctx.consensusIntact, 2, ctx.consensusIntact === null ? "AI 분석 대기" : qualSrc);
   l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
-  // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응(금리↓+나스닥↑)으로 근사
+  // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응(2Y 금리↓+나스닥↑)으로 근사
   const l10 = ctx.macroSurprise !== null
     ? ctx.macroSurprise === "easing"
-    : ctx.usRates.t10yChangePct !== null && ctx.overnight.nasdaqPct !== null
-      ? ctx.usRates.t10yChangePct < -0.5 && ctx.overnight.nasdaqPct > 0.5
+    : ctx.usRates.changePp !== null && ctx.overnight.nasdaqPct !== null
+      ? ctx.usRates.changePp < -0.03 && ctx.overnight.nasdaqPct > 0.5
       : null;
   l("L10", "전일 매크로 서프라이즈 완화적", "가점", l10, 2,
     ctx.macroSurprise !== null ? `지표 서프라이즈 ${ctx.macroSurprise === "easing" ? "완화" : "긴축"} (AI 판정)` : l10 === null ? "자동 근사 불가" : "금리↓+나스닥↑ 근사");
