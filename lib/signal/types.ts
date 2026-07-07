@@ -144,7 +144,7 @@ export type ExtRecord = {
   basisBlackout: boolean;      // 만기 주간 제외
   vkospiPeak: number | null;   // 소스 부재 — null
   // RV1 하닉 분봉 반전 감지 (engine/reversal.ts) — 성립 시 즉시 진입신호 문자
-  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number } | null;
+  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number | null } | null;
 };
 
 // ── 통합 판정

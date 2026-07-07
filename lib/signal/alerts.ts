@@ -177,19 +177,19 @@ export function buildReversalAlert(j: Judgment): SignalAlert | null {
   if (!hit) return null;
   if (j.phase === "장전" || j.phase === "마감") return null; // 장중(09:00~15:45)만
   if (hit.dir === "DOWN" && j.crashContext.active) return null; // XS1 — 폭락 후 인버스 금지
-  const pre = `${hit.preMovePct > 0 ? "+" : ""}${hit.preMovePct.toFixed(1)}%p`;
+  const pre = hit.preMovePct !== null ? ` (직전 ${hit.preMovePct > 0 ? "+" : ""}${hit.preMovePct.toFixed(1)}%p)` : "";
   return hit.dir === "UP"
     ? {
         key: "rev_up",
         severity: "high",
         smsSubject: "반전 레버리지",
-        text: `[스탁가드 신호] 하닉 반전 상승 — ${hit.cond} (직전 ${pre}) 레버리지 검토`,
+        text: `[스탁가드 신호] 하닉 반전 상승 — ${hit.cond}${pre} 레버리지 검토`,
       }
     : {
         key: "rev_down",
         severity: "high",
         smsSubject: "반전 인버스",
-        text: `[스탁가드 신호] 하닉 반전 하락 — ${hit.cond} (직전 ${pre}) 인버스 검토`,
+        text: `[스탁가드 신호] 하닉 반전 하락 — ${hit.cond}${pre} 인버스 검토`,
       };
 }
 

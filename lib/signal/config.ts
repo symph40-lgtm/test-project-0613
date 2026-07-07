@@ -124,9 +124,11 @@ export const SIGNAL_CONFIG = {
     m5Sum3: 2.2,    // 4) 5분봉 3개 합 ≥ 2.2%
     m5Sum5: 2.7,    // 5) 5분봉 5개 합 ≥ 2.7%
     m5Sum7: 3.2,    // 6) 5분봉 7개 합 ≥ 3.2%
-    // '추세 중'으로 인정할 직전 순변화 최소치 — 반전 창 시작 이전 30분 기준 (오탐 방지)
+    // 직전 추세 전제 — 사용자 확정(2026-07-07): 횡보 중에도 조건 성립 시 판정 → false.
+    // 오탐이 과해지면 true로 되돌리면 '반전 창 이전 30분 순변화 ≥ minTrendPct'를 다시 요구한다.
+    requireTrend: false,
     minTrendPct: 0.8,
-    trendLookbackMin: 30,
+    trendLookbackMin: 30, // 직전 흐름 표기용 (문자의 "직전 ±x%p")
   },
 
   // ── 대상 종목·상품 배수

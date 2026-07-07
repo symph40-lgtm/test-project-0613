@@ -107,9 +107,15 @@ const revCases: { name: string; ticks: IntradayTick[]; expect: string }[] = [
     expect: "DOWN/5분봉3개",
   },
   {
-    // 추세 없이(보합) 1분봉 +0.9 — '추세 중의 반전'이 아님 → 무판정
-    name: "무추세 급등은 반전 아님",
+    // 횡보(보합) 중 1분봉 +0.9 — 추세 전제 제거(사용자 확정)로 이것도 상승 판정
+    name: "횡보 중 1분봉 급등도 판정",
     ticks: hynixSeries((m) => (m <= 590 ? 0 : 0.9), 540, 591),
+    expect: "UP/1분봉",
+  },
+  {
+    // 임계값 미달 (1분봉 +0.7 < 0.8) → 무판정
+    name: "임계값 미달은 무판정",
+    ticks: hynixSeries((m) => (m <= 590 ? 0 : 0.7), 540, 591),
     expect: "없음",
   },
 ];
