@@ -33,8 +33,9 @@ function krByteLength(s: string): number {
   return n;
 }
 
-// subject를 주면 제목 있는 장문(LMS)으로 발송 (진입신호·급락트리거 등 종류 표시용),
-// 없으면 제목 없이 발송 — 단문이면 SMS 요금.
+// 제목(subject) 정책 (사용자 확정 2026-07-08): 본문이 90바이트 이하 단문이면 제목을 무시하고
+// 무제 SMS로 발송한다 — 제목을 붙이면 무조건 LMS(장문 요금)로 전환되기 때문.
+// 제목은 본문이 90바이트를 넘어 어차피 LMS가 되는 경우에만 붙는다.
 export async function sendSms({
   to,
   text,
@@ -67,8 +68,9 @@ async function sendViaSolapi(phone: string, text: string, subject?: string): Pro
     const salt = crypto.randomBytes(16).toString("hex");
     const signature = crypto.createHmac("sha256", apiSecret).update(date + salt).digest("hex");
 
-    // 제목이 있으면 LMS 강제 (SMS는 제목 미지원), 없으면 길이에 따라 자동
-    const isLms = Boolean(subject) || krByteLength(text) > 90;
+    // 단문(≤90바이트)은 제목을 버리고 SMS 발송 — 장문일 때만 제목 포함 LMS (사용자 확정 2026-07-08)
+    const isLms = krByteLength(text) > 90;
+    if (!isLms) subject = undefined;
     const res = await fetch("https://api.solapi.com/messages/v4/send", {
       method: "POST",
       headers: {
@@ -98,14 +100,16 @@ async function sendViaSolapi(phone: string, text: string, subject?: string): Pro
 // ── Aligo (레거시 폴백 — 등록 IP에서만 동작)
 async function sendViaAligo(phone: string, text: string, subject?: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    // 단문(≤90바이트)은 제목을 버리고 SMS 발송 — 장문일 때만 제목 포함 LMS (사용자 확정 2026-07-08)
+    const isLms = krByteLength(text) > 90;
+    if (!isLms) subject = undefined;
     const body = new URLSearchParams({
       key: process.env.ALIGO_API_KEY!,
       user_id: process.env.ALIGO_USER_ID!,
       sender: process.env.ALIGO_SENDER!,
       receiver: phone,
       msg: text,
-      // 90byte 초과 시 자동으로 LMS 전환. 제목은 지정된 알림 종류만
-      msg_type: subject || text.length > 45 ? "LMS" : "SMS",
+      msg_type: isLms ? "LMS" : "SMS",
       ...(subject ? { title: subject } : {}),
     });
 
