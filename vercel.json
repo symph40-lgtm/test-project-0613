@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/morning-brief",
+      "schedule": "30 23 * * 0-4"
+    },
+    {
       "path": "/api/cron/intraday",
       "schedule": "0 1 * * 1-5"
     },

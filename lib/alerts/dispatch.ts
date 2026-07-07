@@ -13,7 +13,7 @@ export type ChannelAlert = {
 };
 
 export async function dispatchToChannels(
-  triggerKey: "signal" | "rate",
+  triggerKey: "signal" | "rate" | "intraday_summary",
   date: string, // KST 거래일 (YYYY-MM-DD) — 이 날짜 기준 1일 1회 중복 방지
   alert: ChannelAlert,
   emailSubject?: string,
