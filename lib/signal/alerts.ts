@@ -169,9 +169,9 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
   return alerts;
 }
 
-// ── RV1 하닉 분봉 반전 진입신호 (사용자 지정 2026-07-07) — 조건 성립 시 즉시 문자.
-// 감지는 엔진(engine/reversal.ts, judgment.ext.reversal)이 하고 여기선 문자만 만든다.
-// 하락 반전(인버스)은 하드 블록 XS1(폭락 후 인버스 금지)이 우선 — 어떤 신호도 무효화 불가(마스터 8.4).
+// ── RV1 하닉 분봉 모멘텀 진입신호 (사용자 지정 2026-07-07) — 조건 성립 시 즉시 문자.
+// 추세·반전 여부 무관 (사용자 확정 3차). 감지는 엔진(engine/reversal.ts, judgment.ext.reversal).
+// 하락(인버스)은 하드 블록 XS1(폭락 후 인버스 금지)이 우선 — 어떤 신호도 무효화 불가(마스터 8.4).
 export function buildReversalAlert(j: Judgment): SignalAlert | null {
   const hit = j.ext.reversal;
   if (!hit) return null;
@@ -182,22 +182,22 @@ export function buildReversalAlert(j: Judgment): SignalAlert | null {
     ? {
         key: "rev_up",
         severity: "high",
-        smsSubject: "반전 레버리지",
-        text: `[스탁가드 신호] 하닉 반전 상승 — ${hit.cond}${pre} 레버리지 검토`,
+        smsSubject: "모멘텀 레버리지",
+        text: `[스탁가드 신호] 하닉 상승 모멘텀 — ${hit.cond}${pre} 레버리지 검토`,
       }
     : {
         key: "rev_down",
         severity: "high",
-        smsSubject: "반전 인버스",
-        text: `[스탁가드 신호] 하닉 반전 하락 — ${hit.cond}${pre} 인버스 검토`,
+        smsSubject: "모멘텀 인버스",
+        text: `[스탁가드 신호] 하닉 하락 모멘텀 — ${hit.cond}${pre} 인버스 검토`,
       };
 }
 
-// 반전 신호 발송 — state 라우트에서 판정마다 호출 (방향별 1일 1회 중복 방지)
+// 모멘텀 신호 발송 — state 라우트에서 판정마다 호출 (방향별 1일 1회 중복 방지)
 export async function maybeSendReversalAlert(j: Judgment): Promise<number> {
   const alert = buildReversalAlert(j);
   if (!alert) return 0;
-  return dispatchToChannels("signal", j.date, alert, `분봉 반전 — ${alert.text.slice(10, 45)}`, {
+  return dispatchToChannels("signal", j.date, alert, `분봉 모멘텀 — ${alert.text.slice(10, 45)}`, {
     reversal: j.ext.reversal,
     dayType: j.dayType,
     ts: j.ts,

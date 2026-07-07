@@ -85,8 +85,8 @@ for (const c of moveCases) {
   for (const a of buildMoveAlerts(c.ticks)) console.log(`  📱 ${a.text}`);
 }
 
-// RV1 하닉 분봉 반전 검증 (사용자 지정 2026-07-07 — 1분/5분봉 반전 조건 + XS1 게이트)
-console.log("\n── RV1 분봉 반전 검증");
+// RV1 하닉 분봉 모멘텀 검증 (사용자 지정 2026-07-07 — 추세·반전 무관, 분봉 조건 7종 + XS1 게이트)
+console.log("\n── RV1 분봉 모멘텀 검증");
 // 하닉 등락률 시계열 → 1분 틱 배열
 const hynixSeries = (fn: (min: number) => number, from: number, to: number): IntradayTick[] => {
   const out: IntradayTick[] = [];
@@ -95,22 +95,29 @@ const hynixSeries = (fn: (min: number) => number, from: number, to: number): Int
 };
 const revCases: { name: string; ticks: IntradayTick[]; expect: string }[] = [
   {
-    // 30분 이상 -0.1%/분 하락 후 1분 만에 +0.9 반등 → 조건 1 (1분봉 ≥0.8)
-    name: "하락 추세 중 1분봉 +0.9 반전 → UP",
+    // 지속 하락(-0.1%/분) 후 마지막 1분 +0.9 — 추세 무관이므로 둘 다 성립,
+    // |변동|이 큰 5분봉7개 하락(-3.5%p)이 우선 판정
+    name: "지속 하락 중 — 큰 쪽(5분봉7개 하락) 우선",
     ticks: hynixSeries((m) => (m <= 590 ? -0.1 * (m - 540) : -4.1), 540, 591),
-    expect: "UP/1분봉",
+    expect: "DOWN/5분봉7개",
   },
   {
-    // +0.1%/분 상승 후 15분간 완만 하락 — 5분봉 3개 합 -2.55 → 조건 4 (≥2.2)
-    name: "상승 추세 중 5분봉 3개 합 -2.5 반전 → DOWN",
+    // 상승 후 15분 하락 — 5분봉 3개 합 -2.55 (≥2.2)
+    name: "5분봉 3개 합 -2.5 하락",
     ticks: hynixSeries((m) => (m <= 584 ? 0.1 * (m - 540) : 4.4 - 0.17 * (m - 584)), 540, 600),
     expect: "DOWN/5분봉3개",
   },
   {
-    // 횡보(보합) 중 1분봉 +0.9 — 추세 전제 제거(사용자 확정)로 이것도 상승 판정
-    name: "횡보 중 1분봉 급등도 판정",
+    // 횡보(보합) 중 1분봉 +0.9 (≥0.8)
+    name: "횡보 중 1분봉 +0.9 상승",
     ticks: hynixSeries((m) => (m <= 590 ? 0 : 0.9), 540, 591),
     expect: "UP/1분봉",
+  },
+  {
+    // 신규 조건: 1분봉 5개 합 +1.6 (≥1.5) — 1개(0.32)·3개(0.96)로는 미달
+    name: "1분봉 5개 합 +1.6 상승 (신규 조건)",
+    ticks: hynixSeries((m) => (m <= 589 ? 0 : 0.32 * (m - 589)), 540, 594),
+    expect: "UP/1분봉5개",
   },
   {
     // 임계값 미달 (1분봉 +0.7 < 0.8) → 무판정
