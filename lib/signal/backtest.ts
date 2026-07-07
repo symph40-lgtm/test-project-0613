@@ -75,6 +75,7 @@ function makeTicks(segs: Seg[], opts: {
         samsungFrgn: null,
         hynixInst: opts.hynixInst ?? null,
         samsungInst: null,
+        hynixVol: null,
         nikkeiChg: opts.nikkeiChg,
         twiiChg: opts.twiiChg,
         nqChg: null,

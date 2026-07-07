@@ -26,6 +26,7 @@ export type IntradayTick = {
   samsungFrgn: number | null;
   hynixInst: number | null;   // 기관 잠정 순매매량 (L9)
   samsungInst: number | null;
+  hynixVol: number | null;    // 하닉 누적 거래량(주) — 거래량 급증 알람용 (2026-07-08)
   nikkeiChg: number | null;
   twiiChg: number | null;
   nqChg: number | null;

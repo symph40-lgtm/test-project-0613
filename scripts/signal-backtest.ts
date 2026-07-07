@@ -2,7 +2,7 @@
 // 엔진(lib/signal/engine)·backtest는 외부 의존성 없는 순수 함수라 DB·API 없이 실행된다.
 
 import { runBacktest } from "../lib/signal/backtest";
-import { buildMoveAlerts, buildReversalAlert } from "../lib/signal/alerts";
+import { buildMoveAlerts, buildReversalAlert, buildVolumeAlert } from "../lib/signal/alerts";
 import { detectReversal } from "../lib/signal/engine/reversal";
 import type { IntradayTick, Judgment } from "../lib/signal/types";
 
@@ -45,7 +45,7 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
   ts: "", minuteOfDay: 650, futPx: null, futChg: null, k200Px: null,
   hynixPx: null, hynixChg: null, samsungPx: null, samsungChg: null,
   hynixFrgn: null, samsungFrgn: null, hynixInst: null, samsungInst: null,
-  nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
+  hynixVol: null, nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
 });
 const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
   { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
@@ -54,26 +54,36 @@ const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[]
   { name: "선물 -0.8% (첫 감지선 0.7)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: ["move_fut_d0.7"] },
   { name: "미돌파 (하닉 -2.9% · 선물 -0.5%)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.5 })], expectKeys: [] },
   { name: "장외 시간 (16:30)", ticks: [mkTick({ hynixChg: -8, minuteOfDay: 990 })], expectKeys: [] },
-  // 반전 스윙 (2026-07-06 사용자 요청 — 고점 대비 반락 / 저점 대비 반등, 0.7%p 등간격)
+  // 반락·반등 스윙 (0.7%p 스텝 — 키에 극값 에피소드 포함, 극값 갱신 시 재무장 2026-07-08)
   {
     name: "선물 반락 +1.5%→-1.1% (고점 대비 -2.6%p)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 }), mkTick({ futChg: -1.1 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_d2.1"],
+    expectKeys: ["move_fut_d0.7", "swing_fut_d2.1e2"],
   },
   {
     name: "선물 반락 조기 경고 +1.5%→+0.4% (고점 대비 -1.1%p, 아직 플러스권)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 })],
-    expectKeys: ["swing_fut_d0.7"],
+    expectKeys: ["swing_fut_d0.7e2"],
   },
   {
     name: "선물 반등 -2.4%→-0.8% (저점 대비 +1.6%p)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -2.4 }), mkTick({ futChg: -0.8 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_u1.4"],
+    expectKeys: ["move_fut_d0.7", "swing_fut_u1.4e-4"],
   },
   {
     name: "일방향 하락은 반전 아님 (고점 +0.1%)",
     ticks: [mkTick({ futChg: 0.1 }), mkTick({ futChg: -1.2 }), mkTick({ futChg: -1.6 })],
     expectKeys: ["move_fut_d1.4"],
+  },
+  {
+    name: "저점 갱신 후 새 반등 — 에피소드 리셋 (저점 -6.3, +0.8 반등이 새 키로)",
+    ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -4.3 }), mkTick({ futChg: -2.8 }), mkTick({ futChg: -6.3 }), mkTick({ futChg: -5.5 })],
+    expectKeys: ["move_fut_d4.9", "swing_fut_u0.7e-9"],
+  },
+  {
+    name: "폭락 연장 단계 — -7.1%도 알림 (4.2 초과 구간)",
+    ticks: [mkTick({ futChg: -7.1 })],
+    expectKeys: ["move_fut_d7"],
   },
 ];
 for (const c of moveCases) {
@@ -83,6 +93,33 @@ for (const c of moveCases) {
   if (!ok) failed++;
   console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 [${want.join(",")}] / 실제 [${got.join(",")}]`);
   for (const a of buildMoveAlerts(c.ticks)) console.log(`  📱 ${a.text}`);
+}
+
+// 거래량 급증 알람 검증 (사용자 지정 2026-07-08 — 하닉 5분봉이 당일 평균 1.3배 이상)
+console.log("\n── 거래량 급증 검증");
+// 분당 누적 거래량을 주면 5분봉 거래량은 완성 버킷 간 차로 계산됨
+const volTicks = (cumAt: (min: number) => number, from: number, to: number): IntradayTick[] => {
+  const out: IntradayTick[] = [];
+  for (let min = from; min <= to; min++) out.push(mkTick({ minuteOfDay: min, hynixVol: cumAt(min), hynixChg: -3.2 }));
+  return out;
+};
+{
+  // 평상 봉 10만주 × 5개 후 마지막 봉 20만주 (2.0배) → 발동
+  const spike = buildVolumeAlert(volTicks((m) => (m < 565 ? (m - 539) * 20000 : 500000 + (m - 564) * 40000), 540, 570));
+  const okSpike = spike?.key === "vol_hynix_b113";
+  if (!okSpike) failed++;
+  console.log(`[${okSpike ? "PASS" : "FAIL"}] 5분봉 2.0배 급증 — 기대 vol_hynix_b113 / 실제 ${spike?.key ?? "없음"}`);
+  if (spike) console.log(`  📱 ${spike.text}`);
+  // 1.2배는 기준(1.3) 미달 → 무알람
+  const mild = buildVolumeAlert(volTicks((m) => (m < 565 ? (m - 539) * 20000 : 500000 + (m - 564) * 24000), 540, 570));
+  const okMild = mild === null;
+  if (!okMild) failed++;
+  console.log(`[${okMild ? "PASS" : "FAIL"}] 1.2배는 무알람 — 실제 ${mild?.key ?? "없음"}`);
+  // 거래량 데이터 없음(마이그레이션 전) → 무알람
+  const noVol = buildVolumeAlert(volTicks(() => NaN, 540, 570).map((t) => ({ ...t, hynixVol: null })));
+  const okNoVol = noVol === null;
+  if (!okNoVol) failed++;
+  console.log(`[${okNoVol ? "PASS" : "FAIL"}] 거래량 데이터 없음 — 무알람 ${okNoVol}`);
 }
 
 // RV1 하닉 분봉 모멘텀 검증 (사용자 지정 2026-07-07 — 추세·반전 무관, 분봉 조건 7종 + XS1 게이트)

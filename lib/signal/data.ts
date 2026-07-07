@@ -3,7 +3,7 @@
 // (fchart 일봉·KPI200 실시간·등락종목수)를 추가한다. 전 함수는 실패 시 null — 페이지는 안 깨진다.
 
 import YahooFinance from "yahoo-finance2";
-import { fetchKospi200Futures, fetchKoreanQuote, fetchStockFlow } from "@/lib/market/naver-flow";
+import { fetchKospi200Futures, fetchKoreanQuote, fetchStockFlow, fetchAccVolume } from "@/lib/market/naver-flow";
 import { fetchMarketData } from "@/lib/market/fetch";
 import { SIGNAL_CONFIG, EVENT_CALENDAR, rebalanceMonthBias } from "./config";
 import type { DailyBar, IntradayTick, PremarketContext } from "./types";
@@ -132,7 +132,7 @@ export async function fetchCrossMarkets(): Promise<{ nikkeiChg: number | null; t
 export async function collectTick(): Promise<IntradayTick> {
   const { minuteOfDay, iso } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
-  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth] = await Promise.all([
+  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol] = await Promise.all([
     fetchKospi200Futures().catch(() => null),
     fetchKpi200().catch(() => null),
     fetchKoreanQuote(hynix).catch(() => null),
@@ -141,6 +141,7 @@ export async function collectTick(): Promise<IntradayTick> {
     fetchStockFlow("삼성전자", samsung).catch(() => null),
     fetchCrossMarkets().catch(() => ({ nikkeiChg: null, twiiChg: null, nqChg: null })),
     fetchBreadth().catch(() => null),
+    fetchAccVolume(hynix).catch(() => null),
   ]);
 
   const futPx = fut?.session === "정규" && !fut.stale ? fut.price : fut?.price ?? null;
@@ -160,6 +161,7 @@ export async function collectTick(): Promise<IntradayTick> {
     samsungFrgn: samsungFlow?.provisional ? samsungFlow.foreign : null,
     hynixInst: hynixFlow?.provisional ? hynixFlow.institution : null,
     samsungInst: samsungFlow?.provisional ? samsungFlow.institution : null,
+    hynixVol,
     nikkeiChg: cross.nikkeiChg,
     twiiChg: cross.twiiChg,
     nqChg: cross.nqChg,

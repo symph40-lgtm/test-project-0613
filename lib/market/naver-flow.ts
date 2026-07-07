@@ -213,6 +213,23 @@ export async function fetchKoreanOffHours(code: string): Promise<KoreanOffHours 
   }
 }
 
+// ─── 누적 거래량 (네이버 통합정보 totalInfos) — 거래량 급증 알람용 ──
+export async function fetchAccVolume(code: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://m.stock.naver.com/api/stock/${code}/integration`, {
+      headers: { "User-Agent": "Mozilla/5.0", Referer: "https://m.stock.naver.com/" },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { totalInfos?: { code?: string; value?: string }[] };
+    const raw = j.totalInfos?.find((x) => x.code === "accumulatedTradingVolume")?.value;
+    const v = typeof raw === "string" ? parseFloat(raw.replace(/,/g, "")) : null;
+    return v !== null && isFinite(v) && v >= 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── 한국 종목 밸류에이션 (네이버 — Yahoo가 .KS PER을 안 주는 문제 보완) ──
 export type KoreanValuation = {
   trailingPE: number | null; // PER (후행)

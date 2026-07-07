@@ -18,7 +18,7 @@ export async function appendTick(date: string, tick: IntradayTick): Promise<bool
   const lastTs = lastRows?.[0]?.ts ? new Date(lastRows[0].ts).getTime() : 0;
   if (Date.now() - lastTs < MIN_TICK_GAP_MS) return false;
 
-  const { error } = await admin.from("signal_ticks").insert({
+  const row: Record<string, unknown> = {
     date,
     ts: tick.ts,
     fut_px: tick.futPx,
@@ -37,7 +37,15 @@ export async function appendTick(date: string, tick: IntradayTick): Promise<bool
     nq_chg: tick.nqChg,
     breadth: tick.breadth,
     basis: tick.basis,
-  });
+    hynix_vol: tick.hynixVol,
+  };
+  const { error } = await admin.from("signal_ticks").insert(row);
+  // 마이그레이션 019(hynix_vol) 미적용 폴백 — 컬럼 없어도 틱 적재는 계속돼야 함
+  if (error && /hynix_vol/.test(error.message)) {
+    delete row.hynix_vol;
+    const retry = await admin.from("signal_ticks").insert(row);
+    return !retry.error;
+  }
   return !error;
 }
 
@@ -71,6 +79,7 @@ export async function loadTicks(date: string): Promise<IntradayTick[]> {
       nqChg: r.nq_chg,
       breadth: r.breadth,
       basis: r.basis,
+      hynixVol: r.hynix_vol ?? null,
     };
   });
 }

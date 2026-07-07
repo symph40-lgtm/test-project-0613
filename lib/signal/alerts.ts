@@ -79,8 +79,10 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
 
 // ── 장중 급변 감지 (순수 함수) — 오늘 틱 시계열을 받아 두 종류 알림 생성:
 //  ① 절대 단계: 당일 등락률(전일 종가 대비)이 단계(stockLevels·futLevels)를 돌파
-//  ② 반전 스윙: 당일 고점 대비 반락폭 / 저점 대비 반등폭이 단계(±SwingLevels)를 돌파 —
-//     +1.5%→-1.1% 같은 반전은 등락률(-1.1%)만으론 안 보임 (사용자 요청 2026-07-06)
+//  ② 반락·반등 스윙: 당일 극값 대비 스텝(swingStep) 등간격 돌파 —
+//     +1.5%→-1.1% 같은 반전은 등락률(-1.1%)만으론 안 보임 (사용자 요청 2026-07-06).
+//     극값이 스텝 이상 갱신되면 에피소드가 바뀌어 단계가 재무장된다 (2026-07-08 사용자 피드백:
+//     저점 -8.7까지 깊어진 뒤의 새 반등이 낮은 단계 소진으로 -5.8에서야 알림된 문제 수정).
 // 판정 구간과 무관하게 장중(09:00~15:45) 전체 감시 — 보유 중 트레일링 점검·급등 확인용.
 // 문자 요금 절약을 위해 90바이트 이내 단문으로 압축 (상세는 이메일·대시보드).
 export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
@@ -93,12 +95,12 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
 
   const targets: {
     name: string; sym: string; chg: number | null;
-    levels: readonly number[]; swingLevels: readonly number[];
+    levels: readonly number[]; swingStep: number;
     series: (t: IntradayTick) => number | null;
   }[] = [
-    { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: M.stockLevels, swingLevels: M.stockSwingLevels, series: (t) => t.hynixChg },
-    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: M.stockLevels, swingLevels: M.stockSwingLevels, series: (t) => t.samsungChg },
-    { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: M.futLevels, swingLevels: M.futSwingLevels, series: (t) => t.futChg },
+    { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: M.stockLevels, swingStep: M.stockSwingStep, series: (t) => t.hynixChg },
+    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: M.stockLevels, swingStep: M.stockSwingStep, series: (t) => t.samsungChg },
+    { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: M.futLevels, swingStep: M.futSwingStep, series: (t) => t.futChg },
   ];
 
   const alerts: SignalAlert[] = [];
@@ -129,45 +131,110 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
       });
     }
 
-    // ② 반전 스윙 — 당일 고점/저점 대비 (오늘 틱 전체에서 극값 산출)
+    // ② 반락·반등 스윙 — 당일 극값 대비 스텝 등간격. 키에 극값 에피소드(스텝 격자 버킷)를 넣어
+    // 극값이 스텝 이상 갱신되면 같은 단계도 다시 발송된다 (새 저점 기준의 새 반등이므로).
     const chgs = ticks.map(t.series).filter((v): v is number => v !== null && isFinite(v));
     if (chgs.length < 2) continue;
     const hi = Math.max(...chgs);
     const lo = Math.min(...chgs);
+    const step = t.swingStep;
 
     // 고점 대비 반락 — 고점이 최소치 이상 반대편(위)에 있었을 때만 '반전'으로 인정
     const downSwing = hi - cur;
-    if (hi >= M.swingMinExtreme) {
-      const sCrossed = t.swingLevels.filter((lv) => downSwing >= lv);
-      if (sCrossed.length > 0) {
-        const level = Math.max(...sCrossed);
-        const isTop = downSwing >= t.swingLevels[t.swingLevels.length - 1];
-        alerts.push({
-          key: `swing_${t.sym}_d${level}`,
-          severity: isTop ? "high" : "medium",
-          // "[스탁가드] 코스피200선물 반락 고점+1.5%→-1.1% (-2.6%p) 위험선·트레일링 점검"
-          text: `[스탁가드] ${t.name} 반락 고점${hi > 0 ? "+" : ""}${hi.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (-${downSwing.toFixed(1)}%p) 위험선·트레일링 점검`,
-        });
-      }
+    if (hi >= M.swingMinExtreme && downSwing >= step) {
+      // +1e-9: 부동소수 격자 경계(예: 6.3/0.7=9.0000…02)에서 floor가 한 칸 어긋나는 것 방지
+      const level = Number((Math.floor(downSwing / step + 1e-9) * step).toFixed(1));
+      const epi = Math.floor(hi / step + 1e-9); // 고점 에피소드 — 고점이 스텝 이상 높아지면 재무장
+      alerts.push({
+        key: `swing_${t.sym}_d${level}e${epi}`,
+        severity: downSwing >= 3 * step ? "high" : "medium",
+        // "[스탁가드] 코스피200선물 반락 고점+1.5%→-1.1% (-2.6%p) 위험선·트레일링 점검"
+        text: `[스탁가드] ${t.name} 반락 고점${hi > 0 ? "+" : ""}${hi.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (-${downSwing.toFixed(1)}%p) 위험선·트레일링 점검`,
+      });
     }
 
     // 저점 대비 반등 — 저점이 최소치 이상 아래에 있었을 때만
     const upSwing = cur - lo;
-    if (lo <= -M.swingMinExtreme) {
-      const sCrossed = t.swingLevels.filter((lv) => upSwing >= lv);
-      if (sCrossed.length > 0) {
-        const level = Math.max(...sCrossed);
-        const isTop = upSwing >= t.swingLevels[t.swingLevels.length - 1];
-        alerts.push({
-          key: `swing_${t.sym}_u${level}`,
-          severity: isTop ? "high" : "medium",
-          // "[스탁가드] 코스피200선물 반등 저점-2.0%→-1.0% (+1.0%p) 추세 전환 확인"
-          text: `[스탁가드] ${t.name} 반등 저점${lo.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (+${upSwing.toFixed(1)}%p) 추세 전환 확인`,
-        });
-      }
+    if (lo <= -M.swingMinExtreme && upSwing >= step) {
+      const level = Number((Math.floor(upSwing / step + 1e-9) * step).toFixed(1));
+      const epi = Math.floor(lo / step + 1e-9); // 저점 에피소드 — 저점이 스텝 이상 깊어지면 재무장
+      alerts.push({
+        key: `swing_${t.sym}_u${level}e${epi}`,
+        severity: upSwing >= 3 * step ? "high" : "medium",
+        // "[스탁가드] 코스피200선물 반등 저점-2.0%→-1.0% (+1.0%p) 추세 전환 확인"
+        text: `[스탁가드] ${t.name} 반등 저점${lo.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (+${upSwing.toFixed(1)}%p) 추세 전환 확인`,
+      });
     }
   }
   return alerts;
+}
+
+// ── 거래량 급증 알람 (사용자 지정 2026-07-08) — 하닉 완성 5분봉 거래량이 당일 평균(그날의
+// 이전 완성 5분봉 평균)의 ratio배(기본 1.3 = 30% 초과) 이상이면 알림 생성.
+// 봉별 거래량은 연속 틱의 누적 거래량 차로 계산 (마이그레이션 019 hynix_vol 필요 — 없으면 조용히 무시).
+export function buildVolumeAlert(ticks: IntradayTick[]): SignalAlert | null {
+  const V = SIGNAL_CONFIG.volumeAlert;
+  const S = SIGNAL_CONFIG.session;
+  const last = ticks.length > 0 ? ticks[ticks.length - 1] : undefined;
+  if (!last || last.minuteOfDay < S.openMin || last.minuteOfDay > S.endMin + 15) return null;
+
+  // 완성 5분봉별 누적 거래량 (버킷 내 마지막 값)
+  const pts = ticks.filter((t) => t.hynixVol !== null && isFinite(t.hynixVol as number) && t.minuteOfDay >= S.openMin);
+  if (pts.length < 4) return null;
+  const nowMin = last.minuteOfDay;
+  const byBucket = new Map<number, number>();
+  for (const p of pts) byBucket.set(Math.floor(p.minuteOfDay / 5), p.hynixVol as number);
+  const buckets = [...byBucket.entries()].filter(([b]) => (b + 1) * 5 <= nowMin).sort(([a], [b]) => a - b);
+
+  // 봉별 거래량 = 인접 완성 버킷의 누적 차 (틱 공백으로 버킷이 건너뛰면 그 구간은 제외)
+  const bars: { b: number; vol: number }[] = [];
+  for (let i = 1; i < buckets.length; i++) {
+    const [b, cum] = buckets[i];
+    const [pb, pcum] = buckets[i - 1];
+    if (b - pb !== 1) continue;
+    const vol = cum - pcum;
+    if (vol >= 0) bars.push({ b, vol });
+  }
+  if (bars.length < V.minBars + 1) return null; // 평균 표본 + 판정 대상 1개
+
+  const lastBar = bars[bars.length - 1];
+  const prevBars = bars.slice(0, -1);
+  const avg = prevBars.reduce((s, x) => s + x.vol, 0) / prevBars.length;
+  if (avg <= 0) return null;
+  const ratio = lastBar.vol / avg;
+  if (ratio < V.ratio) return null;
+
+  const endMin = (lastBar.b + 1) * 5;
+  const hm = `${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
+  const man = Math.round(lastBar.vol / 10000);
+  const chg = last.hynixChg !== null ? ` 현재 ${last.hynixChg > 0 ? "+" : ""}${last.hynixChg.toFixed(1)}%` : "";
+  return {
+    key: `vol_hynix_b${lastBar.b}`, // 봉 단위 키 — 같은 봉은 1회
+    severity: ratio >= 2 ? "high" : "medium",
+    // "[스탁가드] 하닉 거래량 급증 5분봉 152만주=당일평균 1.6배 (10:35) 현재 -3.2%"
+    text: `[스탁가드] 하닉 거래량 급증 5분봉 ${man}만주=당일평균 ${ratio.toFixed(1)}배 (${hm})${chg}`,
+  };
+}
+
+// 거래량 알람 발송 — 30분 창 안에서 최대 maxPerWindow건 (최초 + 1건 추가, 사용자 지정)
+export async function maybeSendVolumeAlert(date: string, ticks: IntradayTick[]): Promise<number> {
+  const alert = buildVolumeAlert(ticks);
+  if (!alert) return 0;
+  const V = SIGNAL_CONFIG.volumeAlert;
+  const admin = createAdminClient();
+  const sinceIso = new Date(Date.now() - V.windowMin * 60000).toISOString();
+  const { data } = await admin
+    .from("alerts")
+    .select("message")
+    .eq("trigger_key", "signal")
+    .gte("created_at", sinceIso);
+  const recent = new Set(
+    (data ?? [])
+      .map((r) => (r.message as { alertKey?: string } | null)?.alertKey)
+      .filter((k): k is string => typeof k === "string" && k.startsWith("vol_hynix_")),
+  );
+  if (recent.size >= V.maxPerWindow) return 0;
+  return dispatchToChannels("signal", date, alert, `거래량 급증 — ${alert.text.slice(7, 40)}`);
 }
 
 // ── RV1 하닉 분봉 모멘텀 진입신호 (사용자 지정 2026-07-07) — 조건 성립 시 즉시 문자.
