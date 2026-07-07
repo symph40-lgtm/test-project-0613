@@ -25,7 +25,10 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
   // 약한 추세(장중 재형성 포함)는 확정과 구분 — 비중 1/3·타이트 트레일링 안내
   const weak = t?.grade === "약한추세";
   const late = t?.midday?.active && (t?.flips ?? 0) > 2 ? " · 장중 재형성" : "";
-  if (j.dayType === "추세일_상방" && j.setups.long.blocked.length === 0) {
+  // 진입신호 문자는 셋업 필수 조건까지 전부 충족했을 때만 — dayType(축2 추세)만으로 보내면
+  // 셋업 카드가 '대기'인데 "진입 검토" 문자가 가는 모순 발생 (2026-07-07 실제 사례:
+  // Bias 상방·매크로 악화 0/3으로 인버스 필수 미충족인데 추세일_하방 문자 발송됨)
+  if (j.dayType === "추세일_상방" && j.setups.long.blocked.length === 0 && j.setups.long.requiredOk) {
     return {
       key: "trend_up",
       severity: "high",
@@ -35,7 +38,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
         : `[스탁가드 신호] 추세일 상방 확정${late} (${stat})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
     };
   }
-  if (j.dayType === "추세일_하방" && j.setups.short.blocked.length === 0) {
+  if (j.dayType === "추세일_하방" && j.setups.short.blocked.length === 0 && j.setups.short.requiredOk) {
     return {
       key: "trend_down",
       severity: "high",

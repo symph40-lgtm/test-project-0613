@@ -110,8 +110,10 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
   const bars5 = resample(pts, 5);
 
   // T6 — 09:00~10:00 방향 전환 횟수 (5분봉 종가 이동의 부호 전환, 미세 이동 무시)
+  // 완성된 봉만 집계 — 진행 중인 봉은 틱마다 부호가 바뀌어 전환 횟수가 2↔3으로 진동,
+  // 횡보일↔추세일 판정이 1분 단위로 왕복하며 모순된 문자가 나갔음 (2026-07-07 실측)
   const eps = Math.abs(dayOpen) * 0.0005;
-  const early5 = bars5.filter((b) => b.startMin < S.openMin + 60);
+  const early5 = bars5.filter((b) => b.startMin < S.openMin + 60 && b.startMin + 5 <= nowMin);
   let flips = 0;
   {
     let prevSign = 0;
