@@ -9,6 +9,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels, type ChannelAlert } from "@/lib/alerts/dispatch";
 import { SIGNAL_CONFIG } from "./config";
+import { detectReversal } from "./engine/reversal";
 import type { IntradayTick, Judgment } from "./types";
 
 type SignalAlert = ChannelAlert;
@@ -208,11 +209,14 @@ export function buildVolumeAlert(ticks: IntradayTick[]): SignalAlert | null {
   const hm = `${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
   const man = Math.round(lastBar.vol / 10000);
   const chg = last.hynixChg !== null ? ` 현재 ${last.hynixChg > 0 ? "+" : ""}${last.hynixChg.toFixed(1)}%` : "";
+  // 거래량 급증이 방향 전환을 동반했는지 — RV1 분봉 모멘텀 판정을 같이 표기 (사용자 요청 2026-07-08)
+  const rev = detectReversal(ticks);
+  const revNote = rev ? (rev.dir === "UP" ? " 상승반전" : " 하락반전") : "";
   return {
     key: `vol_hynix_b${lastBar.b}`, // 봉 단위 키 — 같은 봉은 1회
     severity: ratio >= 2 ? "high" : "medium",
-    // "[스탁가드] 하닉 거래량 급증 5분봉 152만주=당일평균 1.6배 (10:35) 현재 -3.2%"
-    text: `[스탁가드] 하닉 거래량 급증 5분봉 ${man}만주=당일평균 ${ratio.toFixed(1)}배 (${hm})${chg}`,
+    // "[스탁가드] 하닉 거래량 급증 5분봉 152만주=평균 1.6배 (10:35) 현재 -3.2% 상승반전"
+    text: `[스탁가드] 하닉 거래량 급증 5분봉 ${man}만주=평균 ${ratio.toFixed(1)}배 (${hm})${chg}${revNote}`,
   };
 }
 

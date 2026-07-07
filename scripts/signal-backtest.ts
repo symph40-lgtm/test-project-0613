@@ -120,6 +120,18 @@ const volTicks = (cumAt: (min: number) => number, from: number, to: number): Int
   const okNoVol = noVol === null;
   if (!okNoVol) failed++;
   console.log(`[${okNoVol ? "PASS" : "FAIL"}] 거래량 데이터 없음 — 무알람 ${okNoVol}`);
+  // 급증 + 상승 반전 동반 — 문자에 '상승반전' 표기 (2026-07-08 사용자 요청)
+  const spikeRev = buildVolumeAlert(
+    Array.from({ length: 31 }, (_, i) => {
+      const min = 540 + i;
+      const cum = min < 565 ? (min - 539) * 20000 : 500000 + (min - 564) * 40000;
+      const chg = min < 565 ? -3.2 : -3.2 + (min - 564) * 0.2; // 급증 구간에 5분봉 +1.0%p 반등
+      return mkTick({ minuteOfDay: min, hynixVol: cum, hynixChg: Number(chg.toFixed(2)) });
+    }),
+  );
+  const okRev = spikeRev !== null && spikeRev.text.includes("상승반전");
+  if (!okRev) failed++;
+  console.log(`[${okRev ? "PASS" : "FAIL"}] 급증 + 상승반전 표기 — 실제 "${spikeRev?.text ?? "없음"}"`);
 }
 
 // RV1 하닉 분봉 모멘텀 검증 (사용자 지정 2026-07-07 — 추세·반전 무관, 분봉 조건 7종 + XS1 게이트)
