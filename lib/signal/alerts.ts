@@ -30,11 +30,13 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
   // 진입신호 문자는 셋업 필수 조건까지 전부 충족했을 때만 — dayType(축2 추세)만으로 보내면
   // 셋업 카드가 '대기'인데 "진입 검토" 문자가 가는 모순 발생 (2026-07-07 실제 사례:
   // Bias 상방·매크로 악화 0/3으로 인버스 필수 미충족인데 추세일_하방 문자 발송됨)
+  // 판정확정 문자는 제목에 "*판정 확정"을 붙여 급변·스윙 등 다른 문자와 구분 (사용자 지정 2026-07-09.
+  // 제목은 장문(LMS)에만 붙음 — 단문 정책은 sms.ts 전역 규칙)
   if (j.dayType === "추세일_상방" && j.setups.long.blocked.length === 0 && j.setups.long.requiredOk) {
     return {
       key: "trend_up",
       severity: "high",
-      smsSubject: "진입신호 레버리지",
+      smsSubject: "*판정 확정 레버리지",
       text: weak
         ? `[스탁가드 신호] 상방 약한 추세${late} (${stat})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
         : `[스탁가드 신호] 추세일 상방 확정${late} (${stat})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
@@ -44,7 +46,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "trend_down",
       severity: "high",
-      smsSubject: "진입신호 인버스",
+      smsSubject: "*판정 확정 인버스",
       text: weak
         ? `[스탁가드 신호] 하방 약한 추세${late} (${stat})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
         : `[스탁가드 신호] 추세일 하방 확정${late} (${stat})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산`,
@@ -54,7 +56,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "vrebound_long",
       severity: "high",
-      smsSubject: "진입신호 V반등",
+      smsSubject: "*판정 확정 V반등",
       text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
     };
   }
@@ -63,7 +65,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "vrebound_early",
       severity: "high",
-      smsSubject: "진입신호 V반등(조기)",
+      smsSubject: "*판정 확정 V반등(조기)",
       text: `[스탁가드 신호] V반등 조기 반전 감지\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)`,
     };
   }
@@ -71,8 +73,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     return {
       key: "range_day",
       severity: "low",
-      smsSubject: "매매금지 횡보일",
-      text: `[스탁가드 신호] 횡보일 선언 (방향 전환 ${j.trend?.flips ?? "?"}회)\n당일 추세 매매 금지 — '안 하는 것'이 절반입니다.`,
+      smsSubject: "*판정 확정 횡보일",
+      text: `[스탁가드 신호] 횡보일 선언 — ${j.trend?.swing?.detail ?? "산·골 연결선 방향 없음"}\n당일 추세 매매 금지 — '안 하는 것'이 절반입니다. 구조가 풀리면 재평가.`,
     };
   }
   return null;
@@ -108,10 +110,17 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
   for (const t of targets) {
     if (t.chg === null || !isFinite(t.chg)) continue;
     const cur = t.chg;
+    const chgs = ticks.map(t.series).filter((v): v is number => v !== null && isFinite(v));
+    const hi = chgs.length > 0 ? Math.max(...chgs) : cur;
+    const lo = chgs.length > 0 ? Math.min(...chgs) : cur;
 
-    // ① 절대 단계 — 돌파한 최고 단계 1개만 (예: -7.2%면 -7 단계)
+    // ① 절대 단계 — 돌파한 최고 단계 1개만 (예: -7.2%면 -7 단계).
+    // 당일 극값을 갱신 중일 때만 발송 (2026-07-09 수정): 고점 4%대에서 +2.7%로 내려오는 중에
+    // "급등 +2.7%" 문자가 나가던 문제 — 하락 중의 낮은 단계 재돌파는 급등이 아니라 반락이며,
+    // 그 구간은 ② 스윙(반락·반등) 알림이 흐름과 함께 담당한다.
+    const atExtreme = cur > 0 ? cur >= hi - 0.1 : cur <= lo + 0.1;
     const crossed = t.levels.filter((lv) => Math.abs(cur) >= lv);
-    if (crossed.length > 0) {
+    if (crossed.length > 0 && atExtreme) {
       const level = Math.max(...crossed);
       const dir = cur > 0 ? "급등" : "급락";
       const sign = cur > 0 ? "+" : "";
@@ -134,10 +143,7 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
 
     // ② 반락·반등 스윙 — 당일 극값 대비 스텝 등간격. 키에 극값 에피소드(스텝 격자 버킷)를 넣어
     // 극값이 스텝 이상 갱신되면 같은 단계도 다시 발송된다 (새 저점 기준의 새 반등이므로).
-    const chgs = ticks.map(t.series).filter((v): v is number => v !== null && isFinite(v));
     if (chgs.length < 2) continue;
-    const hi = Math.max(...chgs);
-    const lo = Math.min(...chgs);
     const step = t.swingStep;
 
     // 고점 대비 반락 — 고점이 최소치 이상 반대편(위)에 있었을 때만 '반전'으로 인정
@@ -168,6 +174,79 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
     }
   }
   return alerts;
+}
+
+// ── 외인·프로그램 수급 반전 알림 (사용자 지정 2026-07-09) — 코스피 외국인 현물·프로그램의
+// 당일 누적 순매수(KIS, 억원)가 극값 대비 스텝 이상 되돌아오면 문자.
+//  · 순매도 중이라도 순매도가 줄어들면(저점 대비 반등) = 매수기회 관찰
+//  · 순매수 중이라도 순매수가 줄어들면(고점 대비 반락) = 매도기회 관찰
+// 스윙 알림과 같은 '극값 에피소드 재무장' 방식 — 극값이 스텝 이상 갱신되면 단계가 다시 열린다.
+export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
+  const F = SIGNAL_CONFIG.flowAlert;
+  const S = SIGNAL_CONFIG.session;
+  const last = ticks.length > 0 ? ticks[ticks.length - 1] : undefined;
+  if (!last || last.minuteOfDay < S.openMin + 30 || last.minuteOfDay > S.endMin + 15) return []; // 초반 30분 잠정치 노이즈 제외
+
+  const targets: { name: string; sym: string; step: number; series: (t: IntradayTick) => number | null }[] = [
+    { name: "외인 코스피", sym: "kfrgn", step: F.frgnStep, series: (t) => t.kospiFrgn },
+    { name: "프로그램 코스피", sym: "kprgm", step: F.prgmStep, series: (t) => t.kospiPrgm },
+  ];
+
+  const fmtBil = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString("ko-KR")}억`;
+  const alerts: SignalAlert[] = [];
+  for (const t of targets) {
+    const vals = ticks
+      .filter((x) => x.minuteOfDay >= S.openMin)
+      .map(t.series)
+      .filter((v): v is number => v !== null && isFinite(v));
+    if (vals.length < 5) continue;
+    const cur = vals[vals.length - 1];
+    const hi = Math.max(...vals);
+    const lo = Math.min(...vals);
+    // '반전'만 알린다 — 일방향 확대(예: 순매수가 계속 늘기만)는 극값에 도달하기까지의
+    // 반대 방향 이동이 없으므로 제외. 극값 이전에 minSpan 이상 반대 이동이 있었을 때만 반전.
+    const hiIdx = vals.lastIndexOf(hi);
+    const loIdx = vals.lastIndexOf(lo);
+    const riseIntoHi = hiIdx > 0 ? hi - Math.min(...vals.slice(0, hiIdx + 1)) : 0;
+    const fallIntoLo = loIdx > 0 ? Math.max(...vals.slice(0, loIdx + 1)) - lo : 0;
+
+    // 고점 대비 반락 — 매수세 이탈 (순매수 축소 or 순매도 확대)
+    const down = hi - cur;
+    if (down >= t.step && riseIntoHi >= F.minSpan) {
+      const level = Math.floor(down / t.step + 1e-9) * t.step;
+      const epi = Math.floor(hi / t.step + 1e-9);
+      alerts.push({
+        key: `flow_${t.sym}_d${level}e${epi}`,
+        severity: down >= 2 * t.step ? "high" : "medium",
+        // "[스탁가드] 외인 코스피 +1,890억 (고점+3,214억比 -1,324억) 매수세 이탈—매도기회 관찰"
+        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (고점${fmtBil(hi)}比 -${Math.round(down).toLocaleString("ko-KR")}억) ${cur >= 0 ? "매수세 이탈" : "순매도 확대"}—매도기회 관찰`,
+      });
+    }
+
+    // 저점 대비 반등 — 매수세 유입 (순매도 감속 or 순매수 확대)
+    const up = cur - lo;
+    if (up >= t.step && fallIntoLo >= F.minSpan) {
+      const level = Math.floor(up / t.step + 1e-9) * t.step;
+      const epi = Math.floor(lo / t.step + 1e-9);
+      alerts.push({
+        key: `flow_${t.sym}_u${level}e${epi}`,
+        severity: up >= 2 * t.step ? "high" : "medium",
+        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (저점${fmtBil(lo)}比 +${Math.round(up).toLocaleString("ko-KR")}억) ${cur <= 0 ? "순매도 감속" : "매수세 확대"}—매수기회 관찰`,
+      });
+    }
+  }
+  return alerts;
+}
+
+// 수급 반전 발송 — state 라우트에서 틱마다 호출 (에피소드 키별 1일 1회는 dispatch가 보장)
+export async function maybeSendFlowAlerts(date: string, ticks: IntradayTick[]): Promise<number> {
+  const alerts = buildFlowAlerts(ticks);
+  if (alerts.length === 0) return 0;
+  let sent = 0;
+  for (const alert of alerts) {
+    sent += await dispatchToChannels("signal", date, alert, `수급 반전 — ${alert.text.slice(7, 40)}`);
+  }
+  return sent;
 }
 
 // ── 거래량 급증 알람 (사용자 지정 2026-07-08) — 하닉 완성 5분봉 거래량이 당일 평균(그날의

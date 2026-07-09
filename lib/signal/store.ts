@@ -38,11 +38,15 @@ export async function appendTick(date: string, tick: IntradayTick): Promise<bool
     breadth: tick.breadth,
     basis: tick.basis,
     hynix_vol: tick.hynixVol,
+    kospi_frgn: tick.kospiFrgn,
+    kospi_prgm: tick.kospiPrgm,
+    fut_frgn: tick.futFrgn,
+    fut_frgn_qty: tick.futFrgnQty,
   };
   const { error } = await admin.from("signal_ticks").insert(row);
-  // 마이그레이션 019(hynix_vol) 미적용 폴백 — 컬럼 없어도 틱 적재는 계속돼야 함
-  if (error && /hynix_vol/.test(error.message)) {
-    delete row.hynix_vol;
+  // 마이그레이션 미적용 폴백 (019 hynix_vol · 020 KIS 수급) — 컬럼 없어도 틱 적재는 계속돼야 함
+  if (error && /hynix_vol|kospi_frgn|kospi_prgm|fut_frgn/.test(error.message)) {
+    for (const k of ["hynix_vol", "kospi_frgn", "kospi_prgm", "fut_frgn", "fut_frgn_qty"]) delete row[k];
     const retry = await admin.from("signal_ticks").insert(row);
     return !retry.error;
   }
@@ -80,6 +84,10 @@ export async function loadTicks(date: string): Promise<IntradayTick[]> {
       breadth: r.breadth,
       basis: r.basis,
       hynixVol: r.hynix_vol ?? null,
+      kospiFrgn: r.kospi_frgn ?? null,
+      kospiPrgm: r.kospi_prgm ?? null,
+      futFrgn: r.fut_frgn ?? null,
+      futFrgnQty: r.fut_frgn_qty ?? null,
     };
   });
 }

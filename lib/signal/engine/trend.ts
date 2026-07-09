@@ -1,6 +1,13 @@
 // 추세일 판별 엔진 — 마스터 스펙 2.5 (T1~T8, DC1/DC2) + 확장 O1 시가유형·확장 가점.
-// 입력은 장중 틱 시계열(K200 선물 기준). 데이터가 없는 신호(T4·T5·T8)는 available=false로
+// 입력은 장중 틱 시계열(K200 선물 기준). 데이터가 없는 신호는 available=false로
 // 만점에서 제외하고, 판정은 "가용 만점 대비 비율"로 정규화한다 (plan.md 편차 1).
+//
+// 2026-07-09 사용자 개정:
+//  - T4(외인 선물)·T5(프로그램) KIS 연동 — 부호가 아닌 30분 기울기(감속=상방/가속=하방)로 판정
+//  - T8 재정의: 거래대금 확장 → 외인 현물+프로그램 수급 흐름 (순매도 감속=매수기회 등, 가중 2)
+//  - T6 재정의: 5분봉 전환 횟수 → 스윙 고점·저점(산·골) 연결선 구조 ("변동성의 추세").
+//    고점2+저점2 연결선 동방향=추세, 불일치면 3점(부족 시 4점) 연결선의 지향 방향, 그래도
+//    불가하면 횡보. 판단은 13:30까지 매 틱 재평가 (개장 초반 한정 아님).
 
 import { SIGNAL_CONFIG } from "../config";
 import type { IntradayTick, TrendResult, TSignal } from "../types";
@@ -35,6 +42,109 @@ function resample(pts: Pt[], barMin: number): { open: number; close: number; sta
   return [...bars.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
 }
 
+// ── 수급 시계열 헬퍼 — 최근 windowMin분 누적 순매수 변화 (억원)
+function flowDelta(ticks: IntradayTick[], sel: (t: IntradayTick) => number | null, windowMin = 30): {
+  cur: number; delta: number; spanMin: number;
+} | null {
+  const pts = ticks
+    .filter((t) => sel(t) !== null && isFinite(sel(t) as number) && t.minuteOfDay >= S.openMin)
+    .map((t) => ({ min: t.minuteOfDay, v: sel(t) as number }));
+  if (pts.length < 2) return null;
+  const cur = pts[pts.length - 1];
+  const past = pts.filter((p) => p.min <= cur.min - windowMin);
+  const base = past.length > 0 ? past[past.length - 1] : pts[0];
+  if (cur.min - base.min < 10) return null; // 최소 10분 간격 없으면 기울기 판정 유보
+  return { cur: cur.v, delta: cur.v - base.v, spanMin: cur.min - base.min };
+}
+
+// ── 스윙 구조 (T6 재정의, 2026-07-09) ─────────────────────────
+// 지그재그 피벗: 진행 방향 극값에서 minAmpPct 이상 반전하면 직전 극값을 산(H)/골(L)로 확정.
+type SwingPivot = { min: number; px: number; kind: "H" | "L" };
+
+function zigzagPivots(pts: Pt[], minAmpPct: number): SwingPivot[] {
+  const out: SwingPivot[] = [];
+  if (pts.length < 2) return out;
+  const amp = (px: number) => (px * minAmpPct) / 100;
+  let dir: 1 | -1 | 0 = 0;
+  let hi = pts[0], lo = pts[0], ext = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i];
+    if (dir === 0) {
+      // 방향 미확정 — 최고·최저 추적, 진폭이 열리면 반대편 극값을 첫 피벗으로
+      if (p.px > hi.px) hi = p;
+      if (p.px < lo.px) lo = p;
+      if (p.px <= hi.px - amp(hi.px)) { out.push({ ...hi, kind: "H" }); dir = -1; ext = p; }
+      else if (p.px >= lo.px + amp(lo.px)) { out.push({ ...lo, kind: "L" }); dir = 1; ext = p; }
+    } else if (dir === 1) {
+      if (p.px > ext.px) ext = p;
+      else if (p.px <= ext.px - amp(ext.px)) { out.push({ ...ext, kind: "H" }); dir = -1; ext = p; }
+    } else {
+      if (p.px < ext.px) ext = p;
+      else if (p.px >= ext.px + amp(ext.px)) { out.push({ ...ext, kind: "L" }); dir = 1; ext = p; }
+    }
+  }
+  return out;
+}
+
+type SwingResult = NonNullable<TrendResult["swing"]>;
+
+// 사용자 알고리즘: 고점 연결선·저점 연결선의 방향으로 추세 판단.
+// 1) 고점 2개 + 저점 2개: 두 연결선이 같은 방향이면 그 방향의 추세.
+// 2) 불일치·평탄이면: 고점 3개나 저점 3개가 생길 때까지 대기 후, 3점 연결선(첫→끝)의 지향 방향.
+//    양쪽 다 3점이면 일치할 때만 채택.
+// 3) 3점으로도 불가(평탄·상충)면 4점으로. 4점까지도 불가하면 횡보.
+export function computeSwingStructure(pts: Pt[]): SwingResult {
+  const tol = T.swing.tolPct / 100;
+  const pivots = zigzagPivots(pts, T.swing.minAmpPct);
+  const highs = pivots.filter((p) => p.kind === "H").map((p) => p.px);
+  const lows = pivots.filter((p) => p.kind === "L").map((p) => p.px);
+  const base: Omit<SwingResult, "status" | "dir" | "detail"> = { highs: highs.length, lows: lows.length };
+
+  const dirOf = (a: number, b: number): "UP" | "DOWN" | "FLAT" =>
+    b > a * (1 + tol) ? "UP" : b < a * (1 - tol) ? "DOWN" : "FLAT";
+  const arrow = (d: "UP" | "DOWN" | "FLAT") => (d === "UP" ? "상승" : d === "DOWN" ? "하락" : "평탄");
+  // k점 연결선의 지향 방향 (첫→끝)
+  const lineDir = (vals: number[], k: number): "UP" | "DOWN" | "FLAT" | null =>
+    vals.length >= k ? dirOf(vals[vals.length - k], vals[vals.length - 1]) : null;
+
+  if (highs.length < 2 || lows.length < 2) {
+    return { ...base, status: "미정", dir: null, detail: `스윙 부족 (산 ${highs.length}·골 ${lows.length}) — 구조 확정 대기` };
+  }
+
+  const h2 = dirOf(highs[highs.length - 2], highs[highs.length - 1]);
+  const l2 = dirOf(lows[lows.length - 2], lows[lows.length - 1]);
+  if (h2 === l2 && h2 !== "FLAT") {
+    return { ...base, status: "추세", dir: h2, detail: `고점선·저점선 모두 ${arrow(h2)} (2점 일치)` };
+  }
+  if (h2 === "FLAT" && l2 === "FLAT") {
+    return { ...base, status: "횡보", dir: null, detail: "고점선·저점선 모두 평탄 — 산·골 반복" };
+  }
+
+  // 2점 불일치 — k점 확장 판단 (3점 → 4점). 어느 방향으로 튈지 모르니 다음 산·골까지 보고,
+  // k점 연결선이 지향하는 방향이 분명할 때만 추세로 반영. 한쪽 평탄·상충은 '판단 불가' →
+  // 다음 단계로 (성급한 추세·횡보 선언 모두 방지).
+  const prefix = `고점선 ${arrow(h2)}·저점선 ${arrow(l2)} 불일치`;
+  for (const k of [3, 4]) {
+    const hk = lineDir(highs, k);
+    const lk = lineDir(lows, k);
+    if (hk === null && lk === null) {
+      return { ...base, status: "미정", dir: null, detail: `${prefix} → 다음 산·골 대기 (${k}점 판단 불가)` };
+    }
+    if (hk !== null && lk !== null) {
+      if (hk === lk && hk !== "FLAT") return { ...base, status: "추세", dir: hk, detail: `${prefix} → ${k}점 연결선 모두 ${arrow(hk)}` };
+      if (hk === "FLAT" && lk === "FLAT") return { ...base, status: "횡보", dir: null, detail: `${prefix} → ${k}점 연결선 모두 평탄 (횡보)` };
+      continue; // 상충·한쪽 평탄 — 다음 단계(4점)로, 4점까지도 불가하면 루프 종료 후 횡보
+    }
+    // 한쪽만 k점 확보 — 그 연결선의 지향 방향이 분명하면 반영 ("고점 3개나 저점 3개로 판단")
+    const single = hk ?? lk;
+    if (single !== "FLAT" && single !== null) {
+      return { ...base, status: "추세", dir: single, detail: `${prefix} → ${hk !== null ? "고점" : "저점"} ${k}점 연결선 ${arrow(single)}` };
+    }
+    // 한쪽만 있고 평탄 → 다음 단계
+  }
+  return { ...base, status: "횡보", dir: null, detail: `${prefix} — 4점까지도 방향 불일치 (횡보)` };
+}
+
 export function computeTrend(ticks: IntradayTick[], gapPct: number | null): TrendResult {
   const { pts, source } = extractSeries(ticks);
   const signals: TSignal[] = [];
@@ -47,12 +157,12 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
 
   if (pts.length < 5 || dayOpen === null || last === null) {
     // 데이터 부족 — 전 신호 미산출
-    for (const code of ["T1", "T2", "T3", "T7"]) sig(code, code, false, false, null, "장중 데이터 부족");
-    sig("T4", "외인 선물 수급", false, false, null, "KIS 미연동 — 데이터 없음");
-    sig("T5", "프로그램 매매", false, false, null, "KIS 미연동 — 데이터 없음");
-    sig("T8", "거래대금 확장", false, false, null, "실시간 거래대금 소스 없음");
+    for (const code of ["T1", "T2", "T3", "T6", "T7"]) sig(code, code, false, false, null, "장중 데이터 부족");
+    sig("T4", "외인 선물 수급", false, false, null, "KIS 수급 데이터 대기");
+    sig("T5", "프로그램 매매", false, false, null, "KIS 수급 데이터 대기");
+    sig("T8", "외인 현물·프로그램 흐름", false, false, null, "KIS 수급 데이터 대기");
     return {
-      signals, score: 0, maxAvailable: 0, normalized: 0, grade: "비추세", dir: null, flips: 0, midday: null,
+      signals, score: 0, maxAvailable: 0, normalized: 0, grade: "비추세", dir: null, flips: 0, swing: null, midday: null,
       dc1: null, dc2: null, openType: null, openCrossCount: null, openMaxAdverse: null,
       extBonus: 0, extNotes: [`시계열 ${pts.length}틱(${source}) — 판정 불가`],
     };
@@ -106,13 +216,11 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
       `${dir === "UP" ? "상방" : "하방"} 편측 ${(ratio * 100).toFixed(0)}% (기준 ${T.t2SideRatio * 100}%)`);
   }
 
-  // ── 5분봉 (T3 되돌림 · T6 방향 전환)
+  // ── 5분봉 (스윙 구조 · 참고용 전환 횟수)
   const bars5 = resample(pts, 5);
-
-  // T6 — 09:00~10:00 방향 전환 횟수 (5분봉 종가 이동의 부호 전환, 미세 이동 무시)
-  // 완성된 봉만 집계 — 진행 중인 봉은 틱마다 부호가 바뀌어 전환 횟수가 2↔3으로 진동,
-  // 횡보일↔추세일 판정이 1분 단위로 왕복하며 모순된 문자가 나갔음 (2026-07-07 실측)
   const eps = Math.abs(dayOpen) * 0.0005;
+
+  // (참고 표시용) 09:00~10:00 5분봉 전환 횟수 — 2026-07-09 개정으로 횡보 판정에는 미사용
   const early5 = bars5.filter((b) => b.startMin < S.openMin + 60 && b.startMin + 5 <= nowMin);
   let flips = 0;
   {
@@ -125,7 +233,15 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
       prevSign = s;
     }
   }
-  const t6Violated = flips > T.t6MaxFlips;
+
+  // T6 — 스윙 구조 (산·골 연결선, "변동성의 추세"). 완성된 5분봉 종가만 사용 —
+  // 진행 중 봉을 넣으면 피벗이 틱마다 진동한다 (2026-07-07 실측 교훈 동일 적용).
+  const doneBars5 = bars5.filter((b) => b.startMin + 5 <= nowMin);
+  const swing = computeSwingStructure(doneBars5.map((b) => ({ min: b.startMin, px: b.close })));
+  sig("T6", "스윙 구조(고점·저점 연결선)", swing.status !== "미정", swing.status === "추세",
+    swing.status === "추세" ? swing.dir : null,
+    `${swing.detail} [산${swing.highs}·골${swing.lows}]`);
+  const rangeBySwing = swing.status === "횡보";
 
   // T3 — 되돌림 깊이 (진행 방향 기준 극값 대비 현재 되돌림 < 40%)
   const dayHigh = Math.max(...pts.map((p) => p.px));
@@ -144,10 +260,50 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
       `되돌림 ${(pullback * 100).toFixed(0)}% (기준 <${T.t3PullbackMax * 100}%)`);
   }
 
-  // T4·T5·T8 — 데이터 소스 부재 (KIS 선물 수급·프로그램·거래대금)
-  sig("T4", "외인 선물 수급", false, false, null, "KIS 미연동 — 기록·판정 제외");
-  sig("T5", "프로그램 매매 방향", false, false, null, "KIS 미연동 — 기록·판정 제외");
-  sig("T8", "거래대금 확장", false, false, null, "실시간 거래대금 소스 없음");
+  // ── T4·T5·T8 — KIS 수급 (2026-07-09 연동)
+  const fmtBil = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString("ko-KR")}억`;
+
+  // T4 — 외인 선물 수급: 부호가 아닌 30분 기울기 (매수 확대/매도 감속=상방, 반대=하방. 스펙 2.5.2)
+  const futFlow = flowDelta(ticks, (t) => t.futFrgn);
+  if (futFlow === null) {
+    sig("T4", "외인 선물 수급", false, false, null, "KIS 수급 데이터 대기");
+  } else {
+    const d = futFlow.delta;
+    const dir: "UP" | "DOWN" | null = d >= T.t4MinDelta30 ? "UP" : d <= -T.t4MinDelta30 ? "DOWN" : null;
+    sig("T4", "외인 선물 수급", true, dir !== null, dir,
+      `누적 ${fmtBil(futFlow.cur)} · ${futFlow.spanMin}분간 ${fmtBil(d)} (기준 ±${T.t4MinDelta30}억)`);
+  }
+
+  // T5 — 프로그램 매매 방향: 차익+비차익 순매수 부호가 가격 방향과 일치 (스펙 2.5.2)
+  const prgmFlow = flowDelta(ticks, (t) => t.kospiPrgm, 5); // 현재값만 필요 — 짧은 창
+  if (prgmFlow === null) {
+    sig("T5", "프로그램 매매 방향", false, false, null, "KIS 수급 데이터 대기");
+  } else {
+    const prgmDir: "UP" | "DOWN" | null = prgmFlow.cur > 100 ? "UP" : prgmFlow.cur < -100 ? "DOWN" : null;
+    const pass = prgmDir !== null && dayDir !== null && prgmDir === dayDir;
+    sig("T5", "프로그램 매매 방향", true, pass, pass ? prgmDir : null,
+      `프로그램 ${fmtBil(prgmFlow.cur)} · 가격 ${dayDir ?? "미형성"}${pass ? " (일치)" : ""}`);
+  }
+
+  // T8 — 외인 현물+프로그램 흐름 (2026-07-09 재정의, 중요·가중 2): 30분 기울기.
+  // 순매도라도 감속(Δ+)이면 매수기회, 순매수라도 감속(Δ-)이면 매도기회 (사용자 지정).
+  const kfrgnFlow = flowDelta(ticks, (t) => t.kospiFrgn);
+  const kprgmFlow = flowDelta(ticks, (t) => t.kospiPrgm);
+  if (kfrgnFlow === null && kprgmFlow === null) {
+    sig("T8", "외인 현물·프로그램 흐름", false, false, null, "KIS 수급 데이터 대기");
+  } else {
+    const judge = (f: typeof kfrgnFlow): "UP" | "DOWN" | null =>
+      f === null ? null : f.delta >= T.t8MinDelta30 ? "UP" : f.delta <= -T.t8MinDelta30 ? "DOWN" : null;
+    const a = judge(kfrgnFlow), b = judge(kprgmFlow);
+    // 두 소스가 있으면 일치할 때만, 한쪽만 있으면 그 방향
+    const dir: "UP" | "DOWN" | null = a !== null && b !== null ? (a === b ? a : null) : a ?? b;
+    const parts = [
+      kfrgnFlow ? `외인 ${fmtBil(kfrgnFlow.cur)}(Δ30분 ${fmtBil(kfrgnFlow.delta)})` : "외인 대기",
+      kprgmFlow ? `프로그램 ${fmtBil(kprgmFlow.cur)}(Δ ${fmtBil(kprgmFlow.delta)})` : "프로그램 대기",
+    ];
+    sig("T8", "외인 현물·프로그램 흐름", true, dir !== null, dir,
+      `${parts.join(" · ")}${dir === "UP" ? " → 매수세 개선" : dir === "DOWN" ? " → 매수세 이탈" : ""}`);
+  }
 
   // T7 — 갭 방향과 첫 30분 진행 방향 일치 (gap-and-go)
   const first30 = pts.filter((p) => p.min < S.openMin + 30);
@@ -174,8 +330,9 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
     dc2 = pathSum > 0 ? Math.abs(last - dayOpen) / pathSum : null;
   }
 
-  // ── 장중 재형성(지연) 추세 — 최근 롤링 창 기준 재평가. 추세는 장 초반에만 형성되는 게 아니라
-  // 초반 왕복 후 중반부터 형성될 수 있다 (사용자 관찰). 창 내 DC1·순이동·전환 횟수로 판정.
+  // ── 장중 재형성(지연) 추세 — 최근 롤링 창(기본 90분) 기준 재평가. 추세는 장 초반에만 형성되는 게 아니라
+  // 초반 왕복 후 중반부터 형성될 수 있다 (사용자 관찰). 창 내 DC1·순이동으로 판정.
+  // (2026-07-09: 창 내 전환 횟수 조건 제거 — 전환 횟수 기반 판정은 사용자 개정으로 폐기)
   const MD = T.midday;
   let midday: { active: boolean; dir: "UP" | "DOWN" | null; dc1: number | null; movePct: number | null; flips: number | null } | null = null;
   {
@@ -191,22 +348,11 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
         const sgn = winDir === "UP" ? 1 : -1;
         winDc1 = winBarsDc.filter((b) => Math.sign(b.close - b.open) === sgn).length / winBarsDc.length;
       }
-      // 창 내 방향 전환 (5분봉, T6과 동일 로직)
-      const winBars5 = resample(winPts, 5);
-      let winFlips = 0, prevSign = 0;
-      for (let i = 1; i < winBars5.length; i++) {
-        const mv = winBars5[i].close - winBars5[i - 1].close;
-        if (Math.abs(mv) < eps) continue;
-        const sg = Math.sign(mv);
-        if (prevSign !== 0 && sg !== prevSign) winFlips++;
-        prevSign = sg;
-      }
       const active =
         winDir !== null &&
         winDc1 !== null && winDc1 >= MD.dc1Theta &&
-        Math.abs(movePct) >= MD.minMovePct &&
-        winFlips <= T.t6MaxFlips;
-      midday = { active, dir: winDir, dc1: winDc1, movePct, flips: winFlips };
+        Math.abs(movePct) >= MD.minMovePct;
+      midday = { active, dir: winDir, dc1: winDc1, movePct, flips: null };
     }
   }
 
@@ -236,10 +382,11 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
 
   const normalized = maxAvailable > 0 ? score / maxAvailable : 0;
   // 방향: 당일 진행 방향(시가 대비)이 형성됐으면 그것을 우선 — 반전일(7/3형)에서 초반 신호(T7)가
-  // 낡은 방향으로 투표하는 문제 방지. 미형성 시 장중 재형성 방향 → 신호 가중 투표 순.
+  // 낡은 방향으로 투표하는 문제 방지. 미형성 시 장중 재형성 → 스윙 구조 → 신호 가중 투표 순.
   const voteDir: "UP" | "DOWN" | null =
     dirVotes.UP === dirVotes.DOWN ? null : dirVotes.UP > dirVotes.DOWN ? "UP" : "DOWN";
-  const dir: "UP" | "DOWN" | null = dayDir ?? (midday?.active ? midday.dir : null) ?? voteDir;
+  const dir: "UP" | "DOWN" | null =
+    dayDir ?? (midday?.active ? midday.dir : null) ?? (swing.status === "추세" ? swing.dir : null) ?? voteDir;
 
   // 장중 재형성 정합: 창 내 추세가 성립하고 방향이 현재 판정 방향과 일치
   const middayAligned = midday !== null && midday.active && (dir === null || midday.dir === dir);
@@ -249,21 +396,23 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
     (dc1 !== null && dc2 !== null && dc1 >= SIGNAL_CONFIG.dc.dc1Theta && dc2 >= SIGNAL_CONFIG.dc.dc2Min) ||
     middayAligned;
 
+  // 횡보일 선언 = 스윙 구조가 '횡보' (산·골 연결선 4점까지 불일치/평탄) AND 장중 재형성 없음.
+  // '미정'(스윙 부족·다음 산골 대기)은 횡보가 아니다 — 성급한 횡보일 선언 방지 (2026-07-09 사용자 개정).
   let grade: TrendResult["grade"];
-  if (t6Violated && !middayAligned) grade = "횡보일선언";
+  if (rangeBySwing && !middayAligned) grade = "횡보일선언";
   else if (normalized >= T.confirmRatio && dcConfirm) grade = "추세일";
   else if (normalized >= T.weakRatio || middayAligned) grade = "약한추세";
   else grade = "비추세";
 
-  if (t6Violated && middayAligned) {
+  if (rangeBySwing && middayAligned) {
     extNotes.push(
-      `초반 횡보(전환 ${flips}회) 후 장중 재형성 — 최근 ${MD.windowMin}분 DC1 ${midday!.dc1 !== null ? (midday!.dc1 * 100).toFixed(0) + "%" : "-"} · 이동 ${midday!.movePct !== null ? midday!.movePct.toFixed(1) + "%" : "-"}`,
+      `스윙 횡보 구조였으나 장중 재형성 — 최근 ${MD.windowMin}분 DC1 ${midday!.dc1 !== null ? (midday!.dc1 * 100).toFixed(0) + "%" : "-"} · 이동 ${midday!.movePct !== null ? midday!.movePct.toFixed(1) + "%" : "-"}`,
     );
   }
   if (source === "하닉") extNotes.push("선물 시세 부족 — 하닉 시계열로 판정(참고 정확도)");
 
   return {
-    signals, score, maxAvailable, normalized, grade, dir, flips, midday,
+    signals, score, maxAvailable, normalized, grade, dir, flips, swing, midday,
     dc1, dc2,
     openType: o1.openType, openCrossCount: o1.crossCount, openMaxAdverse: o1.maxAdverse,
     extBonus, extNotes,

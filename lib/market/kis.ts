@@ -1,5 +1,5 @@
-// 한국투자증권(KIS) Developers REST API — 코스피200 '야간선물' 실시간 시세 조회.
-// 네이버가 제공하지 않는 야간 세션(18:00~05:00, KRX 야간시장·구 CME 연계) 시세를 KIS로 가져온다.
+// 한국투자증권(KIS) Developers REST API — ①코스피200 '야간선물' 실시간 시세
+// ②시장별 투자자매매동향(외인 수급) ③프로그램매매 종합현황. (②③은 2026-07-09 연동 — T4·T5·T8)
 //
 // 필요한 환경변수(.env.local + Vercel):
 //   KIS_APP_KEY     — KIS Developers에서 발급한 앱 KEY
@@ -106,6 +106,86 @@ export async function fetchKisNightFutures(): Promise<KisFutures> {
     if (chg > 0 && (sign === "4" || sign === "5")) chg = -chg;
     if (!isFinite(price) || price <= 0) return null;
     return { price, changePercent: chg };
+  } catch {
+    return null;
+  }
+}
+
+// ── 투자자매매동향 (FHPTJ04030000, HTS [0403] 상단 표) — 당일 누적 순매수 스냅샷.
+// 시장 코드 실측(2026-07-09): 코스피 현물 = KSP/0001, 코스피200 선물 = K2I/F001.
+// tr_pbmn(거래대금)은 백만원 단위 → 억원으로 환산해 반환. 장중 잠정치라 확정치와 오차 존재.
+export type KisInvestorFlow = {
+  frgnNetAmt: number;   // 외국인 순매수 (억원)
+  frgnNetQty: number | null; // 외국인 순매수 수량 (주 / 계약 — 참고)
+  orgnNetAmt: number;   // 기관 순매수 (억원)
+  prsnNetAmt: number;   // 개인 순매수 (억원)
+};
+
+export async function fetchKisInvestorFlow(market: "kospi" | "k200fut"): Promise<KisInvestorFlow | null> {
+  const appkey = process.env.KIS_APP_KEY;
+  const appsecret = process.env.KIS_APP_SECRET;
+  if (!appkey || !appsecret) return null;
+  const token = await getToken();
+  if (!token) return null;
+  const [iscd, iscd2] = market === "kospi" ? ["KSP", "0001"] : ["K2I", "F001"];
+  try {
+    const url = new URL(`${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market`);
+    url.searchParams.set("FID_INPUT_ISCD", iscd);
+    url.searchParams.set("FID_INPUT_ISCD_2", iscd2);
+    const r = await fetch(url, {
+      headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPTJ04030000", custtype: "P" },
+      cache: "no-store",
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { rt_cd?: string; output?: Record<string, unknown>[] };
+    const o = j.output?.[0];
+    if (j.rt_cd !== "0" || !o) return null;
+    const num = (v: unknown): number => {
+      const n = typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : typeof v === "number" ? v : NaN;
+      return isFinite(n) ? n : NaN;
+    };
+    const frgnAmt = num(o.frgn_ntby_tr_pbmn);
+    if (!isFinite(frgnAmt)) return null;
+    const qty = num(o.frgn_ntby_qty);
+    return {
+      frgnNetAmt: frgnAmt / 100,
+      frgnNetQty: isFinite(qty) ? qty : null,
+      orgnNetAmt: (isFinite(num(o.orgn_ntby_tr_pbmn)) ? num(o.orgn_ntby_tr_pbmn) : 0) / 100,
+      prsnNetAmt: (isFinite(num(o.prsn_ntby_tr_pbmn)) ? num(o.prsn_ntby_tr_pbmn) : 0) / 100,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── 프로그램매매 종합현황(시간) (FHPPG04600101, HTS [0460]) — 코스피 차익+비차익 순매수.
+// 최신 시각 행의 whol_smtn_ntby_tr_pbmn(백만원)을 억원으로 환산. 장중 최근 30분 시계열만 제공되므로
+// 60초 폴링으로 최신 값을 틱에 적재해 자체 시계열을 만든다.
+export async function fetchKisProgramNet(): Promise<number | null> {
+  const appkey = process.env.KIS_APP_KEY;
+  const appsecret = process.env.KIS_APP_SECRET;
+  if (!appkey || !appsecret) return null;
+  const token = await getToken();
+  if (!token) return null;
+  try {
+    const url = new URL(`${KIS_BASE}/uapi/domestic-stock/v1/quotations/comp-program-trade-today`);
+    url.searchParams.set("FID_COND_MRKT_DIV_CODE", "J"); // KRX
+    url.searchParams.set("FID_MRKT_CLS_CODE", "K");      // 코스피
+    url.searchParams.set("FID_SCTN_CLS_CODE", "");
+    url.searchParams.set("FID_INPUT_ISCD", "");
+    url.searchParams.set("FID_COND_MRKT_DIV_CODE1", "");
+    url.searchParams.set("FID_INPUT_HOUR_1", "");
+    const r = await fetch(url, {
+      headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPPG04600101", custtype: "P" },
+      cache: "no-store",
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { rt_cd?: string; output?: { bsop_hour?: string; whol_smtn_ntby_tr_pbmn?: string }[] };
+    const rows = j.output;
+    if (j.rt_cd !== "0" || !Array.isArray(rows) || rows.length === 0) return null;
+    // 첫 행이 최신 시각 (실측 확인)
+    const v = parseFloat(String(rows[0].whol_smtn_ntby_tr_pbmn ?? "").replace(/,/g, ""));
+    return isFinite(v) ? v / 100 : null;
   } catch {
     return null;
   }

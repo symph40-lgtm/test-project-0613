@@ -10,7 +10,7 @@ import { collectTick, buildPremarketContext, kstNow } from "@/lib/signal/data";
 import { decide } from "@/lib/signal/engine/decide";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { appendTick, loadTicks, logJudgment, upsertDailyFeatures, loadDailyFeatures, loadRecentFeatures } from "@/lib/signal/store";
-import { maybeSendSignalSms, maybeSendMoveAlerts, maybeSendReversalAlert, maybeSendVolumeAlert } from "@/lib/signal/alerts";
+import { maybeSendSignalSms, maybeSendMoveAlerts, maybeSendReversalAlert, maybeSendVolumeAlert, maybeSendFlowAlerts } from "@/lib/signal/alerts";
 import { autoAnnotateIfNeeded } from "@/lib/signal/autoAnnotate";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +40,8 @@ export async function GET(req: NextRequest) {
         causeNonEarnings: features?.cause_non_earnings ?? null,
         qualSource: features?.annotation_source ?? null,
         macroSurprise: features?.macro_surprise ?? null,
+        usNewsImpact: features?.us_news_impact ?? null,
+        usNewsNote: features?.us_news_note ?? null,
       }),
       collectTick(),
     ]);
@@ -72,6 +74,8 @@ export async function GET(req: NextRequest) {
         maybeSendReversalAlert(judgment).catch(() => 0),
         // 거래량 급증 — 하닉 5분봉이 당일 평균 1.3배 이상 (30분 창 최대 2건)
         maybeSendVolumeAlert(date, ticks).catch(() => 0),
+        // 외인·프로그램 수급 반전 — 극값 대비 스텝 이상 되돌림 (매수기회/매도기회 관찰)
+        maybeSendFlowAlerts(date, ticks).catch(() => 0),
       ]);
       sms = smsResult;
     }

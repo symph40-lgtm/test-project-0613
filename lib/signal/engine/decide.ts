@@ -80,9 +80,12 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
     const dayLowPct = futPts.length > 0 ? Math.min(...futPts) : null;
     const lastPct = futPts.length > 0 ? futPts[futPts.length - 1] : null;
     const reboundPp = dayLowPct !== null && lastPct !== null ? lastPct - dayLowPct : null;
+    // LM 매크로 게이트 (2026-07-09) — 매크로 악화 시 조기 선진입도 금지 (널뛰기 변동성)
+    const lmOk = setups.long.items.find((i) => i.code === "LM")?.pass !== false;
     const earlyRebound =
       phase === "판정" &&
       bias.dir === "상방" && bias.strength >= 2 &&
+      lmOk &&
       reboundPp !== null && reboundPp >= 1.5 &&
       !(gap !== null && gap > SIGNAL_CONFIG.gapBigPct) &&
       setups.long.verdict !== "진입후보" && setups.long.verdict !== "강한신호";
@@ -99,10 +102,10 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
       action = "L3 반전 후 지속 확인까지 관찰. 인버스 절대 금지(XS1).";
     }
   } else if (trend.grade === "횡보일선언") {
-    // 분기 3 — T6 위반
+    // 분기 3 — 스윙 구조 횡보 (2026-07-09 개정: 산·골 연결선이 4점까지도 불일치/평탄)
     dayType = "횡보일";
-    headline = `횡보일 — 방향 전환 ${trend.flips}회 (기준 ${SIGNAL_CONFIG.trend.t6MaxFlips}회 초과)`;
-    action = `당일 추세 매매 금지. '안 하는 것'이 시스템의 절반 (2.5.7). 단, 최근 ${SIGNAL_CONFIG.trend.midday.windowMin}분 창에서 방향이 재형성되면 자동으로 재평가됩니다.`;
+    headline = `횡보일 — ${trend.swing?.detail ?? "산·골 연결선 방향 없음"}`;
+    action = `당일 추세 매매 금지. '안 하는 것'이 시스템의 절반 (2.5.7). 새 산·골이 생기면 ${hm(S.entryEndMin)}까지 계속 재평가하며, 구조가 풀리면 자동 해제됩니다.`;
   } else if (trend.grade === "추세일" && divergence?.status !== "이탈") {
     // 분기 2 — 추세일 확정
     dayType = trend.dir === "UP" ? "추세일_상방" : "추세일_하방";
@@ -111,6 +114,14 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
     if (setup.blocked.length > 0) {
       headline = `추세일 ${trend.dir} 확정, 그러나 하드 블록 — ${setup.blocked[0]}`;
       action = "진입 불가. 블록 해제 조건 확인.";
+    } else if (phase === "판정" && !setup.requiredOk) {
+      // 셋업 필수 미충족(LM 매크로 게이트 등) — 진입 검토 문구·문자를 내지 않는다 (2026-07-09)
+      const missing = (trend.dir === "UP" ? setups.long : setups.short).items
+        .filter((i) => i.kind === "필수" && i.pass !== true)
+        .map((i) => i.code)
+        .join("·");
+      headline = `추세일 ${trend.dir === "UP" ? "상방" : "하방"} 확정 — 그러나 필수 조건 미충족(${missing || "?"})`;
+      action = `진입 보류. ${missing.includes("LM") ? "매크로 악화 구간 — 널뛰기 변동성이라 차트가 좋아도 위험. " : ""}필수 충족 시 진입 신호 발송.`;
     } else if (phase === "판정") {
       headline = `추세일 ${trend.dir === "UP" ? "상방" : "하방"} 확정 (T-스코어 ${trend.score.toFixed(1)}/${trend.maxAvailable} · DC1 ${trend.dc1 !== null ? (trend.dc1 * 100).toFixed(0) + "%" : "-"})`;
       action = `${target} 진입 검토 — ${risk.sizeGuide}. 스탑 -${risk.stopFixedPct}%.`;

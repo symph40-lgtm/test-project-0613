@@ -1,5 +1,11 @@
 // 셋업 판정 — 레버리지(L1~L11)·인버스(S1~S7)·하드 블록(X·XS). 마스터 스펙 2.2~2.3, 4.1~4.2.
 // 하드 블록은 스코어와 무관하게 최우선 차단 (학습·확장 모듈이 무효화 불가).
+//
+// 2026-07-09 사용자 개정:
+//  - LM(매크로 게이트) 신설·필수: 매크로 악화(금리↑·환율↑·SOX↓ 중 2개 이상)면 차트(축2)가 좋아도
+//    레버리지 진입 금지 — 매크로가 널뛰면 주가도 널뛰어 변동이 너무 큼.
+//  - L1(Bias 상방) 필수에서 제외 — 참고 표기만. L8(컨센서스 가점)·S5(디커플링 가점) 제거.
+//  - L10 근사·S2 매크로 악화 판정에서 SOX를 나스닥보다 우선.
 
 import { SIGNAL_CONFIG } from "../config";
 import type { BiasResult, CheckItem, IntradayTick, PremarketContext, SetupResult, TrendResult } from "../types";
@@ -24,13 +30,26 @@ export function computeSetups(inp: Inputs): SetupResult {
   // ── L5 외인 수급 3요소 (하닉 개별 잠정치 — plan.md 편차 2)
   const l5 = foreignThreeFactor(ticks, ctx.frgn20dAvg.hynix);
 
+  // ── 매크로 악화 지표 (LM 게이트·S2 공용) — 해외장은 SOX 우선, 없으면 나스닥 (2026-07-09)
+  const usEquity = ctx.overnight.soxPct ?? ctx.overnight.nasdaqPct;
+  const macroBadItems = [
+    ctx.usRates.regime === "상승",
+    (ctx.usdkrw.changePercent ?? 0) > 0.3,
+    (usEquity ?? 0) < -0.5,
+  ];
+  const macroBad = macroBadItems.filter(Boolean).length;
+
   // ══ 레버리지(롱) ══
   const L: CheckItem[] = [];
   const push = (arr: CheckItem[]) => (code: string, label: string, kind: CheckItem["kind"], pass: boolean | null, points: number, detail: string) =>
     arr.push({ code, label, kind, pass, points, detail });
   const l = push(L);
 
-  l("L1", "Bias 상방", "필수", bias.dir === "상방", 0, `축1 ${bias.dir} 강도${bias.strength}`);
+  // LM — 매크로 게이트 (필수, 2026-07-09 신설): 매크로 악화 2개 이상이면 레버리지 진입 금지.
+  l("LM", "매크로 게이트(악화 2개 미만)", "필수", macroBad < 2, 0,
+    `악화 ${macroBad}/3 (금리↑ ${fmtB(macroBadItems[0])} · 환율↑ ${fmtB(macroBadItems[1])} · SOX↓ ${fmtB(macroBadItems[2])})`);
+  // L1 — Bias 상방: 필수에서 제외, 참고 표기만 (사용자 개정 2026-07-09. 매크로는 LM 게이트가 담당)
+  l("L1", "Bias 상방 (판정 제외 — 참고)", "가점", null, 0, `축1 ${bias.dir} 강도${bias.strength}`);
   // L2 금리·환율 — 셋업 필수에서 제외 (사용자 개정 2026-07-07: Bias C3·C4에서 이미 반영,
   // 셋업에서 또 요구하면 이중 계산). 참고 표기용 행으로만 유지 (가점 0점·판정 미참여).
   const fxOk = ctx.usdkrw.changePercent !== null ? ctx.usdkrw.changePercent <= 0.1 : null;
@@ -49,16 +68,17 @@ export function computeSetups(inp: Inputs): SetupResult {
   const qualSrc = ctx.qualSource === "user" ? "사용자 입력" : ctx.qualSource === "ai" ? "AI 자동 분석" : "입력";
   l("L6", `직전 1~3일 누적 ${SIGNAL_CONFIG.crashCumPct}% 이상 낙폭`, "가점", crashActive, 3, `누적 ${inp.crashCumPct?.toFixed(1) ?? cum3?.toFixed(1) ?? "?"}%`);
   l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "AI 분석 대기" : qualSrc);
-  l("L8", "이익 컨센서스 유지·상향", "가점", ctx.consensusIntact, 2, ctx.consensusIntact === null ? "AI 분석 대기" : qualSrc);
+  // (L8 이익 컨센서스 가점 — 사용자 개정 2026-07-09로 제거. XS2 차단 판단에는 계속 사용)
   l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
-  // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응(2Y 금리↓+나스닥↑)으로 근사
+  // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응으로 근사.
+  // 근사의 해외장은 SOX 우선 — 나스닥보다 중요 (사용자 개정 2026-07-09)
   const l10 = ctx.macroSurprise !== null
     ? ctx.macroSurprise === "easing"
-    : ctx.usRates.changePp !== null && ctx.overnight.nasdaqPct !== null
-      ? ctx.usRates.changePp < -0.03 && ctx.overnight.nasdaqPct > 0.5
+    : ctx.usRates.changePp !== null && usEquity !== null
+      ? ctx.usRates.changePp < -0.03 && usEquity > 0.5
       : null;
   l("L10", "전일 매크로 서프라이즈 완화적", "가점", l10, 2,
-    ctx.macroSurprise !== null ? `지표 서프라이즈 ${ctx.macroSurprise === "easing" ? "완화" : "긴축"} (AI 판정)` : l10 === null ? "자동 근사 불가" : "금리↓+나스닥↑ 근사");
+    ctx.macroSurprise !== null ? `지표 서프라이즈 ${ctx.macroSurprise === "easing" ? "완화" : "긴축"} (AI 판정)` : l10 === null ? "자동 근사 불가" : "금리↓+SOX↑ 근사");
   l("L11", "기대인플레 하락 추세", "가점", null, 1, "데이터 소스 없음 — 수동 확인");
 
   // 금지 X1~X3
@@ -98,23 +118,16 @@ export function computeSetups(inp: Inputs): SetupResult {
   const overheat = upDays >= 2 || (cum5 !== null && cum5 >= SIGNAL_CONFIG.overheatCumPct);
   s("S1", "과열 또는 하방 Bias", "필수", overheat || bias.dir === "하방", 0,
     `연속상승 ${upDays}일 · 5일 ${cum5?.toFixed(1) ?? "?"}% · Bias ${bias.dir}`);
-  const macroBad = [
-    ctx.usRates.regime === "상승",
-    (ctx.usdkrw.changePercent ?? 0) > 0.3,
-    (ctx.overnight.nasdaqPct ?? 0) < -0.5,
-  ].filter(Boolean).length;
-  s("S2", "매크로 악화(2개 이상)", "필수", macroBad >= 2, 0, `충족 ${macroBad}/3 (금리↑·환율↑·해외↓)`);
+  s("S2", "매크로 악화(2개 이상)", "필수", macroBad >= 2, 0, `충족 ${macroBad}/3 (금리↑·환율↑·SOX↓)`);
   const s3 = trend === null ? null : trend.dir === "DOWN" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
   s("S3", "하방 방향 형성·유지 확인", "필수", s3, 0,
     trend === null ? "장중 데이터 대기" : `방향 ${trend.dir ?? "-"} · ${trend.grade}`);
   const s4 = trend === null ? null : trend.dir === "DOWN" && trend.dc1 !== null && trend.dc1 >= 0.5;
   s("S4", "FKS200 꺾임/하방 지속", "필수", s4, 0, trend === null ? "장중 데이터 대기" : `DC1 ${pctOrDash(trend.dc1)}`);
 
+  // S5 — 디커플링 과열: 판정 제외, 참고 표기만 (사용자 개정 2026-07-09)
   const lastTick = ticks[ticks.length - 1];
-  const s5 = lastTick
-    ? (lastTick.nikkeiChg ?? 0) < -0.3 && (lastTick.hynixChg ?? 0) > 0.5
-    : null;
-  s("S5", "디커플링 과열(타국↓·한국↑)", "가점", s5, 2, lastTick ? `니케이 ${fmt(lastTick.nikkeiChg)}% · 하닉 ${fmt(lastTick.hynixChg)}%` : "데이터 대기");
+  s("S5", "디커플링 과열 (판정 제외 — 참고)", "가점", null, 0, lastTick ? `니케이 ${fmt(lastTick.nikkeiChg)}% · 하닉 ${fmt(lastTick.hynixChg)}%` : "데이터 대기");
   s("S6", "악재 뉴스 발생", "가점", null, 2, "수동 확인 (원인 주석 입력)");
   s("S7", "매크로 컨센서스 수준 → 금리 우려 유지", "가점", null, 1, "수동 확인");
 

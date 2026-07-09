@@ -27,6 +27,11 @@ export type IntradayTick = {
   hynixInst: number | null;   // 기관 잠정 순매매량 (L9)
   samsungInst: number | null;
   hynixVol: number | null;    // 하닉 누적 거래량(주) — 거래량 급증 알람용 (2026-07-08)
+  // KIS 수급 (2026-07-09 연동) — 당일 누적 순매수, 단위 억원 (KIS tr_pbmn 백만원 ÷ 100)
+  kospiFrgn: number | null;   // 코스피 현물 외국인 (T8·수급 반전 알림)
+  kospiPrgm: number | null;   // 코스피 프로그램 차익+비차익 (T5·T8·수급 반전 알림)
+  futFrgn: number | null;     // 코스피200 선물 외국인 (T4)
+  futFrgnQty: number | null;  // 선물 외국인 순매수 계약수 (참고 표기)
   nikkeiChg: number | null;
   twiiChg: number | null;
   nqChg: number | null;
@@ -47,8 +52,11 @@ export type PremarketContext = {
   macroTrend: { rate5dPp: number | null; usdkrw5dPct: number | null };
   // 경제지표 서프라이즈 방향 (AI가 뉴스에서 판정 — 예: NFP 컨센 11만 vs 실제 5만 = easing)
   macroSurprise: "easing" | "tightening" | null;
-  // 밤사이 미국장 — Bias에서는 제외(사용자 개정 2026-07-07), 셋업 L10 근사·S2 매크로 악화 판정에만 사용
+  // 밤사이 미국장 — 나스닥은 Bias 제외 유지(2026-07-07), SOX는 재도입 (2026-07-09 사용자 개정:
+  // "SOXX를 나스닥보다 더 중요하게" — 장후 주요 판정 데이터. L10 근사·S2에서도 SOX 우선)
   overnight: { nasdaqPct: number | null; soxPct: number | null };
+  // 전일 미국 뉴스·주식영향 영향도 (L7 개정 2026-07-09 — 낙폭이 없어도 매일 AI가 분석해 Bias 반영)
+  usNews: { impact: "상방" | "하방" | "중립" | null; note: string | null };
   hynixDaily: DailyBar[];      // 최신이 마지막. NR7·ATR·누적낙폭·갭 계산용
   samsungDaily: DailyBar[];
   k200Daily: DailyBar[];       // KPI200 지수 (선물 일봉 프록시)
@@ -83,9 +91,17 @@ export type TrendResult = {
   score: number;           // 충족 가중치 합
   maxAvailable: number;    // 가용 신호 가중치 합
   normalized: number;      // score / maxAvailable (0~1)
-  grade: "추세일" | "약한추세" | "비추세" | "횡보일선언"; // T6 위반 = 횡보일선언 (장중 재형성 시 해제)
+  grade: "추세일" | "약한추세" | "비추세" | "횡보일선언"; // 스윙 구조 횡보 = 횡보일선언 (장중 재형성 시 해제)
   dir: "UP" | "DOWN" | null;
-  flips: number;           // T6 방향 전환 횟수 (09:00~10:00)
+  flips: number;           // (참고 표시용) 5분봉 방향 전환 횟수 09:00~10:00 — 판정에는 미사용 (2026-07-09)
+  // T6 재정의 (2026-07-09) — 스윙 고점·저점(산·골) 연결선 구조. "변동성의 추세".
+  swing: {
+    status: "추세" | "횡보" | "미정";  // 미정 = 스윙 부족 또는 다음 고점·저점 대기 (횡보 아님)
+    dir: "UP" | "DOWN" | null;
+    highs: number;         // 확정된 스윙 고점 수
+    lows: number;          // 확정된 스윙 저점 수
+    detail: string;        // 판단 근거 (고점선·저점선 방향, 몇 점 판단인지)
+  } | null;
   // 장중 재형성(지연) 추세 — 최근 롤링 창(기본 90분) 기준. 초반 횡보 후 중반 형성 추세 감지.
   midday: { active: boolean; dir: "UP" | "DOWN" | null; dc1: number | null; movePct: number | null; flips: number | null } | null;
   dc1: number | null;      // 실시간 DC1 (봉 주기 = config.dc.barMin, 현재 5분봉)
@@ -200,6 +216,8 @@ export type DailyFeatureRow = {
   consensus_intact: boolean | null;
   cause_non_earnings: boolean | null;
   macro_surprise: "easing" | "tightening" | null;
+  us_news_impact: "up" | "down" | "neutral" | null; // 전일 미국 뉴스 영향도 (L7 개정 2026-07-09)
+  us_news_note: string | null;
   annotation_source: "ai" | "user" | null;
   ai_analyzed_at: string | null;
 };

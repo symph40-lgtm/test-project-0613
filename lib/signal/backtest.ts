@@ -76,6 +76,10 @@ function makeTicks(segs: Seg[], opts: {
         hynixInst: opts.hynixInst ?? null,
         samsungInst: null,
         hynixVol: null,
+        kospiFrgn: null,
+        kospiPrgm: null,
+        futFrgn: null,
+        futFrgnQty: null,
         nikkeiChg: opts.nikkeiChg,
         twiiChg: opts.twiiChg,
         nqChg: null,
@@ -97,6 +101,7 @@ function makeCtx(over: Partial<PremarketContext> & { hynixDaily: DailyBar[] }): 
     macroTrend: { rate5dPp: null, usdkrw5dPct: null },
     macroSurprise: null,
     overnight: { nasdaqPct: 0.5, soxPct: 0.8 },
+    usNews: { impact: null, note: null },
     samsungDaily: over.hynixDaily,
     k200Daily: over.hynixDaily,
     frgn20dAvg: { hynix: 1_000_000, samsung: 800_000 },
@@ -347,24 +352,49 @@ export function runBacktest(): BacktestResult[] {
   }
 
   // ── 횡보일 (특이도 검증 — 오탐 1회가 정탐 2회 이익을 상쇄, 마스터 6장)
+  // 2026-07-09 개정 후 기준: 산·골이 같은 높이로 반복(고점선·저점선 모두 평탄) → 횡보일.
   {
     const daily = dailyWithMoves(2_500_000, [0.3, -0.4]);
     const ctx = makeCtx({ hynixDaily: daily });
     const ticks = makeTicks(
       [
-        { from: 540, to: 552, startPct: 0.0, endPct: 0.6 },
-        { from: 552, to: 564, startPct: 0.6, endPct: -0.4 },
-        { from: 564, to: 576, startPct: -0.4, endPct: 0.5 },
-        { from: 576, to: 588, startPct: 0.5, endPct: -0.3 },
-        { from: 588, to: 615, startPct: -0.3, endPct: 0.4 },
+        { from: 540, to: 552, startPct: 0.0, endPct: 0.5 },
+        { from: 552, to: 564, startPct: 0.5, endPct: -0.4 },
+        { from: 564, to: 576, startPct: -0.4, endPct: 0.52 },
+        { from: 576, to: 588, startPct: 0.52, endPct: -0.38 },
+        { from: 588, to: 600, startPct: -0.38, endPct: 0.49 },
+        { from: 600, to: 612, startPct: 0.49, endPct: -0.41 },
+        { from: 612, to: 628, startPct: -0.41, endPct: 0.3 },
       ],
       { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.1, twiiChg: -0.1 },
     );
-    const j = decide(ctx, ticks, 615, new Date().toISOString());
-    check("횡보일", "방향 전환 4회+ 왕복 장세", "횡보일 선언 — 추세 매매 금지",
+    const j = decide(ctx, ticks, 630, new Date().toISOString());
+    check("횡보일", "같은 높이의 산·골 반복 왕복 장세", "횡보일 선언 — 추세 매매 금지",
       j, j.dayType === "횡보일",
-      `dayType=${j.dayType}, 전환 ${j.trend?.flips}회`,
-      `T6 위반 여부 검증`);
+      `dayType=${j.dayType}, 스윙=${j.trend?.swing?.status}(${j.trend?.swing?.detail})`,
+      `스윙 구조 횡보 판정 검증`);
+  }
+
+  // ── 스윙 추세 (2026-07-09 신설) — 고점·저점이 함께 높아지는 계단식 상승 (산·골 연결선 동방향)
+  {
+    const daily = dailyWithMoves(2_500_000, [-0.5, 0.2]);
+    const ctx = makeCtx({ hynixDaily: daily });
+    const ticks = makeTicks(
+      [
+        { from: 540, to: 555, startPct: 0.0, endPct: 0.8 },   // 산1 0.8
+        { from: 555, to: 570, startPct: 0.8, endPct: 0.3 },   // 골1 0.3
+        { from: 570, to: 590, startPct: 0.3, endPct: 1.5 },   // 산2 1.5 (고점선 상승)
+        { from: 590, to: 605, startPct: 1.5, endPct: 0.9 },   // 골2 0.9 (저점선 상승)
+        { from: 605, to: 640, startPct: 0.9, endPct: 2.2 },   // 진행
+      ],
+      { futPrevClose: 400, hynixPrevClose: daily[daily.length - 1].close, nikkeiChg: 0.6, twiiChg: 0.5, hynixFrgn: 100_000 },
+    );
+    const j = decide(ctx, ticks, 640, new Date().toISOString());
+    const swingOk = j.trend?.swing?.status === "추세" && j.trend?.swing?.dir === "UP";
+    check("스윙추세", "고점선·저점선 모두 상승하는 계단식 상승 (10:40 판정)", "스윙 구조 = 상방 추세 (횡보 아님)",
+      j, swingOk === true && j.dayType !== "횡보일",
+      `dayType=${j.dayType}, 스윙=${j.trend?.swing?.status}/${j.trend?.swing?.dir}`,
+      `${j.trend?.swing?.detail ?? "-"}`);
   }
 
   return results;

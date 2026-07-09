@@ -2,8 +2,9 @@
 // 엔진(lib/signal/engine)·backtest는 외부 의존성 없는 순수 함수라 DB·API 없이 실행된다.
 
 import { runBacktest } from "../lib/signal/backtest";
-import { buildMoveAlerts, buildReversalAlert, buildVolumeAlert } from "../lib/signal/alerts";
+import { buildMoveAlerts, buildReversalAlert, buildVolumeAlert, buildFlowAlerts } from "../lib/signal/alerts";
 import { detectReversal } from "../lib/signal/engine/reversal";
+import { computeSwingStructure } from "../lib/signal/engine/trend";
 import type { IntradayTick, Judgment } from "../lib/signal/types";
 
 const results = runBacktest();
@@ -45,7 +46,8 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
   ts: "", minuteOfDay: 650, futPx: null, futChg: null, k200Px: null,
   hynixPx: null, hynixChg: null, samsungPx: null, samsungChg: null,
   hynixFrgn: null, samsungFrgn: null, hynixInst: null, samsungInst: null,
-  hynixVol: null, nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
+  hynixVol: null, kospiFrgn: null, kospiPrgm: null, futFrgn: null, futFrgnQty: null,
+  nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
 });
 const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
   { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
@@ -66,9 +68,16 @@ const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[]
     expectKeys: ["swing_fut_d0.7e2"],
   },
   {
+    // 2026-07-09 수정: 반등 중(-2.4→-0.8)의 "급락 -0.8%" 절대단계 재발송 제거 — 스윙 알림만
     name: "선물 반등 -2.4%→-0.8% (저점 대비 +1.6%p)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -2.4 }), mkTick({ futChg: -0.8 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_u1.4e-4"],
+    expectKeys: ["swing_fut_u1.4e-4"],
+  },
+  {
+    // 2026-07-09 사용자 보고 사례: 고점 +4.3% 후 +2.7%로 하락 중 — "급등 +2.7%" 문자 금지, 반락 스윙만
+    name: "고점 +4.3% 후 +2.7% 하락 중 — 절대단계(급등) 재발송 금지",
+    ticks: [mkTick({ futChg: 1.0 }), mkTick({ futChg: 4.3 }), mkTick({ futChg: 2.7 })],
+    expectKeys: ["swing_fut_d1.4e6"],
   },
   {
     name: "일방향 하락은 반전 아님 (고점 +0.1%)",
@@ -76,9 +85,11 @@ const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[]
     expectKeys: ["move_fut_d1.4"],
   },
   {
+    // 2026-07-09 수정: 마지막 틱 -5.5는 저점(-6.3) 대비 반등 중 — 절대단계 없이 스윙만
+    // (실시간에서는 -6.3 틱 시점에 move_fut_d6.3이 이미 발송됨)
     name: "저점 갱신 후 새 반등 — 에피소드 리셋 (저점 -6.3, +0.8 반등이 새 키로)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -4.3 }), mkTick({ futChg: -2.8 }), mkTick({ futChg: -6.3 }), mkTick({ futChg: -5.5 })],
-    expectKeys: ["move_fut_d4.9", "swing_fut_u0.7e-9"],
+    expectKeys: ["swing_fut_u0.7e-9"],
   },
   {
     name: "폭락 연장 단계 — -7.1%도 알림 (4.2 초과 구간)",
@@ -192,6 +203,69 @@ const sentOk = sentAlert?.key === "rev_down";
 if (!blockedOk || !sentOk) failed++;
 console.log(`[${blockedOk && sentOk ? "PASS" : "FAIL"}] XS1 게이트 — 폭락 중 인버스 차단 ${blockedOk} · 평시 발송 ${sentOk}`);
 if (sentAlert) console.log(`  📱 ${sentAlert.text}`);
+
+// ── 외인·프로그램 수급 반전 알림 검증 (사용자 지정 2026-07-09)
+console.log("\n── 수급 반전 알림 검증");
+const flowTicks = (vals: (number | null)[], sel: "kospiFrgn" | "kospiPrgm"): IntradayTick[] =>
+  vals.map((v, i) => mkTick({ minuteOfDay: 575 + i, [sel]: v }));
+const flowCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
+  {
+    // 순매수 +3,200억 고점 후 +1,900억 — 매수세 이탈 (매도기회 관찰)
+    name: "외인 순매수 고점 +3,200억 → +1,900억 반락",
+    ticks: flowTicks([500, 1500, 3200, 2600, 1900], "kospiFrgn"),
+    expectKeys: ["flow_kfrgn_d800e4"],
+  },
+  {
+    // 순매도 -4,100억 저점 후 -2,900억 — 순매도 감속 (매수기회 관찰)
+    name: "외인 순매도 저점 -4,100억 → -2,900억 감속",
+    ticks: flowTicks([-1000, -2500, -4100, -3500, -2900], "kospiFrgn"),
+    expectKeys: ["flow_kfrgn_u800e-6"],
+  },
+  {
+    // 일방향 확대 (반전 없음) — 무알림
+    name: "프로그램 일방향 순매수 확대 — 무알림",
+    ticks: flowTicks([200, 900, 1800, 2600, 3300], "kospiPrgm"),
+    expectKeys: [],
+  },
+  {
+    // 진폭 미달 (선행 되돌림 minSpan 300억 미만) — 무알림
+    name: "미세 등락 (진폭 250억) — 무알림",
+    ticks: flowTicks([100, 350, 200, 150, 120], "kospiFrgn"),
+    expectKeys: [],
+  },
+];
+for (const c of flowCases) {
+  const got = buildFlowAlerts(c.ticks).map((a) => a.key).sort();
+  const want = [...c.expectKeys].sort();
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) failed++;
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 [${want.join(",")}] / 실제 [${got.join(",")}]`);
+  for (const a of buildFlowAlerts(c.ticks)) console.log(`  📱 ${a.text}`);
+}
+
+// ── 스윙 구조(T6 재정의) 단위 검증 (사용자 지정 2026-07-09)
+console.log("\n── 스윙 구조 판정 검증");
+const swingPts = (pcts: number[]): { min: number; px: number }[] =>
+  pcts.map((p, i) => ({ min: 540 + i * 5, px: 400 * (1 + p / 100) }));
+const swingCases: { name: string; pcts: number[]; expect: string }[] = [
+  // 고점·저점 모두 상승 (2점 일치) — 계단식 상승
+  { name: "고점선·저점선 상승 → 상방 추세", pcts: [0, 0.8, 0.3, 1.5, 0.9, 2.0, 1.6], expect: "추세/UP" },
+  // 고점·저점 모두 하락
+  { name: "고점선·저점선 하락 → 하방 추세", pcts: [0, -0.8, -0.3, -1.5, -0.9, -2.2, -1.7], expect: "추세/DOWN" },
+  // 같은 높이 반복 — 횡보
+  { name: "같은 높이 산·골 반복 → 횡보", pcts: [0, 0.5, -0.4, 0.52, -0.38, 0.49, -0.41, 0.3], expect: "횡보/-" },
+  // 고점 하락·저점 상승(수렴) 후 3번째 고점까지 하락 지향 → 하방 반영
+  { name: "2점 불일치 → 고점 3점 하락 지향 → 하방", pcts: [0, 1.2, -0.8, 0.7, -0.3, 0.1, -0.5], expect: "추세/DOWN" },
+  // 스윙 부족 (일방향 상승 — 산·골이 안 생김) → 미정 (횡보 아님)
+  { name: "일방향 상승 (스윙 부족) → 미정", pcts: [0, 0.4, 0.9, 1.4, 2.0], expect: "미정/-" },
+];
+for (const c of swingCases) {
+  const r = computeSwingStructure(swingPts(c.pcts));
+  const got = `${r.status}/${r.dir ?? "-"}`;
+  const ok = got === c.expect;
+  if (!ok) failed++;
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${c.name} — 기대 ${c.expect} / 실제 ${got} (${r.detail})`);
+}
 
 console.log(`\n총 실패 ${failed}건`);
 process.exit(failed > 0 ? 1 : 0);

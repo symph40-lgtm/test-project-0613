@@ -4,6 +4,7 @@
 
 import YahooFinance from "yahoo-finance2";
 import { fetchKospi200Futures, fetchKoreanQuote, fetchStockFlow, fetchAccVolume } from "@/lib/market/naver-flow";
+import { hasKisKeys, fetchKisInvestorFlow, fetchKisProgramNet } from "@/lib/market/kis";
 import { fetchMarketData } from "@/lib/market/fetch";
 import { SIGNAL_CONFIG, EVENT_CALENDAR, rebalanceMonthBias } from "./config";
 import type { DailyBar, IntradayTick, PremarketContext } from "./types";
@@ -132,7 +133,10 @@ export async function fetchCrossMarkets(): Promise<{ nikkeiChg: number | null; t
 export async function collectTick(): Promise<IntradayTick> {
   const { minuteOfDay, iso } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
-  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol] = await Promise.all([
+  // KIS 수급 (T4·T5·T8, 2026-07-09) — 정규장 시간에만 호출 (장외엔 마감 스냅샷이라 시계열 왜곡)
+  const inRegular = minuteOfDay >= SIGNAL_CONFIG.session.openMin && minuteOfDay <= SIGNAL_CONFIG.session.endMin + 15;
+  const useKis = hasKisKeys() && inRegular;
+  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol, kospiInv, futInv, prgmNet] = await Promise.all([
     fetchKospi200Futures().catch(() => null),
     fetchKpi200().catch(() => null),
     fetchKoreanQuote(hynix).catch(() => null),
@@ -142,6 +146,9 @@ export async function collectTick(): Promise<IntradayTick> {
     fetchCrossMarkets().catch(() => ({ nikkeiChg: null, twiiChg: null, nqChg: null })),
     fetchBreadth().catch(() => null),
     fetchAccVolume(hynix).catch(() => null),
+    useKis ? fetchKisInvestorFlow("kospi").catch(() => null) : Promise.resolve(null),
+    useKis ? fetchKisInvestorFlow("k200fut").catch(() => null) : Promise.resolve(null),
+    useKis ? fetchKisProgramNet().catch(() => null) : Promise.resolve(null),
   ]);
 
   const futPx = fut?.session === "정규" && !fut.stale ? fut.price : fut?.price ?? null;
@@ -162,6 +169,10 @@ export async function collectTick(): Promise<IntradayTick> {
     hynixInst: hynixFlow?.provisional ? hynixFlow.institution : null,
     samsungInst: samsungFlow?.provisional ? samsungFlow.institution : null,
     hynixVol,
+    kospiFrgn: kospiInv?.frgnNetAmt ?? null,
+    kospiPrgm: prgmNet,
+    futFrgn: futInv?.frgnNetAmt ?? null,
+    futFrgnQty: futInv?.frgnNetQty ?? null,
     nikkeiChg: cross.nikkeiChg,
     twiiChg: cross.twiiChg,
     nqChg: cross.nqChg,
@@ -176,6 +187,8 @@ export async function buildPremarketContext(manual?: {
   causeNonEarnings: boolean | null;
   qualSource?: "ai" | "user" | null;
   macroSurprise?: "easing" | "tightening" | null;
+  usNewsImpact?: "up" | "down" | "neutral" | null; // L7 개정 (2026-07-09) — 매일 미국 뉴스 영향도
+  usNewsNote?: string | null;
 }): Promise<PremarketContext> {
   const { date } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
@@ -218,6 +231,10 @@ export async function buildPremarketContext(manual?: {
     overnight: {
       nasdaqPct: market?.nasdaq?.changePercent ?? null,
       soxPct: market?.sox?.changePercent ?? null,
+    },
+    usNews: {
+      impact: manual?.usNewsImpact === "up" ? "상방" : manual?.usNewsImpact === "down" ? "하방" : manual?.usNewsImpact === "neutral" ? "중립" : null,
+      note: manual?.usNewsNote ?? null,
     },
     hynixDaily,
     samsungDaily,
