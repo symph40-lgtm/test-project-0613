@@ -4,7 +4,7 @@
 // 페이지를 열어두면 장중 틱이 서버에 축적되어 T-신호·DC 판정이 점점 정교해진다.
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, ShieldAlert, Activity, Gauge, GitBranch, Layers, FlaskConical, NotebookPen, MessageSquareText } from "lucide-react";
+import { RefreshCw, ShieldAlert, Activity, Gauge, GitBranch, Layers, FlaskConical, NotebookPen, MessageSquareText, BookOpen } from "lucide-react";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import type { BacktestResult } from "@/lib/signal/backtest";
 import type { Stage1Report } from "@/lib/signal/stage1";
@@ -75,13 +75,21 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
       badge="M7"
       width="wide"
       subNavRight={
-        <button
-          onClick={() => { setLoading(true); load(); }}
-          className="flex items-center gap-1.5 rounded-[8px] border border-hairline bg-canvas px-3 py-1.5 text-[13px] hover:bg-pearl"
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          {updatedAt ? `${updatedAt} 갱신` : "갱신"}
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/signal/guide"
+            className="flex items-center gap-1.5 rounded-[8px] border border-hairline bg-canvas px-3 py-1.5 text-[13px] hover:bg-pearl"
+          >
+            <BookOpen size={13} /> 지표 설명
+          </a>
+          <button
+            onClick={() => { setLoading(true); load(); }}
+            className="flex items-center gap-1.5 rounded-[8px] border border-hairline bg-canvas px-3 py-1.5 text-[13px] hover:bg-pearl"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            {updatedAt ? `${updatedAt} 갱신` : "갱신"}
+          </button>
+        </div>
       }
     >
       {error ? (
@@ -163,15 +171,21 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
                       {j.trend.grade}{j.trend.dir ? ` · ${j.trend.dir === "UP" ? "상방" : "하방"}` : ""}
                     </span>
                     <span className="text-[12px] text-ink-48">
-                      DC1 {j.trend.dc1 !== null ? `${(j.trend.dc1 * 100).toFixed(0)}%` : "-"} · DC2 {j.trend.dc2 !== null ? j.trend.dc2.toFixed(2) : "-"} · 전환 {j.trend.flips}회
+                      DC1 {j.trend.dc1 !== null ? `${(j.trend.dc1 * 100).toFixed(0)}%` : "-"} · DC2 {j.trend.dc2 !== null ? j.trend.dc2.toFixed(2) : "-"}
                     </span>
                   </div>
+                  {j.trend.swing ? (
+                    <p className={`mt-1.5 text-[12px] ${j.trend.swing.status === "추세" ? "font-medium text-red-600" : j.trend.swing.status === "횡보" ? "font-medium text-ink-48" : "text-ink-48"}`}>
+                      스윙 구조(변동성 추세): {j.trend.swing.status}
+                      {j.trend.swing.dir ? ` · ${j.trend.swing.dir === "UP" ? "상방" : "하방"}` : ""}
+                      {" — "}{j.trend.swing.detail}
+                    </p>
+                  ) : null}
                   {j.trend.midday ? (
                     <p className={`mt-1.5 text-[12px] ${j.trend.midday.active ? "font-medium text-amber-700" : "text-ink-48"}`}>
                       최근 90분 창: {j.trend.midday.dir === "UP" ? "상방" : j.trend.midday.dir === "DOWN" ? "하방" : "무방향"}
                       {" · "}DC1 {j.trend.midday.dc1 !== null ? `${(j.trend.midday.dc1 * 100).toFixed(0)}%` : "-"}
                       {" · "}이동 {j.trend.midday.movePct !== null ? `${j.trend.midday.movePct > 0 ? "+" : ""}${j.trend.midday.movePct.toFixed(1)}%` : "-"}
-                      {" · "}전환 {j.trend.midday.flips ?? "-"}회
                       {j.trend.midday.active ? " — 장중 추세 형성" : ""}
                     </p>
                   ) : null}
@@ -266,10 +280,10 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
           {/* ── L/S 셋업 체크리스트 */}
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <SetupCard
-              title="레버리지(롱) 셋업 — L1~L11"
+              title="레버리지(롱) 셋업 — LM·L1~L11"
               verdict={j.setups.long.verdict}
               bonus={j.setups.long.bonus}
-              bonusMax={11}
+              bonusMax={9}
               items={j.setups.long.items}
               blocked={j.setups.long.blocked}
               tone="red"
@@ -278,7 +292,7 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
               title="인버스 셋업 — S1~S7"
               verdict={j.setups.short.verdict}
               bonus={j.setups.short.bonus}
-              bonusMax={5}
+              bonusMax={3}
               items={j.setups.short.items}
               blocked={j.setups.short.blocked}
               tone="blue"
@@ -557,7 +571,7 @@ function AnnotationForm({ date, annotation, onSaved }: {
     <section className="rounded-[18px] border border-hairline bg-canvas p-5">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="flex items-center gap-1.5 text-[14px] font-semibold">
-          <NotebookPen size={15} className="text-guard" /> 오늘의 정성 판단 (L7·L8 + 원인 주석)
+          <NotebookPen size={15} className="text-guard" /> 오늘의 정성 판단 (낙폭 원인·컨센서스 + 원인 주석)
         </h3>
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${annotation?.source === "user" ? "bg-ink text-white" : annotation?.source === "ai" ? "bg-purple-50 text-purple-700" : "bg-pearl text-ink-48"}`}>
           {annotation?.source === "user" ? "사용자 입력 적용 중" : annotation?.source === "ai" ? "AI 자동 분석 적용 중" : "AI 분석 대기"}
@@ -588,8 +602,8 @@ function AnnotationForm({ date, annotation, onSaved }: {
             className="mt-1 w-full rounded-[8px] border border-hairline bg-canvas px-2.5 py-2 text-[13px]"
           />
         </div>
-        <TriToggle label="L8 — 증권사 이익 컨센서스 유지·상향 중인가?" value={consensus} onChange={setConsensus} />
-        <TriToggle label="L7 — 낙폭 원인이 비실적 요인(수급·지정학·소송)인가?" value={nonEarnings} onChange={setNonEarnings} />
+        <TriToggle label="이익 컨센서스 유지·상향 중인가? (XS2 인버스 차단 판단용)" value={consensus} onChange={setConsensus} />
+        <TriToggle label="낙폭 원인이 비실적 요인(수급·지정학·소송)인가? (셋업 L7 가점·XS2)" value={nonEarnings} onChange={setNonEarnings} />
       </div>
       <div className="mt-3 flex items-center gap-3">
         <button
