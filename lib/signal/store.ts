@@ -43,14 +43,21 @@ export async function appendTick(date: string, tick: IntradayTick): Promise<bool
     fut_frgn: tick.futFrgn,
     fut_frgn_qty: tick.futFrgnQty,
   };
-  const { error } = await admin.from("signal_ticks").insert(row);
-  // 마이그레이션 미적용 폴백 (019 hynix_vol · 020 KIS 수급) — 컬럼 없어도 틱 적재는 계속돼야 함
-  if (error && /hynix_vol|kospi_frgn|kospi_prgm|fut_frgn/.test(error.message)) {
-    for (const k of ["hynix_vol", "kospi_frgn", "kospi_prgm", "fut_frgn", "fut_frgn_qty"]) delete row[k];
-    const retry = await admin.from("signal_ticks").insert(row);
-    return !retry.error;
+  // 마이그레이션 미적용 폴백 — 없는 컬럼만 정확히 빼고 재시도. 예전처럼 신규 컬럼 5개를 통째로
+  // 버리면 안 됨: 2026-07-09~13 실측 사고 — 019(hynix_vol)만 미적용인 DB에서 42703 에러가 나자
+  // 020의 KIS 수급 4컬럼까지 같이 스트립돼, KIS 호출은 성공하는데 사흘간 전부 null로 저장됐다
+  // (T4·T5·T8 "KIS 수급 데이터 대기"의 실제 원인).
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { error } = await admin.from("signal_ticks").insert(row);
+    if (!error) return true;
+    // PostgREST: "Could not find the 'hynix_vol' column of 'signal_ticks' in the schema cache"
+    // Postgres: column "hynix_vol" of relation "signal_ticks" does not exist
+    const m = error.message.match(/'([a-z0-9_]+)' column/i) ?? error.message.match(/column "([a-z0-9_]+)"/i);
+    const col = m?.[1];
+    if (!col || !(col in row) || col === "date" || col === "ts") return false;
+    delete row[col];
   }
-  return !error;
+  return false;
 }
 
 export async function loadTicks(date: string): Promise<IntradayTick[]> {

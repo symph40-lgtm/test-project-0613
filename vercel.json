@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/morning-brief",
-      "schedule": "30 23 * * 0-4"
+      "schedule": "45 22 * * 0-4"
     },
     {
       "path": "/api/cron/intraday",
