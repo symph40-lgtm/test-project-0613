@@ -42,13 +42,18 @@ export async function GET(req: NextRequest) {
     const smhDaily = await fetchSmhDaily(15);
     const judgment = decideUs(rows, smhDaily, toVirtualMin(minuteOfDay), iso, date);
 
-    // 문자 — 판정 확정(1일 1회) + SMH 급변·스윙 (에피소드별 1일 1회는 dispatch가 보장)
+    // 문자 — 판정 확정(1일 1회) + SMH 급변·스윙 (에피소드별 1일 1회는 dispatch가 보장).
+    // 조용 시간(01:00~07:00 KST)엔 문자만 억제하고 이메일은 발송 — 수집·판정은 계속 (사용자 지정)
+    const kst = new Date(Date.now() + 9 * 3600e3);
+    const kstMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    const Q = US_SIGNAL_CONFIG.quietSms;
+    const quiet = kstMin >= Q.fromKstMin && kstMin < Q.toKstMin;
     let sent = 0;
     if (isWeekday && inSession) {
       const sig = buildUsSignalAlert(judgment);
-      if (sig) sent += await dispatchToChannels("signal", date, sig, undefined, { us: true, dayType: judgment.dayType, ts: iso }).catch(() => 0);
+      if (sig) sent += await dispatchToChannels("signal", date, { ...sig, suppressSms: quiet }, undefined, { us: true, dayType: judgment.dayType, ts: iso }).catch(() => 0);
       for (const alert of buildUsMoveAlerts(rows)) {
-        sent += await dispatchToChannels("signal", date, alert, `미국 급변 — ${alert.text.slice(10, 40)}`).catch(() => 0);
+        sent += await dispatchToChannels("signal", date, { ...alert, suppressSms: quiet }, `미국 급변 — ${alert.text.slice(10, 40)}`).catch(() => 0);
       }
     }
 

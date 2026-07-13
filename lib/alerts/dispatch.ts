@@ -10,6 +10,9 @@ export type ChannelAlert = {
   severity: "high" | "medium" | "low";
   text: string;
   smsSubject?: string; // 문자 제목 — 알림 종류 표시. 미지정 시 무제(단문 요금)
+  // 조용 시간 — true면 문자(SMS)만 억제하고 이메일은 발송 (미국 신호 야간, 사용자 지정 2026-07-13).
+  // 주의: alertKey 1일 1회 기록은 그대로 남으므로 조용 시간에 소진된 키는 이후에도 문자로 재발송되지 않음.
+  suppressSms?: boolean;
 };
 
 export async function dispatchToChannels(
@@ -54,7 +57,9 @@ export async function dispatchToChannels(
   for (const [userId, ch] of byUser) {
     if (alreadyByUser.has(userId)) continue;
     const results: string[] = [];
-    if (ch.sms) {
+    if (ch.sms && alert.suppressSms) {
+      results.push("sms:quiet"); // 조용 시간 — 문자 억제 (이메일은 발송)
+    } else if (ch.sms) {
       const r = await sendSms({ to: ch.sms, text: alert.text, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`sms:${r.ok ? "ok" : "fail"}`);
       if (r.ok) sent++;

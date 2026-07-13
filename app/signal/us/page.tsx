@@ -107,6 +107,7 @@ export default async function UsSignalPage() {
         <p className="mt-1">cron-job.org에 작업 추가: <code className="rounded bg-canvas px-1">/api/signal/us/state?secret=&lt;CRON_SECRET&gt;</code>을
         <b> 매일 22:25~05:05 KST 1분 간격</b>(월~금 ET 기준, 서머타임 종료 후엔 23:25~06:05)으로 호출.
         페이지를 열어두어도 같은 효과(새로고침 시점 수집)가 있지만 문자·시계열 축적은 크론이 확실합니다.</p>
+        <p className="mt-1"><b>조용 시간</b>: 01:00~07:00 KST에는 문자(SMS)를 억제하고 이메일만 발송합니다 — 수집·판정은 계속되므로 밤사이 신호는 아침에 이메일로 확인하세요.</p>
         <p className="mt-2 text-[12px] text-ink-48">기준값 도출: SMH 최근 37거래일 5분봉 + 2년 일간 실측 (추세일 12일 추출 — DC1 0.55/DC2 0.14, 급변 스텝 1.1%, 큰갭 4%). 상세: docs/signal-system-master-spec.md 부록.</p>
       </div>
 
