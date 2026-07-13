@@ -44,12 +44,27 @@ export function computeBias(ctx: PremarketContext): BiasResult {
   // ── C6~C9 확장 매크로 (사용자 지정 2026-07-13: 미10Y·WTI·달러지수·채권가격 축1 포함)
   const mx = ctx.macroExtra;
 
-  // C6 미 금리(10Y) — C4(2Y 정책 민감)와 별개의 장기 할인율·부채 부담 축. 눈금은 C4와 동일 ±0.03%p
+  // C6 미 금리(10Y) — C4(2Y 정책 민감)와 별개의 장기 할인율·부채 부담 축.
+  // 전일 변화(±0.03%p)만이 아니라 절대 레벨 구간을 함께 판정 (사용자 지정 2026-07-13:
+  // "4.57%면 중립이 아니라 중립에서 위험으로 진행 중"). 경계 4.5%↑에선 상승 자체가 하방,
+  // 위험 4.8%↑에선 뚜렷한 완화가 아닌 한 하방.
   if (!mx || mx.us10y.changePp === null) add("C6", "미 금리(10Y)", "미상", "데이터 없음");
   else {
     const pp = mx.us10y.changePp;
-    add("C6", "미 금리(10Y)", pp > 0.03 ? "하방" : pp < -0.03 ? "상방" : "중립",
-      `전일 ${pp > 0 ? "+" : ""}${pp.toFixed(3)}%p${mx.us10y.level !== null ? ` · ${mx.us10y.level.toFixed(2)}%` : ""}`);
+    const lv = mx.us10y.level;
+    const ppTxt = `전일 ${pp > 0 ? "+" : ""}${pp.toFixed(3)}%p`;
+    const lvTxt = lv !== null ? `${lv.toFixed(2)}%` : "?";
+    if (lv !== null && lv >= SIGNAL_CONFIG.us10yDanger) {
+      const easing = pp < -0.03;
+      add("C6", "미 금리(10Y)", easing ? "중립" : "하방",
+        `위험 구간(≥${SIGNAL_CONFIG.us10yDanger}%) ${lvTxt} · ${ppTxt}${easing ? " — 완화 중(관찰)" : ""}`);
+    } else if (lv !== null && lv >= SIGNAL_CONFIG.us10yWarn) {
+      const dir = pp > 0 ? "하방" : pp < -0.03 ? "상방" : "중립";
+      add("C6", "미 금리(10Y)", dir,
+        `경계 구간(${SIGNAL_CONFIG.us10yWarn}~${SIGNAL_CONFIG.us10yDanger}%) ${lvTxt} · ${ppTxt}${pp > 0 ? " — 위험 방향 진행" : ""}`);
+    } else {
+      add("C6", "미 금리(10Y)", pp > 0.03 ? "하방" : pp < -0.03 ? "상방" : "중립", `${ppTxt} · ${lvTxt} (안정 구간 <${SIGNAL_CONFIG.us10yWarn}%)`);
+    }
   }
 
   // C7 WTI 유가 — 급등(+2%↑)=물가·금리 상방 압력이라 주식 하방, 급락(-2%↓)=물가 부담 완화 상방.
