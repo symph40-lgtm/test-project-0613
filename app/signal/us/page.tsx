@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageShell, Disclaimer } from "../../_components/Shell";
 import { collectUsTick, loadUsTicks, fetchSmhDaily, etNow, toVirtualMin } from "@/lib/signal/us/data";
 import { decideUs } from "@/lib/signal/us/engine";
+import RefreshButton from "./RefreshButton";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function UsSignalPage() {
   const fmtPct = (v: number | null | undefined) => (v == null ? "?" : `${v > 0 ? "+" : ""}${v.toFixed(2)}%`);
 
   return (
-    <PageShell title="레버리지·인버스 신호 (미국)" badge="US" width="wide">
+    <PageShell title="레버리지·인버스 신호 (미국)" badge="US" width="wide" subNavRight={<RefreshButton />}>
       <p className="mb-4 text-[13px] leading-relaxed text-ink-48">
         미국 정규장(09:30~16:00 ET · 한국 야간)의 반도체 신호 — 상방이면 <b>USD(2x)</b>, 하방이면 <b>SSG(-2x)</b>.
         판정 기준 지수는 <b>SMH</b> (USD와 상관 0.955·β 2.04 — 실측 최적, FKS200 역할).
