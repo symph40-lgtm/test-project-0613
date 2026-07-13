@@ -57,6 +57,14 @@ export type PremarketContext = {
   overnight: { nasdaqPct: number | null; soxPct: number | null };
   // 전일 미국 뉴스·주식영향 영향도 (L7 개정 2026-07-09 — 낙폭이 없어도 매일 AI가 분석해 Bias 반영)
   usNews: { impact: "상방" | "하방" | "중립" | null; note: string | null };
+  // 축1 확장 매크로 (사용자 지정 2026-07-13) — 미10Y·WTI·달러지수·미 국채가격(TLT).
+  // 옵션: 백테스트 시나리오는 미설정 → 해당 팩터 '미상'(투표 미참여)으로 과거 판정 불변.
+  macroExtra?: {
+    us10y: { level: number | null; changePp: number | null };        // 금리 레벨(%)·전일 변화(%p)
+    wti: { level: number | null; changePercent: number | null };     // WTI ($·전일 %)
+    dxy: { level: number | null; changePercent: number | null };     // 달러지수 DXY
+    bondEtf: { changePercent: number | null };                       // TLT 가격 전일 % (금리 역방향 — 참고)
+  };
   hynixDaily: DailyBar[];      // 최신이 마지막. NR7·ATR·누적낙폭·갭 계산용
   samsungDaily: DailyBar[];
   k200Daily: DailyBar[];       // KPI200 지수 (선물 일봉 프록시)

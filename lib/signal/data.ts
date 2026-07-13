@@ -5,7 +5,7 @@
 import YahooFinance from "yahoo-finance2";
 import { fetchKospi200Futures, fetchKoreanQuote, fetchStockFlow, fetchAccVolume } from "@/lib/market/naver-flow";
 import { hasKisKeys, fetchKisInvestorFlow, fetchKisProgramNet } from "@/lib/market/kis";
-import { fetchMarketData } from "@/lib/market/fetch";
+import { fetchMarketData, fetchBondEtf } from "@/lib/market/fetch";
 import { SIGNAL_CONFIG, EVENT_CALENDAR, rebalanceMonthBias } from "./config";
 import type { DailyBar, IntradayTick, PremarketContext } from "./types";
 
@@ -192,7 +192,7 @@ export async function buildPremarketContext(manual?: {
 }): Promise<PremarketContext> {
   const { date } = kstNow();
   const { hynix, samsung } = SIGNAL_CONFIG.symbols;
-  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20, macroTrend, us2y] = await Promise.all([
+  const [market, hynixDaily, samsungDaily, k200Daily, hynixFlow20, macroTrend, us2y, bondEtf] = await Promise.all([
     fetchMarketData().catch(() => null),
     fetchDailyBars(hynix, 40),
     fetchDailyBars(samsung, 40),
@@ -200,6 +200,7 @@ export async function buildPremarketContext(manual?: {
     fetchFrgn20dAvg(hynix),
     fetchMacro5dTrend(),
     fetchUs2yDaily(),
+    fetchBondEtf("TLT").catch(() => null),
   ]);
   const samsungFrgnAvg = await fetchFrgn20dAvg(samsung);
 
@@ -227,6 +228,19 @@ export async function buildPremarketContext(manual?: {
     },
     usRates: { changePp: y2, regime },
     macroTrend: { rate5dPp: us2y.fiveDayPp, usdkrw5dPct: macroTrend.usdkrw5dPct },
+    // 축1 확장 매크로 (사용자 지정 2026-07-13). 10Y는 야후 ^TNX(금리 %) — 전일 %p 변화로 환산
+    macroExtra: {
+      us10y: (() => {
+        const p = market?.treasury10y?.price ?? null;
+        const c = market?.treasury10y?.changePercent ?? null;
+        const pp = p !== null && c !== null && isFinite(p) && isFinite(c) && 100 + c !== 0
+          ? Number((p - p / (1 + c / 100)).toFixed(4)) : null;
+        return { level: p, changePp: pp };
+      })(),
+      wti: { level: market?.oil?.price ?? null, changePercent: market?.oil?.changePercent ?? null },
+      dxy: { level: market?.dollarIndex?.price ?? null, changePercent: market?.dollarIndex?.changePercent ?? null },
+      bondEtf: { changePercent: bondEtf?.changePercent ?? null },
+    },
     macroSurprise: manual?.macroSurprise ?? null,
     overnight: {
       nasdaqPct: market?.nasdaq?.changePercent ?? null,

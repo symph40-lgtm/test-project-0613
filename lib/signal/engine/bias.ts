@@ -5,6 +5,9 @@
 // 낙폭이 없어도 매일 전일 미국 뉴스·주식영향 영향도를 AI가 분석해 반영. ④C2 리밸런싱은
 // 필수 아닌 옵션 — 방향 투표에서 제외하고 참고 표기만 (가중 0).
 
+// 사용자 지정 2026-07-13: C6 미10Y·C7 WTI·C8 달러지수(DXY) 추가 (각 가중 1),
+// C9 미 국채가격(TLT)은 C6과 역방향 중복이라 참고 표기만 (가중 0).
+
 import { SIGNAL_CONFIG } from "../config";
 import type { BiasResult, PremarketContext } from "../types";
 import { cumReturnPct, consecutiveUpDays } from "./daily";
@@ -37,6 +40,43 @@ export function computeBias(ctx: PremarketContext): BiasResult {
   if (sox === null) add("C5", "전일 SOX(미 반도체)", "미상", "데이터 없음");
   else add("C5", "전일 SOX(미 반도체)", sox > 0.5 ? "상방" : sox < -0.5 ? "하방" : "중립",
     `${sox > 0 ? "+" : ""}${sox.toFixed(2)}% (비중 2배 — 나스닥은 제외)`, 2);
+
+  // ── C6~C9 확장 매크로 (사용자 지정 2026-07-13: 미10Y·WTI·달러지수·채권가격 축1 포함)
+  const mx = ctx.macroExtra;
+
+  // C6 미 금리(10Y) — C4(2Y 정책 민감)와 별개의 장기 할인율·부채 부담 축. 눈금은 C4와 동일 ±0.03%p
+  if (!mx || mx.us10y.changePp === null) add("C6", "미 금리(10Y)", "미상", "데이터 없음");
+  else {
+    const pp = mx.us10y.changePp;
+    add("C6", "미 금리(10Y)", pp > 0.03 ? "하방" : pp < -0.03 ? "상방" : "중립",
+      `전일 ${pp > 0 ? "+" : ""}${pp.toFixed(3)}%p${mx.us10y.level !== null ? ` · ${mx.us10y.level.toFixed(2)}%` : ""}`);
+  }
+
+  // C7 WTI 유가 — 급등(+2%↑)=물가·금리 상방 압력이라 주식 하방, 급락(-2%↓)=물가 부담 완화 상방.
+  // 단, 급락이 수요 침체(리스크오프) 신호일 수도 있어 ±2% 미만은 중립 유지.
+  if (!mx || mx.wti.changePercent === null) add("C7", "WTI 유가", "미상", "데이터 없음");
+  else {
+    const w = mx.wti.changePercent;
+    add("C7", "WTI 유가", w >= 2 ? "하방" : w <= -2 ? "상방" : "중립",
+      `${w > 0 ? "+" : ""}${w.toFixed(1)}%${mx.wti.level !== null ? ` · $${mx.wti.level.toFixed(1)}` : ""} (기준 ±2%)`);
+  }
+
+  // C8 달러지수(DXY) — 글로벌 달러 강도. 강달러(+0.3%↑)=외인 수급·신흥국 역풍 하방, 약달러=상방.
+  // C3(원/달러)은 원화 고유 요인 포함 — DXY는 글로벌 공통분을 따로 본다.
+  if (!mx || mx.dxy.changePercent === null) add("C8", "달러지수(DXY)", "미상", "데이터 없음");
+  else {
+    const d = mx.dxy.changePercent;
+    add("C8", "달러지수(DXY)", d >= 0.3 ? "하방" : d <= -0.3 ? "상방" : "중립",
+      `${d > 0 ? "+" : ""}${d.toFixed(2)}%${mx.dxy.level !== null ? ` · ${mx.dxy.level.toFixed(1)}` : ""} (기준 ±0.3%)`);
+  }
+
+  // C9 미 국채가격(TLT) — 금리와 역방향이라 C6과 이중 계산 방지 위해 참고 표기만 (가중 0).
+  // 가격 축으로 보는 게 익숙할 때의 대조용: TLT 상승 = 장기금리 하락 = 주식 상방 환경.
+  if (mx && mx.bondEtf.changePercent !== null) {
+    const b = mx.bondEtf.changePercent;
+    add("C9", "미 국채가격(TLT·참고)", b >= 0.3 ? "상방" : b <= -0.3 ? "하방" : "중립",
+      `${b > 0 ? "+" : ""}${b.toFixed(2)}% — C6(10Y)과 역방향 지표라 판정 미반영`, 0);
+  }
 
   // L10 — 경제지표 서프라이즈 (AI가 뉴스에서 직접 판정 — 컨센서스 대비 발표값의 방향)
   // 성공사례 원형: NFP 컨센 11만 vs 실제 5만 = easing → 금리인상 우려 후퇴 = 하락 추세 전환의 선행 신호.
