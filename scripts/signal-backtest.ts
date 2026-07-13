@@ -50,8 +50,9 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
   nikkeiChg: null, twiiChg: null, nqChg: null, breadth: null, basis: null, ...over,
 });
 const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
-  { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
-  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1.68"] },
+  // 2026-07-13 사용자 지정: 개별 종목 단계 4/8/12 (50% 축소) — 3.4%는 첫 단계(4) 미달로 무알림
+  { name: "하닉 -5.2% (첫 단계 4)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d4"] },
+  { name: "하닉 +3.4%(4 미달) + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_fut_d1.68"] },
   { name: "선물 -2.3% (2.24단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d2.24"] },
   { name: "선물 -0.8% (첫 감지선 0.56)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: ["move_fut_d0.56"] },
   { name: "미돌파 (하닉 -2.9% · 선물 -0.5%)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.5 })], expectKeys: [] },

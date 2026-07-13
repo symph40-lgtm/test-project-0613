@@ -64,7 +64,13 @@ export async function dispatchToChannels(
       results.push(`sms:${r.ok ? "ok" : "fail"}`);
       if (r.ok) sent++;
     }
-    if (ch.email) {
+    // 이메일 절감 (사용자 지정 2026-07-13: "이메일은 지금보다 1/3로") — 심각도 high와 브리핑류만
+    // 발송. 실측 5일 167건 중 high 63건(38%) ≈ 1/3. 조용 시간(suppressSms)엔 이메일이 유일한
+    // 채널이므로 심각도와 무관하게 발송.
+    const emailOk = alert.severity === "high" || triggerKey === "intraday_summary" || alert.suppressSms === true;
+    if (ch.email && !emailOk) {
+      results.push("email:cut"); // 절감 규칙으로 미발송
+    } else if (ch.email) {
       const r = await sendEmail({
         to: ch.email,
         subject: emailSubject ?? alert.text.split("\n")[0],
