@@ -8,6 +8,7 @@ import { fetchDailyBars, kstNow } from "@/lib/signal/data";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { loadTicks } from "@/lib/signal/store";
 import { gapPct } from "@/lib/signal/engine/daily";
+import { snapshotStances } from "@/lib/market/stanceSnapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -82,11 +83,18 @@ export async function GET(req: NextRequest) {
       { onConflict: "date" },
     );
 
+    // 보유 매매 판단 스냅샷 + 직전 거래일 next_day_pct 백필 (캘리브레이션 루프 2026-07-13).
+    // 실패해도 본 배치(라벨 확정)에는 영향 없음.
+    const stances = await snapshotStances(date).catch((e) => ({
+      saved: 0, backfilled: 0, note: `스냅샷 예외: ${e instanceof Error ? e.message.slice(0, 120) : "?"}`,
+    }));
+
     return NextResponse.json({
       ok: !error,
       date,
       label: { dc1, dc2, dayLabel, dayReturn, gap },
       tickCount: ticks.length,
+      stances,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "internal error" }, { status: 500 });
