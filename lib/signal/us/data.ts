@@ -38,6 +38,7 @@ export type UsTickRow = {
   us10y_px: number | null; us10y_chg_pp: number | null;
   dxy_chg: number | null; wti_chg: number | null;
   vix_px: number | null; vix_chg: number | null;
+  smh_vol?: number | null; // SMH 당일 누적 거래량 (TV 신호용 — 마이그레이션 023)
   // ── 아래는 표시용 라이브 레벨 (사용자 지정 2026-07-13: 축1에 실제 값 병기) — DB 미저장.
   // appendUsTick이 INSERT 전에 제거한다 (us_signal_ticks에 컬럼 없음 — 마이그레이션 불필요)
   dxy_px?: number | null; wti_px?: number | null; nq_px?: number | null;
@@ -46,15 +47,16 @@ export type UsTickRow = {
 // DB에 저장하지 않는 표시용 필드 — INSERT 전에 분리
 const DISPLAY_ONLY_FIELDS = ["dxy_px", "wti_px", "nq_px"] as const;
 
-async function quote(symbol: string): Promise<{ px: number | null; chg: number | null; prev: number | null }> {
+async function quote(symbol: string): Promise<{ px: number | null; chg: number | null; prev: number | null; vol: number | null }> {
   try {
     const q = await yf.quote(symbol);
     const px = typeof q.regularMarketPrice === "number" ? q.regularMarketPrice : null;
     const chg = typeof q.regularMarketChangePercent === "number" ? q.regularMarketChangePercent : null;
     const prev = typeof q.regularMarketPreviousClose === "number" ? q.regularMarketPreviousClose : null;
-    return { px, chg, prev };
+    const vol = typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null;
+    return { px, chg, prev, vol };
   } catch {
-    return { px: null, chg: null, prev: null };
+    return { px: null, chg: null, prev: null, vol: null };
   }
 }
 
@@ -76,6 +78,7 @@ export async function collectUsTick(): Promise<UsTickRow> {
     us10y_px: tnx.px, us10y_chg_pp: us10yPp,
     dxy_chg: dxy.chg, wti_chg: wti.chg,
     vix_px: vix.px, vix_chg: vix.chg,
+    smh_vol: smh.vol,
     dxy_px: dxy.px, wti_px: wti.px, nq_px: nq.px,
   };
 }
@@ -90,8 +93,17 @@ export async function appendUsTick(row: UsTickRow): Promise<boolean> {
   if (Date.now() - lastTs < MIN_TICK_GAP_MS) return false;
   const dbRow: Record<string, unknown> = { ...row };
   for (const k of DISPLAY_ONLY_FIELDS) delete dbRow[k];
-  const { error } = await admin.from("us_signal_ticks").insert(dbRow);
-  return !error;
+  // 마이그레이션 미적용 폴백 — 없는 컬럼만 정확히 빼고 재시도 (한국 store.ts와 동일 원칙:
+  // 2026-07-13 사고 교훈 — 통째로 버리면 다른 컬럼 데이터까지 소실된다)
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { error } = await admin.from("us_signal_ticks").insert(dbRow);
+    if (!error) return true;
+    const m = error.message.match(/'([a-z0-9_]+)' column/i) ?? error.message.match(/column "([a-z0-9_]+)"/i);
+    const col = m?.[1];
+    if (!col || !(col in dbRow) || col === "date" || col === "ts") return false;
+    delete dbRow[col];
+  }
+  return false;
 }
 
 export async function loadUsTicks(date: string): Promise<UsTickRow[]> {

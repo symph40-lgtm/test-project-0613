@@ -109,6 +109,25 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
   const inSession = nowVirtualMin >= S.openMin && rows.length > 0;
   const trend = inSession ? computeTrend(ticks, gap, { dc: { ...U.dc } }) : null;
 
+  // TV — 거래량 확인 (사용자 지정 2026-07-13): 미국판 수급 대체 신호. 추세 방향 5분봉의
+  // 거래량이 반대 방향 봉의 confirmRatio배 이상이면 '거래량이 추세를 동반'으로 확인 (가중 2).
+  // 점수·정규화에 반영 후 등급을 computeTrend와 같은 규칙으로 재산출 (보수 게이트 전에 수행).
+  if (trend !== null) {
+    const tv = computeVolumeConfirm(rows);
+    trend.signals.push({ code: "TV", label: "거래량 확인(SMH)", available: tv.available, pass: tv.pass, dir: tv.dir, weight: U.volumeConfirm.weight, detail: tv.detail });
+    if (tv.available) {
+      trend.maxAvailable += U.volumeConfirm.weight;
+      if (tv.pass) trend.score += U.volumeConfirm.weight;
+      trend.normalized = trend.maxAvailable > 0 ? trend.score / trend.maxAvailable : 0;
+      if (trend.grade !== "횡보일선언") {
+        const middayAligned = trend.midday !== null && trend.midday.active && (trend.dir === null || trend.midday.dir === trend.dir);
+        const dcConfirm = (trend.dc1 !== null && trend.dc2 !== null && trend.dc1 >= U.dc.dc1Theta && trend.dc2 >= U.dc.dc2Min) || middayAligned;
+        trend.grade = trend.normalized >= SIGNAL_CONFIG.trend.confirmRatio && dcConfirm ? "추세일"
+          : trend.normalized >= SIGNAL_CONFIG.trend.weakRatio || middayAligned ? "약한추세" : "비추세";
+      }
+    }
+  }
+
   // 보수 게이트 (한국과 동일 원칙 — 매크로 정렬 + DC2, US 실측 기준)
   if (trend !== null && trend.grade === "추세일") {
     const aligned = bias.strength >= U.strongDay.minBiasStrength &&
@@ -285,6 +304,47 @@ export function buildUsMoveAlerts(rows: UsTickRow[]): ChannelAlert[] {
     }
   }
   return alerts;
+}
+
+// TV — SMH 누적 거래량 → 5분봉 거래량. 당일 방향(시가→현재) 봉의 거래량 합 vs 반대 방향 봉.
+function computeVolumeConfirm(rows: UsTickRow[]): { available: boolean; pass: boolean; dir: "UP" | "DOWN" | null; detail: string } {
+  const V = U.volumeConfirm;
+  const pts = rows.filter((r) => r.smh_vol != null && isFinite(r.smh_vol) && r.smh_px !== null && r.minute_of_day >= 540);
+  if (pts.length < 8) return { available: false, pass: false, dir: null, detail: "거래량 데이터 대기 (마이그레이션 023 필요 시 미산출)" };
+
+  // 5분 버킷: 누적 거래량(마지막 값)·가격 시가/종가
+  const byBucket = new Map<number, { vol: number; open: number; close: number }>();
+  for (const p of pts) {
+    const bkt = Math.floor(p.minute_of_day / 5);
+    const cur = byBucket.get(bkt);
+    if (!cur) byBucket.set(bkt, { vol: p.smh_vol as number, open: p.smh_px as number, close: p.smh_px as number });
+    else { cur.vol = p.smh_vol as number; cur.close = p.smh_px as number; }
+  }
+  const buckets = [...byBucket.entries()].sort(([a], [b2]) => a - b2);
+  const bars: { vol: number; sign: number }[] = [];
+  for (let i = 1; i < buckets.length; i++) {
+    const [bkt, cur] = buckets[i];
+    const [pb, prev] = buckets[i - 1];
+    if (bkt - pb !== 1) continue; // 틱 공백 구간 제외
+    const vol = cur.vol - prev.vol;
+    if (vol <= 0) continue;
+    bars.push({ vol, sign: Math.sign(cur.close - cur.open) });
+  }
+  if (bars.length < V.minBars) return { available: false, pass: false, dir: null, detail: `완성 5분봉 ${bars.length}개 — ${V.minBars}개부터 판정` };
+
+  const first = pts[0].smh_px as number;
+  const lastPx = pts[pts.length - 1].smh_px as number;
+  const daySign = Math.sign(lastPx - first);
+  if (daySign === 0) return { available: true, pass: false, dir: null, detail: "방향 미형성" };
+  const withVol = bars.filter((x) => x.sign === daySign).reduce((s, x) => s + x.vol, 0);
+  const against = bars.filter((x) => x.sign === -daySign).reduce((s, x) => s + x.vol, 0);
+  const ratio = against > 0 ? withVol / against : withVol > 0 ? 9.99 : 0;
+  const pass = ratio >= V.confirmRatio;
+  const dir: "UP" | "DOWN" = daySign > 0 ? "UP" : "DOWN";
+  return {
+    available: true, pass, dir: pass ? dir : null,
+    detail: `추세방향 봉 거래량 ${ratio.toFixed(2)}배 (기준 ${V.confirmRatio}배 · ${dir === "UP" ? "상승" : "하락"}봉 ${Math.round(withVol / 1e3)}k vs 반대 ${Math.round(against / 1e3)}k)`,
+  };
 }
 
 function b(v: boolean): string { return v ? "충족" : "-"; }
