@@ -14,6 +14,13 @@ import type { IntradayTick, Judgment } from "./types";
 
 type SignalAlert = ChannelAlert;
 
+// ISO → KST HH:MM (문자에 발송 기준 시각 표기 — 사용자 지정 2026-07-13: 같은 값의 문자가
+// 종목만 다르게 연달아 오면 시각 없인 오류처럼 보임. 실제로는 2분 간격 별개 시점이었음)
+function kstHhmm(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 3600e3);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
 // 판정 → 알림 여부·문구 결정 (없으면 null)
 export function buildSignalAlert(j: Judgment): SignalAlert | null {
   if (j.phase !== "판정") return null; // 진입 시간대(L4)에만 문자 — 그 외는 화면으로 충분
@@ -23,6 +30,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     ? `T ${t.score.toFixed(1)}/${t.maxAvailable}·DC1 ${t.dc1 !== null ? (t.dc1 * 100).toFixed(0) + "%" : "-"}`
     : "";
   const stop = `스탑 -${j.risk.stopFixedPct}%${j.risk.stopAtrPct !== null ? `(ATR -${j.risk.stopAtrPct.toFixed(1)}%)` : ""}`;
+  const at = kstHhmm(j.ts); // 판정 기준 시각 (사용자 지정 2026-07-13 — 전 문자 시각 표기)
 
   // 약한 추세(장중 재형성 포함)는 확정과 구분 — 비중 1/3·타이트 트레일링 안내
   const weak = t?.grade === "약한추세";
@@ -38,8 +46,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       severity: "high",
       smsSubject: "*판정 확정 레버리지",
       text: weak
-        ? `[스탁가드 신호] 상방 약한 추세${late} (${stat})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
-        : `[스탁가드 신호] 추세일 상방 확정${late} (${stat})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
+        ? `[스탁가드 신호] 상방 약한 추세${late} (${stat}·${at})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
+        : `[스탁가드 신호] 추세일 상방 확정${late} (${stat}·${at})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
     };
   }
   if (j.dayType === "추세일_하방" && j.setups.short.blocked.length === 0 && j.setups.short.requiredOk) {
@@ -48,8 +56,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       severity: "high",
       smsSubject: "*판정 확정 인버스",
       text: weak
-        ? `[스탁가드 신호] 하방 약한 추세${late} (${stat})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
-        : `[스탁가드 신호] 추세일 하방 확정${late} (${stat})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산`,
+        ? `[스탁가드 신호] 하방 약한 추세${late} (${stat}·${at})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
+        : `[스탁가드 신호] 추세일 하방 확정${late} (${stat}·${at})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산`,
     };
   }
   if (j.dayType === "V반등후보" && (j.setups.long.verdict === "진입후보" || j.setups.long.verdict === "강한신호")) {
@@ -57,7 +65,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       key: "vrebound_long",
       severity: "high",
       smsSubject: "*판정 확정 V반등",
-      text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
+      text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat}·${at})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
     };
   }
   // V반등 조기 반전 — 지속 확인 전 1/3 비중 선진입 (2단계 진입의 1차. 늦으면 수익이 줄어드는 문제 대응)
@@ -66,7 +74,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       key: "vrebound_early",
       severity: "high",
       smsSubject: "*판정 확정 V반등(조기)",
-      text: `[스탁가드 신호] V반등 조기 반전 감지\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)`,
+      text: `[스탁가드 신호] V반등 조기 반전 감지 [${at}]\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)`,
     };
   }
   if (j.dayType === "횡보일") {
@@ -74,7 +82,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       key: "range_day",
       severity: "low",
       smsSubject: "*판정 확정 횡보일",
-      text: `[스탁가드 신호] 횡보일 선언 — ${j.trend?.swing?.detail ?? "산·골 연결선 방향 없음"}\n당일 추세 매매 금지 — '안 하는 것'이 절반입니다. 구조가 풀리면 재평가.`,
+      text: `[스탁가드 신호] 횡보일 선언 [${at}] — ${j.trend?.swing?.detail ?? "산·골 연결선 방향 없음"}\n당일 추세 매매 금지 — '안 하는 것'이 절반입니다. 구조가 풀리면 재평가.`,
     };
   }
   return null;
@@ -155,8 +163,8 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
       alerts.push({
         key: `swing_${t.sym}_d${level}e${epi}`,
         severity: downSwing >= 3 * step ? "high" : "medium",
-        // "[스탁가드] 코스피200선물 반락 고점+1.5%→-1.1% (-2.6%p) 위험선·트레일링 점검"
-        text: `[스탁가드] ${t.name} 반락 고점${hi > 0 ? "+" : ""}${hi.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (-${downSwing.toFixed(1)}%p) 위험선·트레일링 점검`,
+        // "[스탁가드] 코스피200선물 반락 고점+1.5%→-1.1% (-2.6%p, 10:50) 위험선·트레일링 점검"
+        text: `[스탁가드] ${t.name} 반락 고점${hi > 0 ? "+" : ""}${hi.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (-${downSwing.toFixed(1)}%p, ${hhmm}) 위험선·트레일링 점검`,
       });
     }
 
@@ -168,8 +176,8 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
       alerts.push({
         key: `swing_${t.sym}_u${level}e${epi}`,
         severity: upSwing >= 3 * step ? "high" : "medium",
-        // "[스탁가드] 코스피200선물 반등 저점-2.0%→-1.0% (+1.0%p) 추세 전환 확인"
-        text: `[스탁가드] ${t.name} 반등 저점${lo.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (+${upSwing.toFixed(1)}%p) 추세 전환 확인`,
+        // "[스탁가드] 코스피200선물 반등 저점-2.0%→-1.0% (+1.0%p, 10:50) 추세 전환 확인"
+        text: `[스탁가드] ${t.name} 반등 저점${lo.toFixed(1)}%→${cur > 0 ? "+" : ""}${cur.toFixed(1)}% (+${upSwing.toFixed(1)}%p, ${hhmm}) 추세 전환 확인`,
       });
     }
   }
@@ -193,6 +201,7 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
   ];
 
   const fmtBil = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString("ko-KR")}억`;
+  const flowHhmm = `${String(Math.floor(last.minuteOfDay / 60)).padStart(2, "0")}:${String(last.minuteOfDay % 60).padStart(2, "0")}`;
   const alerts: SignalAlert[] = [];
   for (const t of targets) {
     const vals = ticks
@@ -218,8 +227,8 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
       alerts.push({
         key: `flow_${t.sym}_d${level}e${epi}`,
         severity: down >= 2 * t.step ? "high" : "medium",
-        // "[스탁가드] 외인 코스피 +1,890억 (고점+3,214억比 -1,324억) 매수세 이탈—매도기회 관찰"
-        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (고점${fmtBil(hi)}比 -${Math.round(down).toLocaleString("ko-KR")}억) ${cur >= 0 ? "매수세 이탈" : "순매도 확대"}—매도기회 관찰`,
+        // "[스탁가드] 외인 코스피 +1,890억 (고점+3,214억比 -1,324억, 10:50) 매수세 이탈—매도기회 관찰"
+        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (고점${fmtBil(hi)}比 -${Math.round(down).toLocaleString("ko-KR")}억, ${flowHhmm}) ${cur >= 0 ? "매수세 이탈" : "순매도 확대"}—매도기회 관찰`,
       });
     }
 
@@ -231,7 +240,7 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
       alerts.push({
         key: `flow_${t.sym}_u${level}e${epi}`,
         severity: up >= 2 * t.step ? "high" : "medium",
-        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (저점${fmtBil(lo)}比 +${Math.round(up).toLocaleString("ko-KR")}억) ${cur <= 0 ? "순매도 감속" : "매수세 확대"}—매수기회 관찰`,
+        text: `[스탁가드] ${t.name} ${fmtBil(cur)} (저점${fmtBil(lo)}比 +${Math.round(up).toLocaleString("ko-KR")}억, ${flowHhmm}) ${cur <= 0 ? "순매도 감속" : "매수세 확대"}—매수기회 관찰`,
       });
     }
   }
@@ -329,18 +338,19 @@ export function buildReversalAlert(j: Judgment): SignalAlert | null {
   if (j.phase === "장전" || j.phase === "마감") return null; // 장중(09:00~15:45)만
   if (hit.dir === "DOWN" && j.crashContext.active) return null; // XS1 — 폭락 후 인버스 금지
   const pre = hit.preMovePct !== null ? ` (직전 ${hit.preMovePct > 0 ? "+" : ""}${hit.preMovePct.toFixed(1)}%p)` : "";
+  const at = ` [${kstHhmm(j.ts)}]`;
   return hit.dir === "UP"
     ? {
         key: "rev_up",
         severity: "high",
         smsSubject: "모멘텀 레버리지",
-        text: `[스탁가드 신호] 하닉 상승 모멘텀 — ${hit.cond}${pre} 레버리지 검토`,
+        text: `[스탁가드 신호] 하닉 상승 모멘텀 — ${hit.cond}${pre} 레버리지 검토${at}`,
       }
     : {
         key: "rev_down",
         severity: "high",
         smsSubject: "모멘텀 인버스",
-        text: `[스탁가드 신호] 하닉 하락 모멘텀 — ${hit.cond}${pre} 인버스 검토`,
+        text: `[스탁가드 신호] 하닉 하락 모멘텀 — ${hit.cond}${pre} 인버스 검토${at}`,
       };
 }
 
