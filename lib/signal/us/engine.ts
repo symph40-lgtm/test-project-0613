@@ -109,7 +109,7 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
 
   const bias = computeUsBias(last);
   const inSession = nowVirtualMin >= S.openMin && rows.length > 0;
-  const trend = inSession ? computeTrend(ticks, gap, { dc: { ...U.dc }, swing: { ...U.swing } }) : null;
+  const trend = inSession ? computeTrend(ticks, gap, { dc: { ...U.dc }, swing: { ...U.swing }, scale: { ...U.engineScale } }) : null;
 
   // TV — 거래량 확인 (사용자 지정 2026-07-13): 미국판 수급 대체 신호. 추세 방향 5분봉의
   // 거래량이 반대 방향 봉의 confirmRatio배 이상이면 '거래량이 추세를 동반'으로 확인 (가중 2).

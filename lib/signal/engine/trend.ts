@@ -154,9 +154,17 @@ export function computeSwingStructure(pts: Pt[], cfg?: { minAmpPct: number; tolP
 export function computeTrend(
   ticks: IntradayTick[],
   gapPct: number | null,
-  opts?: { dc?: { barMin: number; dc1Theta: number; dc2Min: number }; swing?: { minAmpPct: number; tolPct: number } },
+  opts?: {
+    dc?: { barMin: number; dc1Theta: number; dc2Min: number };
+    swing?: { minAmpPct: number; tolPct: number };
+    // 가격 눈금 오버라이드 (2026-07-13 사용자 지정: "FKS200 기준 값들을 SMH에 맞게") —
+    // 방향 형성 대역·무갭 컷·장중 재형성 기준은 %값이라 기초지수 변동성에 비례해야 한다.
+    // 미지정이면 한국 K200 기본값 — 기존 동작 불변.
+    scale?: { dayDirMinPct: number; noGapPct: number; middayMinMovePct: number; middayDirMinPct: number };
+  },
 ): TrendResult {
   const DCC = opts?.dc ?? SIGNAL_CONFIG.dc;
+  const SC = opts?.scale ?? { dayDirMinPct: 0.1, noGapPct: 0.15, middayMinMovePct: SIGNAL_CONFIG.trend.midday.minMovePct, middayDirMinPct: 0.05 };
   const { pts, source } = extractSeries(ticks);
   const signals: TSignal[] = [];
   const sig = (code: string, label: string, available: boolean, pass: boolean, dir: "UP" | "DOWN" | null, detail: string) =>
@@ -257,9 +265,9 @@ export function computeTrend(
   // T3 — 되돌림 깊이 (진행 방향 기준 극값 대비 현재 되돌림 < 40%)
   const dayHigh = Math.max(...pts.map((p) => p.px));
   const dayLow = Math.min(...pts.map((p) => p.px));
-  // 시가 대비 ±0.1% 이내는 방향 미형성으로 취급
+  // 시가 대비 ±dayDirMinPct 이내는 방향 미형성으로 취급 (K200 0.1% / SMH 0.2% — 눈금 주입)
   const dayDir: "UP" | "DOWN" | null =
-    last > dayOpen * 1.001 ? "UP" : last < dayOpen * 0.999 ? "DOWN" : null;
+    last > dayOpen * (1 + SC.dayDirMinPct / 100) ? "UP" : last < dayOpen * (1 - SC.dayDirMinPct / 100) ? "DOWN" : null;
   if (dayDir === null || nowMin < S.observeEndMin) {
     sig("T3", "되돌림 깊이", false, false, null, "방향 미형성");
   } else {
@@ -321,8 +329,8 @@ export function computeTrend(
   const f30Last = first30[first30.length - 1]?.px ?? null;
   if (gapPct === null || f30Last === null || first30.length < 3) {
     sig("T7", "갭-초반 방향 일치", false, false, null, "갭 또는 초반 데이터 없음");
-  } else if (Math.abs(gapPct) < 0.15) {
-    sig("T7", "갭-초반 방향 일치", true, false, null, `무갭(${gapPct.toFixed(2)}%) — 해당 없음`);
+  } else if (Math.abs(gapPct) < SC.noGapPct) {
+    sig("T7", "갭-초반 방향 일치", true, false, null, `무갭(${gapPct.toFixed(2)}% < ${SC.noGapPct}) — 해당 없음`);
   } else {
     const earlyDir = f30Last > dayOpen ? 1 : f30Last < dayOpen ? -1 : 0;
     const match = earlyDir !== 0 && Math.sign(gapPct) === earlyDir;
@@ -353,7 +361,7 @@ export function computeTrend(
     if (winPts.length >= 10 && winBarsDc.length >= MD.minBars) {
       const first = winPts[0].px, lastW = winPts[winPts.length - 1].px;
       const movePct = ((lastW - first) / first) * 100;
-      const winDir: "UP" | "DOWN" | null = movePct > 0.05 ? "UP" : movePct < -0.05 ? "DOWN" : null;
+      const winDir: "UP" | "DOWN" | null = movePct > SC.middayDirMinPct ? "UP" : movePct < -SC.middayDirMinPct ? "DOWN" : null;
       let winDc1: number | null = null;
       if (winDir !== null) {
         const sgn = winDir === "UP" ? 1 : -1;
@@ -362,7 +370,7 @@ export function computeTrend(
       const active =
         winDir !== null &&
         winDc1 !== null && winDc1 >= MD.dc1Theta &&
-        Math.abs(movePct) >= MD.minMovePct;
+        Math.abs(movePct) >= SC.middayMinMovePct;
       midday = { active, dir: winDir, dc1: winDc1, movePct, flips: null };
     }
   }

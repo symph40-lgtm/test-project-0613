@@ -60,6 +60,15 @@ export const US_SIGNAL_CONFIG = {
   gapNoGapPct: 0.4,        // 무갭 컷 (한국 0.15의 변동성 스케일)
   gapBigPct: 4,            // X1 큰 갭 추격 금지 (|갭| 90% 분위 4.86 인근)
 
+  // 공유 엔진 가격 눈금 오버라이드 (사용자 지정 2026-07-13 5차: "FKS200 기준 값들을 전부 SMH로").
+  // computeTrend 내부의 %기준 상수들 — SMH 일간 |등락| 중앙 1.35% ≈ K200(0.7%)의 2배로 비례 보정.
+  engineScale: {
+    dayDirMinPct: 0.2,       // 당일 방향 형성 대역 (K200 0.1) — T3·T5·DC 방향 판정의 기준
+    noGapPct: 0.4,           // T7 무갭 컷 (K200 0.15) — gapNoGapPct와 동일값
+    middayMinMovePct: 2.0,   // 장중 재형성 최소 순이동 (K200 1.0)
+    middayDirMinPct: 0.1,    // 재형성 창 방향 대역 (K200 0.05)
+  },
+
   // 폭락·과열 (SMH 일봉)
   crashCumPct: -9,         // XS1 — 직전 1~3일 누적 (일간 99% ~8% + 여유)
   overheatCumPct: 12,      // 5일 누적 과열 (일간 중앙 1.35 × 5 × 1.7)
