@@ -161,8 +161,9 @@ export default async function IntradaySummaryPage() {
   // AI Q&A 스탠스 바이어스(reflect=true 최신) — ±2 한정 반영
   const aiStance = await fetchAiStanceBias();
 
-  void marketDrop; // (보유 점수는 종목별 실데이터로 산출 — 시장 급락은 composite 오버레이에 이미 반영됨)
-  // 보유 종목별 매매 판단 — 애널리스트 6대 기준 실데이터 채점(종목마다 차등) + AI 의견 한정 반영
+  // 보유 종목별 매매 판단 — 애널리스트 6대 기준 실데이터 채점(종목마다 차등) + AI 의견 한정 반영.
+  // marketDrop(당일 시장 최악 %)을 종목 점수에 직접 전달 — 급락일 감점·스탠스 상한 (2026-07-13:
+  // 하닉 -16% 폭락일에 '중립(매수우위)'가 나온 오판 수정. composite 오버레이만으론 -8점이 상한이었음)
   const recs = await Promise.all(
     (positions ?? []).map((p) => {
       const q = quoteMap.get(p.ticker);
@@ -181,6 +182,7 @@ export default async function IntradaySummaryPage() {
         isLeverage: p.is_leverage,
         sector: p.sector,
         changePercent: q?.changePercent ?? null,
+        marketDropPct: marketDrop,
         composite,
         soxChange: market.sox.changePercent,
         macro: {

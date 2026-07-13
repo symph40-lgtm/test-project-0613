@@ -153,6 +153,8 @@ export type ScoreInput = {
   isLeverage: boolean;
   sector: string | null;
   changePercent?: number | null;
+  // 당일 시장 최악 신호 (코스피·코스피선물·나스닥선물·보유평균 중 최저 %) — 급락일 감지·스탠스 상한
+  marketDropPct?: number | null;
   composite: number;
   soxChange: number | null;
   macro?: {
@@ -194,6 +196,16 @@ export async function scoreHolding(input: ScoreInput): Promise<HoldingScore> {
     score += pts;
   };
 
+  // ── 급락일 감지 (2026-07-13 사용자 피드백: 하닉 -16% 폭락일에 '중립(매수우위)' 오판 수정)
+  // 원인: 당일 감점 상한 -6 + 장세 -8 = -14뿐이라 펀더멘털 가점(+50~70)이 항상 압도.
+  // 목표주가·컨센서스는 급락을 아직 반영 못 한 낡은 앵커라 급락일엔 절반만 반영하고,
+  // 최종 스탠스에 상한(캡)을 둔다 — 펀더멘털이 아무리 좋아도 급락일에 '비중 확대'는 못 나온다.
+  const dayChg = input.changePercent ?? null;
+  const mDrop = input.marketDropPct ?? null;
+  const crisis = (dayChg !== null && dayChg <= -5) || (mDrop !== null && mDrop <= -4);
+  const severeCrisis = (dayChg !== null && dayChg <= -8) || (mDrop !== null && mDrop <= -6);
+  const staleAnchor = (pts: number) => (crisis && pts > 0 ? Math.round(pts / 2) : pts);
+
   // ① 실적 — EPS 추정치 변화(1순위, 가장 강한 신호)
   if (fund?.epsRevision != null) {
     const e = fund.epsRevision;
@@ -234,14 +246,17 @@ export async function scoreHolding(input: ScoreInput): Promise<HoldingScore> {
     const d = fund.debtToEquity; // Yahoo는 % 단위(예: 50 = 0.5배)
     add("재무(부채비율)", d < 50 ? 4 : d < 120 ? 0 : d < 200 ? -3 : -6, `D/E ${d.toFixed(0)}%`);
   }
-  // ⑥ 컨센서스(한국은 변별력 낮아 가중 작게)
+  // ⑥ 컨센서스(한국은 변별력 낮아 가중 작게) — 급락일엔 낡은 앵커라 가점 절반
   if (fund?.recMean != null) {
     const r = fund.recMean;
-    add("컨센서스", r <= 1.5 ? 8 : r <= 2.0 ? 4 : r <= 2.7 ? 1 : r <= 3.3 ? -4 : -10, `등급 ${r.toFixed(1)}/5`);
+    const pts = staleAnchor(r <= 1.5 ? 8 : r <= 2.0 ? 4 : r <= 2.7 ? 1 : r <= 3.3 ? -4 : -10);
+    add("컨센서스", pts, `등급 ${r.toFixed(1)}/5${crisis && pts > 0 ? " (급락일 ½)" : ""}`);
   }
   if (fund?.vsTargetPct != null && Math.abs(fund.vsTargetPct) < 55) {
     const v = fund.vsTargetPct;
-    add("목표주가 여력", v <= -20 ? 10 : v <= -8 ? 6 : v <= -3 ? 3 : v >= 15 ? -8 : v >= 5 ? -3 : 0, v <= 0 ? `목표가 ${(-v).toFixed(0)}% 하단` : `목표가 ${v.toFixed(0)}% 상회`);
+    // 급락일의 '목표가 하단' 가점은 역설(떨어질수록 가점↑) — 절반만 반영
+    const pts = staleAnchor(v <= -20 ? 10 : v <= -8 ? 6 : v <= -3 ? 3 : v >= 15 ? -8 : v >= 5 ? -3 : 0);
+    add("목표주가 여력", pts, `${v <= 0 ? `목표가 ${(-v).toFixed(0)}% 하단` : `목표가 ${v.toFixed(0)}% 상회`}${crisis && pts > 0 ? " (급락일 ½)" : ""}`);
   }
   // ⑦ 기술적 추세
   if (tech?.aligned) add("추세(이평)", tech.aligned === "정배열" ? 9 : tech.aligned === "역배열" ? -9 : 0, tech.aligned);
@@ -280,14 +295,17 @@ export async function scoreHolding(input: ScoreInput): Promise<HoldingScore> {
     }
   }
 
-  // ⑩ 장세(종합 리스크)
+  // ⑩ 장세(종합 리스크) — 상단 세분화 (2026-07-13: 리스크 100에 -8은 과소)
   const c = input.composite;
-  add("장세(종합리스크)", c <= 12 ? 6 : c <= 22 ? 3 : c <= 35 ? 0 : c <= 50 ? -4 : -8, `리스크 ${c}/100`);
-  // 당일 급등락
-  const chg = input.changePercent ?? null;
-  if (chg != null) {
-    const pts = chg <= -5 ? -6 : chg <= -2 ? -3 : chg >= 9 ? -3 : 0;
-    if (pts !== 0) add("당일 등락", pts, `${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%`);
+  add("장세(종합리스크)", c <= 12 ? 6 : c <= 22 ? 3 : c <= 35 ? 0 : c <= 50 ? -4 : c <= 65 ? -8 : c <= 80 ? -11 : -15, `리스크 ${c}/100`);
+  // 당일 급등락 — 사다리 확대 (2026-07-13: 기존 상한 -6은 -16% 폭락도 -6점이라 무력)
+  if (dayChg != null) {
+    const pts = dayChg <= -12 ? -24 : dayChg <= -8 ? -18 : dayChg <= -5 ? -12 : dayChg <= -3 ? -7 : dayChg <= -1.5 ? -3 : dayChg >= 9 ? -3 : 0;
+    if (pts !== 0) add("당일 등락", pts, `${dayChg >= 0 ? "+" : ""}${dayChg.toFixed(1)}%`);
+  }
+  // 당일 시장 급락 (코스피·선물·나스닥선물·보유평균 중 최악) — 종목이 안 빠져도 시장이 무너지면 감점
+  if (mDrop != null && mDrop <= -1.5) {
+    add("시장 급락", mDrop <= -6 ? -12 : mDrop <= -4 ? -8 : mDrop <= -2.5 ? -4 : -2, `시장 최악 ${mDrop.toFixed(1)}%`);
   }
   // 레버리지 변동성
   if (input.isLeverage) add("레버리지", score < 0 ? -8 : -4, "변동성↑");
@@ -297,10 +315,21 @@ export async function scoreHolding(input: ScoreInput): Promise<HoldingScore> {
     if (b !== 0) add("AI 의견", b * 4, input.aiReason ? String(input.aiReason).slice(0, 30) : `${b > 0 ? "+" : ""}${b}`);
   }
 
-  const stance = scoreToStance(score);
+  // 급락일 스탠스 상한 (2026-07-13) — 점수와 무관한 최종 안전장치.
+  // 종목 -5% 또는 시장 -4% 급락일: 최대 5(중립·매도우위) / 종목 -8% 또는 시장 -6%: 최대 4(비중축소).
+  let stance = scoreToStance(score);
+  let capNote = "";
+  if (severeCrisis && stance > 4) {
+    stance = 4;
+    capNote = `급락일 상한(종목 ${dayChg?.toFixed(1) ?? "?"}%·시장 ${mDrop?.toFixed(1) ?? "?"}%) — 비중 축소 이하로 제한`;
+  } else if (crisis && stance > 5) {
+    stance = 5;
+    capNote = `급락일 상한(종목 ${dayChg?.toFixed(1) ?? "?"}%·시장 ${mDrop?.toFixed(1) ?? "?"}%) — 중립(매도 우위) 이하로 제한`;
+  }
+  if (capNote) factors.push({ label: "급락일 상한", pts: 0, signal: "sell", detail: capNote });
   const meta = STANCE7_META[stance];
   const top = [...factors].filter((f) => f.pts !== 0).sort((a, b) => Math.abs(b.pts) - Math.abs(a.pts)).slice(0, 4);
-  const reason = top.map((f) => `${f.label} ${f.detail}`).join(" · ") || "데이터 부족";
+  const reason = (capNote ? `${capNote} · ` : "") + (top.map((f) => `${f.label} ${f.detail}`).join(" · ") || "데이터 부족");
 
   return {
     ticker: input.ticker, stance, tone: meta.tone, label: meta.label,

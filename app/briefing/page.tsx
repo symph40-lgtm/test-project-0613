@@ -55,6 +55,7 @@ export default async function BriefingPage() {
             isLeverage: p.is_leverage,
             sector: p.sector,
             changePercent: q?.changePercent ?? null,
+            marketDropPct: md?.kospi?.changePercent ?? null, // 급락일 감점·스탠스 상한용 (코스피 당일)
             composite: snapshot.risk_score!,
             soxChange: sox,
             macro: md
