@@ -45,26 +45,31 @@ export function computeBias(ctx: PremarketContext): BiasResult {
   const mx = ctx.macroExtra;
 
   // C6 미 금리(10Y) — C4(2Y 정책 민감)와 별개의 장기 할인율·부채 부담 축.
-  // 전일 변화(±0.03%p)만이 아니라 절대 레벨 구간을 함께 판정 (사용자 지정 2026-07-13:
-  // "4.57%면 중립이 아니라 중립에서 위험으로 진행 중"). 경계 4.5%↑에선 상승 자체가 하방,
-  // 위험 4.8%↑에선 뚜렷한 완화가 아닌 한 하방.
+  // 절대 레벨 단계 사다리 (사용자 지정 2026-07-13 2차: "단계별로 위험 수위를 높여줘"):
+  // 안정(<4.55) → 경계(4.55~) → 주의(4.57~) → 위험(4.59~) → 최고위험(4.62~, 가중 2).
+  // 단계가 오를수록 하방 판정 조건이 느슨해진다 — 경계: 상승 중일 때만 / 주의: 보합 포함 /
+  // 위험: 뚜렷한 완화(-0.03%p↓) 아니면 / 최고위험: 완화 중이어도 하방(레벨 자체가 위험).
   if (!mx || mx.us10y.changePp === null) add("C6", "미 금리(10Y)", "미상", "데이터 없음");
   else {
     const pp = mx.us10y.changePp;
     const lv = mx.us10y.level;
+    const bands = SIGNAL_CONFIG.us10yBands;
+    let stIdx = 0; // 0=안정, 1..bands.length
+    if (lv !== null) bands.forEach((b, i) => { if (lv >= b.from) stIdx = i + 1; });
+    const band = stIdx > 0 ? bands[stIdx - 1] : null;
+    const rangeTxt = band === null ? `안정 <${bands[0].from}%`
+      : stIdx < bands.length ? `${band.label} ${band.from}~${bands[stIdx].from}%` : `${band.label} ${band.from}%↑`;
     const ppTxt = `전일 ${pp > 0 ? "+" : ""}${pp.toFixed(3)}%p`;
     const lvTxt = lv !== null ? `${lv.toFixed(2)}%` : "?";
-    if (lv !== null && lv >= SIGNAL_CONFIG.us10yDanger) {
-      const easing = pp < -0.03;
-      add("C6", "미 금리(10Y)", easing ? "중립" : "하방",
-        `위험 구간(≥${SIGNAL_CONFIG.us10yDanger}%) ${lvTxt} · ${ppTxt}${easing ? " — 완화 중(관찰)" : ""}`);
-    } else if (lv !== null && lv >= SIGNAL_CONFIG.us10yWarn) {
-      const dir = pp > 0 ? "하방" : pp < -0.03 ? "상방" : "중립";
-      add("C6", "미 금리(10Y)", dir,
-        `경계 구간(${SIGNAL_CONFIG.us10yWarn}~${SIGNAL_CONFIG.us10yDanger}%) ${lvTxt} · ${ppTxt}${pp > 0 ? " — 위험 방향 진행" : ""}`);
-    } else {
-      add("C6", "미 금리(10Y)", pp > 0.03 ? "하방" : pp < -0.03 ? "상방" : "중립", `${ppTxt} · ${lvTxt} (안정 구간 <${SIGNAL_CONFIG.us10yWarn}%)`);
-    }
+    const easing = pp < -0.03;
+    let dir: "상방" | "하방" | "중립";
+    let note = "";
+    if (stIdx === 0) dir = pp > 0.03 ? "하방" : easing ? "상방" : "중립";
+    else if (stIdx === 1) { dir = pp > 0 ? "하방" : easing ? "상방" : "중립"; if (pp > 0) note = " — 위험 방향 진행"; }
+    else if (stIdx === 2) { dir = pp >= -0.01 ? "하방" : easing ? "상방" : "중립"; if (dir === "하방") note = " — 위험 방향 진행"; }
+    else if (stIdx === 3) { dir = easing ? "중립" : "하방"; note = easing ? " — 완화 중(관찰)" : " — 고위험 유지"; }
+    else { dir = "하방"; note = easing ? " — 완화 중이나 레벨 자체가 최고위험 (가중 2)" : " — 최고위험 (가중 2)"; }
+    add("C6", "미 금리(10Y)", dir, `${rangeTxt} 구간 ${lvTxt} · ${ppTxt}${note}`, stIdx >= bands.length ? 2 : 1);
   }
 
   // C7 WTI 유가 — 급등(+2%↑)=물가·금리 상방 압력이라 주식 하방, 급락(-2%↓)=물가 부담 완화 상방.

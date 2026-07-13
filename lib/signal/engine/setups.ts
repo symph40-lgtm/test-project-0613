@@ -158,15 +158,16 @@ export function computeSetups(inp: Inputs): SetupResult {
     : ctx.usNews.impact !== null ? `전일 미국 뉴스 ${ctx.usNews.impact} — 뚜렷한 악재 없음 (${qualSrc})`
     : "AI 분석 대기");
 
-  // S7 — 금리 우려 유지: C4(2Y 레짐·5일 추세)·C6(10Y 절대 레벨)로 자동 판정 (사용자 지정 2026-07-13).
+  // S7 — 금리 우려 유지: C4(2Y 레짐·5일 추세)·C6(10Y 절대 레벨 단계)로 자동 판정 (사용자 지정 2026-07-13).
   const tenY = ctx.macroExtra?.us10y ?? null;
+  const us10yFirstBand = SIGNAL_CONFIG.us10yBands[0].from;
   const tenYWorry: boolean | null = tenY === null || tenY.level === null ? null
-    : tenY.level >= SIGNAL_CONFIG.us10yWarn && (tenY.changePp === null || tenY.changePp > -0.03);
+    : tenY.level >= us10yFirstBand && (tenY.changePp === null || tenY.changePp > -0.03);
   const twoYWorry: boolean | null = ctx.usRates.regime === null ? null
     : ctx.usRates.regime === "상승" || (ctx.macroTrend.rate5dPp !== null && ctx.macroTrend.rate5dPp > 0.08);
   const s7 = tenYWorry === null && twoYWorry === null ? null : tenYWorry === true || twoYWorry === true;
   s("S7", "매크로 컨센서스 수준 → 금리 우려 유지", "가점", s7, 1,
-    `2Y ${ctx.usRates.regime ?? "?"}${ctx.macroTrend.rate5dPp !== null ? ` · 5일 ${ctx.macroTrend.rate5dPp > 0 ? "+" : ""}${ctx.macroTrend.rate5dPp.toFixed(2)}%p` : ""} · 10Y ${tenY?.level != null ? `${tenY.level.toFixed(2)}%` : "?"}${tenYWorry === true ? ` (경계 ${SIGNAL_CONFIG.us10yWarn}%↑)` : ""}`);
+    `2Y ${ctx.usRates.regime ?? "?"}${ctx.macroTrend.rate5dPp !== null ? ` · 5일 ${ctx.macroTrend.rate5dPp > 0 ? "+" : ""}${ctx.macroTrend.rate5dPp.toFixed(2)}%p` : ""} · 10Y ${tenY?.level != null ? `${tenY.level.toFixed(2)}%` : "?"}${tenYWorry === true ? ` (경계 ${us10yFirstBand}%↑)` : ""}`);
 
   const shortBlocked: string[] = [];
   if (crashActive && gapPct !== null && gapPct > 0) {
