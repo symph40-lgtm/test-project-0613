@@ -92,10 +92,11 @@ export default async function UsSignalPage() {
             {t.signals.map((s) => (
               <div key={s.code} className="flex items-start gap-2 text-[13px]">
                 <span className="w-8 shrink-0 font-mono text-[11px] font-semibold text-guard">{s.code}</span>
+                <span className="w-8 shrink-0 rounded bg-pearl px-1 text-center font-mono text-[11px] text-ink-48">{s.weight}점</span>
                 <span className={`w-10 shrink-0 font-semibold ${!s.available ? "text-ink-48" : s.pass ? (s.dir === "DOWN" ? "text-blue-600" : "text-red-600") : "text-ink-48"}`}>
                   {!s.available ? "미산출" : s.pass ? (s.dir ?? "충족") : "미충족"}
                 </span>
-                <span className="text-ink-48">{s.label} — {s.detail}</span>
+                <span className="text-ink-48">{s.label} — {s.detail}{!s.available ? " (만점 제외)" : ""}</span>
               </div>
             ))}
           </div>

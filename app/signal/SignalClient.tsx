@@ -201,8 +201,9 @@ export default function SignalClient({ backtest, stage1 }: { backtest: BacktestR
                       <li key={s.code} className="flex items-start gap-2 text-[13px]">
                         <span className="mt-0.5 w-8 shrink-0 font-mono text-[11px] text-ink-48">{s.code}</span>
                         <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${!s.available ? "bg-ink/10" : s.pass ? (s.dir === "DOWN" ? "bg-blue-500" : "bg-red-500") : "bg-ink/25"}`} />
+                        <span className="mt-0.5 w-9 shrink-0 rounded bg-pearl px-1 text-center font-mono text-[11px] text-ink-48">{s.weight}점</span>
                         <span className={s.available ? "text-ink-80" : "text-ink-48"}>
-                          {s.label} <span className="text-ink-48">· {s.detail}{s.available ? ` (+${s.weight})` : ""}</span>
+                          {s.label} <span className="text-ink-48">· {s.detail}{!s.available ? " (만점 제외)" : ""}</span>
                         </span>
                       </li>
                     ))}
