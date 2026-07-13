@@ -23,15 +23,16 @@ export function computeBias(ctx: PremarketContext): BiasResult {
   if (fx === null) add("C3", "환율(USD/KRW)", "미상", "시세 없음");
   else {
     const dir = fx <= 0.05 ? "상방" : fx > 0.3 ? "하방" : "중립";
-    const levelNote = fxLevel !== null && fxLevel >= SIGNAL_CONFIG.usdkrwHigh ? ` · ${SIGNAL_CONFIG.usdkrwHigh}원 위(경계)` : "";
-    add("C3", "환율(USD/KRW)", dir, `전일比 ${fx > 0 ? "+" : ""}${fx.toFixed(2)}%${levelNote}`);
+    const levelNote = fxLevel !== null && fxLevel >= SIGNAL_CONFIG.usdkrwHigh ? ` (${SIGNAL_CONFIG.usdkrwHigh}원 위 경계)` : "";
+    const lvTxt = fxLevel !== null ? `${Math.round(fxLevel).toLocaleString("ko-KR")}원 · ` : "";
+    add("C3", "환율(USD/KRW)", dir, `${lvTxt}전일比 ${fx > 0 ? "+" : ""}${fx.toFixed(2)}%${levelNote}`);
   }
 
   // C4 미 금리 — 2년물 (사용자 개정: 정책 민감도가 높은 2Y가 반도체 할인율 방향을 선행)
   const { regime, changePp } = ctx.usRates;
   if (regime === null) add("C4", "미 금리(2Y)", "미상", "데이터 없음");
   else add("C4", "미 금리(2Y)", regime === "상승" ? "하방" : "상방",
-    `${regime} (전일 ${changePp !== null ? (changePp > 0 ? "+" : "") + changePp.toFixed(3) + "%p" : "?"})`);
+    `${ctx.usRates.level != null ? ctx.usRates.level.toFixed(2) + "% · " : ""}${regime} (전일 ${changePp !== null ? (changePp > 0 ? "+" : "") + changePp.toFixed(3) + "%p" : "?"})`);
 
   // C5' — 전일 SOX(미 반도체). 나스닥은 이중 계산이라 계속 제외(2026-07-07)하되, SOX는
   // 하닉·삼전의 직접 선행 지표라 재도입 + 가중 2 (사용자 개정 2026-07-09: "장후에는 SOXX를 주요
@@ -95,7 +96,7 @@ export function computeBias(ctx: PremarketContext): BiasResult {
   if (mx && mx.bondEtf.changePercent !== null) {
     const b = mx.bondEtf.changePercent;
     add("C9", "미 국채가격(TLT·참고)", b >= 0.3 ? "상방" : b <= -0.3 ? "하방" : "중립",
-      `${b > 0 ? "+" : ""}${b.toFixed(2)}% — C6(10Y)과 역방향 지표라 판정 미반영`, 0);
+      `${mx.bondEtf.level != null ? "$" + mx.bondEtf.level.toFixed(1) + " · " : ""}${b > 0 ? "+" : ""}${b.toFixed(2)}% — C6(10Y)과 역방향 지표라 판정 미반영`, 0);
   }
 
   // L10 — 경제지표 서프라이즈 (AI가 뉴스에서 직접 판정 — 컨센서스 대비 발표값의 방향)

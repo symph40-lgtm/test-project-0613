@@ -38,7 +38,13 @@ export type UsTickRow = {
   us10y_px: number | null; us10y_chg_pp: number | null;
   dxy_chg: number | null; wti_chg: number | null;
   vix_px: number | null; vix_chg: number | null;
+  // ── 아래는 표시용 라이브 레벨 (사용자 지정 2026-07-13: 축1에 실제 값 병기) — DB 미저장.
+  // appendUsTick이 INSERT 전에 제거한다 (us_signal_ticks에 컬럼 없음 — 마이그레이션 불필요)
+  dxy_px?: number | null; wti_px?: number | null; nq_px?: number | null;
 };
+
+// DB에 저장하지 않는 표시용 필드 — INSERT 전에 분리
+const DISPLAY_ONLY_FIELDS = ["dxy_px", "wti_px", "nq_px"] as const;
 
 async function quote(symbol: string): Promise<{ px: number | null; chg: number | null; prev: number | null }> {
   try {
@@ -70,6 +76,7 @@ export async function collectUsTick(): Promise<UsTickRow> {
     us10y_px: tnx.px, us10y_chg_pp: us10yPp,
     dxy_chg: dxy.chg, wti_chg: wti.chg,
     vix_px: vix.px, vix_chg: vix.chg,
+    dxy_px: dxy.px, wti_px: wti.px, nq_px: nq.px,
   };
 }
 
@@ -81,7 +88,9 @@ export async function appendUsTick(row: UsTickRow): Promise<boolean> {
     .from("us_signal_ticks").select("ts").eq("date", row.date).order("ts", { ascending: false }).limit(1);
   const lastTs = lastRows?.[0]?.ts ? new Date(lastRows[0].ts).getTime() : 0;
   if (Date.now() - lastTs < MIN_TICK_GAP_MS) return false;
-  const { error } = await admin.from("us_signal_ticks").insert(row);
+  const dbRow: Record<string, unknown> = { ...row };
+  for (const k of DISPLAY_ONLY_FIELDS) delete dbRow[k];
+  const { error } = await admin.from("us_signal_ticks").insert(dbRow);
   return !error;
 }
 

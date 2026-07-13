@@ -226,7 +226,7 @@ export async function buildPremarketContext(manual?: {
       level: market?.usdkrw?.price ?? null,
       changePercent: market?.usdkrw?.changePercent ?? null,
     },
-    usRates: { changePp: y2, regime },
+    usRates: { changePp: y2, regime, level: us2y.level },
     macroTrend: { rate5dPp: us2y.fiveDayPp, usdkrw5dPct: macroTrend.usdkrw5dPct },
     // 축1 확장 매크로 (사용자 지정 2026-07-13). 10Y는 야후 ^TNX(금리 %) — 전일 %p 변화로 환산
     macroExtra: {
@@ -239,7 +239,7 @@ export async function buildPremarketContext(manual?: {
       })(),
       wti: { level: market?.oil?.price ?? null, changePercent: market?.oil?.changePercent ?? null },
       dxy: { level: market?.dollarIndex?.price ?? null, changePercent: market?.dollarIndex?.changePercent ?? null },
-      bondEtf: { changePercent: bondEtf?.changePercent ?? null },
+      bondEtf: { changePercent: bondEtf?.changePercent ?? null, level: bondEtf?.price ?? null },
     },
     macroSurprise: manual?.macroSurprise ?? null,
     overnight: {
@@ -276,23 +276,23 @@ async function fetchMacro5dTrend(): Promise<{ usdkrw5dPct: number | null }> {
 
 // ── 미 2년물 일봉 (네이버 US2YT=RR — 실시간 금리 소스의 일간 이력)
 // C4 레짐(전일 변화)·매크로 전환 감지(5일 추세)용. 값은 %p (금리 절대 레벨의 차).
-async function fetchUs2yDaily(): Promise<{ changePp: number | null; fiveDayPp: number | null }> {
+async function fetchUs2yDaily(): Promise<{ changePp: number | null; fiveDayPp: number | null; level: number | null }> {
   try {
     const res = await fetch(
       "https://m.stock.naver.com/front-api/marketIndex/prices?category=bond&reutersCode=US2YT=RR&page=1&pageSize=10",
       { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" },
     );
-    if (!res.ok) return { changePp: null, fiveDayPp: null };
+    if (!res.ok) return { changePp: null, fiveDayPp: null, level: null };
     const j = (await res.json()) as { result?: { closePrice: string }[] };
     const closes = (j.result ?? [])
       .map((r) => parseFloat(r.closePrice))
       .filter((v) => !isNaN(v) && v > 0 && v < 20); // 최신이 먼저
-    if (closes.length < 2) return { changePp: null, fiveDayPp: null };
+    if (closes.length < 2) return { changePp: null, fiveDayPp: null, level: null };
     const changePp = Number((closes[0] - closes[1]).toFixed(4));
     const fiveDayPp = closes.length >= 6 ? Number((closes[0] - closes[5]).toFixed(4)) : null;
-    return { changePp, fiveDayPp };
+    return { changePp, fiveDayPp, level: closes[0] };
   } catch {
-    return { changePp: null, fiveDayPp: null };
+    return { changePp: null, fiveDayPp: null, level: null };
   }
 }
 

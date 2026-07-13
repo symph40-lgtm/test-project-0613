@@ -63,12 +63,12 @@ export function computeUsBias(last: UsTickRow | undefined): BiasResult {
   // U2 — 달러지수
   if (last.dxy_chg === null) add("U2", "달러지수(DXY)", "미상", "데이터 없음");
   else add("U2", "달러지수(DXY)", last.dxy_chg >= M.dxyPct ? "하방" : last.dxy_chg <= -M.dxyPct ? "상방" : "중립",
-    `${last.dxy_chg > 0 ? "+" : ""}${last.dxy_chg.toFixed(2)}% (기준 ±${M.dxyPct}%)`);
+    `${last.dxy_px != null ? last.dxy_px.toFixed(1) + " · " : ""}${last.dxy_chg > 0 ? "+" : ""}${last.dxy_chg.toFixed(2)}% (기준 ±${M.dxyPct}%)`);
 
   // U3 — WTI
   if (last.wti_chg === null) add("U3", "WTI 유가", "미상", "데이터 없음");
   else add("U3", "WTI 유가", last.wti_chg >= M.wtiPct ? "하방" : last.wti_chg <= -M.wtiPct ? "상방" : "중립",
-    `${last.wti_chg > 0 ? "+" : ""}${last.wti_chg.toFixed(1)}% (기준 ±${M.wtiPct}%)`);
+    `${last.wti_px != null ? "$" + last.wti_px.toFixed(1) + " · " : ""}${last.wti_chg > 0 ? "+" : ""}${last.wti_chg.toFixed(1)}% (기준 ±${M.wtiPct}%)`);
 
   // U4 — VIX (공포) — 급등=하방·급락=상방, 절대 레벨 30↑은 추가 경계
   if (last.vix_chg === null) add("U4", "VIX(변동성)", "미상", "데이터 없음");
@@ -81,7 +81,7 @@ export function computeUsBias(last: UsTickRow | undefined): BiasResult {
   // U5 — 나스닥 선물 (동행 참고 — 반도체는 나스닥 베타 상단)
   if (last.nq_chg === null) add("U5", "나스닥 선물", "미상", "데이터 없음");
   else add("U5", "나스닥 선물", last.nq_chg >= M.nqPct ? "상방" : last.nq_chg <= -M.nqPct ? "하방" : "중립",
-    `${last.nq_chg > 0 ? "+" : ""}${last.nq_chg.toFixed(2)}% (기준 ±${M.nqPct}%)`);
+    `${last.nq_px != null ? Math.round(last.nq_px).toLocaleString("ko-KR") + " · " : ""}${last.nq_chg > 0 ? "+" : ""}${last.nq_chg.toFixed(2)}% (기준 ±${M.nqPct}%)`);
 
   const ups = factors.filter((f) => f.dir === "상방").reduce((s, f) => s + (f.weight ?? 1), 0);
   const downs = factors.filter((f) => f.dir === "하방").reduce((s, f) => s + (f.weight ?? 1), 0);

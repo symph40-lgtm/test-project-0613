@@ -46,7 +46,8 @@ export type PremarketContext = {
   rebalance: "순풍" | "역풍" | "중립";                                  // C2
   usdkrw: { level: number | null; changePercent: number | null };       // C3
   // C4 — 미 2년물 금리 (사용자 개정 2026-07-07: 10년물→2년물, 값은 %p). 소스: 네이버 US2YT=RR 일봉
-  usRates: { changePp: number | null; regime: "상승" | "안정" | "하락" | null };
+  // level: 금리 절대 레벨(%) — 표시용 (사용자 지정 2026-07-13: 축1에 실제 값 병기)
+  usRates: { changePp: number | null; regime: "상승" | "안정" | "하락" | null; level?: number | null };
   // 매크로 "추세 중의 변화" 감지용 — 5일 추세와 전일 방향이 반대면 전환 신호 (성공사례 원형: 금리 상승 추세 꺾임)
   // rate5dPp = 미 2년물 5일 순변화 (%p)
   macroTrend: { rate5dPp: number | null; usdkrw5dPct: number | null };
@@ -63,7 +64,7 @@ export type PremarketContext = {
     us10y: { level: number | null; changePp: number | null };        // 금리 레벨(%)·전일 변화(%p)
     wti: { level: number | null; changePercent: number | null };     // WTI ($·전일 %)
     dxy: { level: number | null; changePercent: number | null };     // 달러지수 DXY
-    bondEtf: { changePercent: number | null };                       // TLT 가격 전일 % (금리 역방향 — 참고)
+    bondEtf: { changePercent: number | null; level?: number | null }; // TLT 가격 전일 %·현재가 (금리 역방향 — 참고)
   };
   hynixDaily: DailyBar[];      // 최신이 마지막. NR7·ATR·누적낙폭·갭 계산용
   samsungDaily: DailyBar[];
