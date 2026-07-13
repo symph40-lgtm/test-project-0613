@@ -147,8 +147,26 @@ export function computeSetups(inp: Inputs): SetupResult {
   // S5 — 디커플링 과열: 판정 제외, 참고 표기만 (사용자 개정 2026-07-09)
   const lastTick = ticks[ticks.length - 1];
   s("S5", "디커플링 과열 (판정 제외 — 참고)", "가점", null, 0, lastTick ? `니케이 ${fmt(lastTick.nikkeiChg)}% · 하닉 ${fmt(lastTick.hynixChg)}%` : "데이터 대기");
-  s("S6", "악재 뉴스 발생", "가점", null, 2, "수동 확인 (원인 주석 입력)");
-  s("S7", "매크로 컨센서스 수준 → 금리 우려 유지", "가점", null, 1, "수동 확인");
+  // S6 — 악재 뉴스 발생: AI 자동 주석으로 자동 판정 (사용자 지정 2026-07-13 — 수동확인 제거).
+  // 전일 미국 뉴스 하방(L7) 또는 낙폭 원인 주석 존재(= 하락 + 원인 분석됨)면 악재 있음.
+  // annotation_source='user'인 날은 사용자 입력이 그대로 반영된다 (autoAnnotate가 덮어쓰지 않음).
+  const s6 = ctx.usNews.impact === "하방" || ctx.causeNonEarnings !== null ? true
+    : ctx.usNews.impact !== null ? false : null;
+  s("S6", "악재 뉴스 발생", "가점", s6, 2,
+    ctx.usNews.impact === "하방" ? `전일 미국 뉴스 하방 (${qualSrc})${ctx.usNews.note ? ` — ${ctx.usNews.note}` : ""}`
+    : ctx.causeNonEarnings !== null ? `낙폭 원인 주석 있음 (${qualSrc})`
+    : ctx.usNews.impact !== null ? `전일 미국 뉴스 ${ctx.usNews.impact} — 뚜렷한 악재 없음 (${qualSrc})`
+    : "AI 분석 대기");
+
+  // S7 — 금리 우려 유지: C4(2Y 레짐·5일 추세)·C6(10Y 절대 레벨)로 자동 판정 (사용자 지정 2026-07-13).
+  const tenY = ctx.macroExtra?.us10y ?? null;
+  const tenYWorry: boolean | null = tenY === null || tenY.level === null ? null
+    : tenY.level >= SIGNAL_CONFIG.us10yWarn && (tenY.changePp === null || tenY.changePp > -0.03);
+  const twoYWorry: boolean | null = ctx.usRates.regime === null ? null
+    : ctx.usRates.regime === "상승" || (ctx.macroTrend.rate5dPp !== null && ctx.macroTrend.rate5dPp > 0.08);
+  const s7 = tenYWorry === null && twoYWorry === null ? null : tenYWorry === true || twoYWorry === true;
+  s("S7", "매크로 컨센서스 수준 → 금리 우려 유지", "가점", s7, 1,
+    `2Y ${ctx.usRates.regime ?? "?"}${ctx.macroTrend.rate5dPp !== null ? ` · 5일 ${ctx.macroTrend.rate5dPp > 0 ? "+" : ""}${ctx.macroTrend.rate5dPp.toFixed(2)}%p` : ""} · 10Y ${tenY?.level != null ? `${tenY.level.toFixed(2)}%` : "?"}${tenYWorry === true ? ` (경계 ${SIGNAL_CONFIG.us10yWarn}%↑)` : ""}`);
 
   const shortBlocked: string[] = [];
   if (crashActive && gapPct !== null && gapPct > 0) {
@@ -163,8 +181,11 @@ export function computeSetups(inp: Inputs): SetupResult {
   const requiredS = Sh.filter((i) => i.kind === "필수");
   const shortRequiredOk = requiredS.every((i) => i.pass === true);
   const shortBonus = Sh.filter((i) => i.kind === "가점" && i.pass === true).reduce((sm, i) => sm + i.points, 0);
+  // 하락 추세일 확정이면 가점 미달이어도 진입후보 — 판정(추세일_하방·인버스 검토)과 셋업 카드가
+  // 어긋나지 않게 (사용자 피드백 2026-07-13: 필수 전부 충족 + 강한 하락일인데 '대기 0/3' 표시)
+  const trendDownConfirmed = trend !== null && trend.dir === "DOWN" && trend.grade === "추세일";
   const shortVerdict = shortBlocked.length > 0 ? "차단"
-    : shortRequiredOk && shortBonus >= SIGNAL_CONFIG.score.shortCandidate ? "진입후보"
+    : shortRequiredOk && (shortBonus >= SIGNAL_CONFIG.score.shortCandidate || trendDownConfirmed) ? "진입후보"
     : "대기";
 
   return {

@@ -33,6 +33,28 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
   const bias = computeBias(ctx);
   const inSession = nowMinuteOfDay >= S.openMin;
   const trend = inSession && ticks.length > 0 ? computeTrend(ticks, gap) : null;
+
+  // 추세일 확정 보수 게이트 (사용자 지정 2026-07-13) — T-스코어가 추세일이어도
+  // ①매크로(축1) 정렬: 같은 방향 + 강도 ≥ 기준 ②DC2(변동성 대비 순추세 효율) ≥ 기준 —
+  // 둘 다 충족해야 '추세일' 유지, 아니면 약한추세(1/3 비중·타이트 트레일링)로 강등.
+  // "변동성이 심할 때는 보수적으로": 널뛰는 날은 DC2가 낮아 자동으로 강등된다.
+  if (trend !== null && trend.grade === "추세일") {
+    const SD = SIGNAL_CONFIG.trend.strongDay;
+    const macroAligned =
+      bias.strength >= SD.minBiasStrength &&
+      ((trend.dir === "UP" && bias.dir === "상방") || (trend.dir === "DOWN" && bias.dir === "하방"));
+    const efficient = trend.dc2 !== null && trend.dc2 >= SD.dc2Min;
+    if (!(macroAligned && efficient)) {
+      trend.grade = "약한추세";
+      const why = [
+        macroAligned ? null : `매크로 미정렬(축1 ${bias.dir} 강도${bias.strength}, 기준 방향일치+강도${SD.minBiasStrength}↑)`,
+        efficient ? null : `DC2 ${trend.dc2 !== null ? trend.dc2.toFixed(2) : "-"} < ${SD.dc2Min} (변동성 대비 순추세 부족)`,
+      ].filter(Boolean).join(" · ");
+      trend.extNotes.push(`추세일→약한추세 강등 (보수 게이트): ${why}`);
+      dataNotes.push(`보수 게이트 강등: ${why} — 1/3 비중·타이트 트레일링`);
+    }
+  }
+
   const divergence = inSession ? computeDivergence(ticks, trend?.dir ?? null) : null;
   const setups = computeSetups({ ctx, bias, trend, ticks, gapPct: gap, minuteOfDay: nowMinuteOfDay, crashActive, crashCumPct: crashCum });
   const risk = computeRisk(ctx, bias, trend, ticks, nowMinuteOfDay);

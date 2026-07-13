@@ -51,50 +51,50 @@ const mkTick = (over: Partial<IntradayTick>): IntradayTick => ({
 });
 const moveCases: { name: string; ticks: IntradayTick[]; expectKeys: string[] }[] = [
   { name: "하닉 -5.2% (급락 2단계)", ticks: [mkTick({ hynixChg: -5.2 })], expectKeys: ["move_hynix_d5"] },
-  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1.4"] },
-  { name: "선물 -2.3% (2.1단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d2.1"] },
-  { name: "선물 -0.8% (첫 감지선 0.7)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: ["move_fut_d0.7"] },
+  { name: "하닉 +3.4% 급등 + 선물 -1.8%", ticks: [mkTick({ hynixChg: 3.4, futChg: -1.8 })], expectKeys: ["move_hynix_u3", "move_fut_d1.68"] },
+  { name: "선물 -2.3% (2.24단계)", ticks: [mkTick({ futChg: -2.3 })], expectKeys: ["move_fut_d2.24"] },
+  { name: "선물 -0.8% (첫 감지선 0.56)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.8 })], expectKeys: ["move_fut_d0.56"] },
   { name: "미돌파 (하닉 -2.9% · 선물 -0.5%)", ticks: [mkTick({ hynixChg: -2.9, futChg: -0.5 })], expectKeys: [] },
   { name: "장외 시간 (16:30)", ticks: [mkTick({ hynixChg: -8, minuteOfDay: 990 })], expectKeys: [] },
-  // 반락·반등 스윙 (0.7%p 스텝 — 키에 극값 에피소드 포함, 극값 갱신 시 재무장 2026-07-08)
+  // 반락·반등 스윙 (0.56%p 스텝 — 2026-07-13 20% 축소. 키에 극값 에피소드 포함, 극값 갱신 시 재무장)
   {
     name: "선물 반락 +1.5%→-1.1% (고점 대비 -2.6%p)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 }), mkTick({ futChg: -1.1 })],
-    expectKeys: ["move_fut_d0.7", "swing_fut_d2.1e2"],
+    expectKeys: ["move_fut_d0.56", "swing_fut_d2.2e2"],
   },
   {
     name: "선물 반락 조기 경고 +1.5%→+0.4% (고점 대비 -1.1%p, 아직 플러스권)",
     ticks: [mkTick({ futChg: 0.2 }), mkTick({ futChg: 1.5 }), mkTick({ futChg: 0.4 })],
-    expectKeys: ["swing_fut_d0.7e2"],
+    expectKeys: ["swing_fut_d0.6e2"],
   },
   {
     // 2026-07-09 수정: 반등 중(-2.4→-0.8)의 "급락 -0.8%" 절대단계 재발송 제거 — 스윙 알림만
     name: "선물 반등 -2.4%→-0.8% (저점 대비 +1.6%p)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -2.4 }), mkTick({ futChg: -0.8 })],
-    expectKeys: ["swing_fut_u1.4e-4"],
+    expectKeys: ["swing_fut_u1.1e-5"],
   },
   {
     // 2026-07-09 사용자 보고 사례: 고점 +4.3% 후 +2.7%로 하락 중 — "급등 +2.7%" 문자 금지, 반락 스윙만
     name: "고점 +4.3% 후 +2.7% 하락 중 — 절대단계(급등) 재발송 금지",
     ticks: [mkTick({ futChg: 1.0 }), mkTick({ futChg: 4.3 }), mkTick({ futChg: 2.7 })],
-    expectKeys: ["swing_fut_d1.4e6"],
+    expectKeys: ["swing_fut_d1.1e7"],
   },
   {
     name: "일방향 하락은 반전 아님 (고점 +0.1%)",
     ticks: [mkTick({ futChg: 0.1 }), mkTick({ futChg: -1.2 }), mkTick({ futChg: -1.6 })],
-    expectKeys: ["move_fut_d1.4"],
+    expectKeys: ["move_fut_d1.12"],
   },
   {
     // 2026-07-09 수정: 마지막 틱 -5.5는 저점(-6.3) 대비 반등 중 — 절대단계 없이 스윙만
     // (실시간에서는 -6.3 틱 시점에 move_fut_d6.3이 이미 발송됨)
     name: "저점 갱신 후 새 반등 — 에피소드 리셋 (저점 -6.3, +0.8 반등이 새 키로)",
     ticks: [mkTick({ futChg: -1.0 }), mkTick({ futChg: -4.3 }), mkTick({ futChg: -2.8 }), mkTick({ futChg: -6.3 }), mkTick({ futChg: -5.5 })],
-    expectKeys: ["swing_fut_u0.7e-9"],
+    expectKeys: ["swing_fut_u0.6e-12"],
   },
   {
-    name: "폭락 연장 단계 — -7.1%도 알림 (4.2 초과 구간)",
+    name: "폭락 연장 단계 — -7.1%도 알림 (상위 구간)",
     ticks: [mkTick({ futChg: -7.1 })],
-    expectKeys: ["move_fut_d7"],
+    expectKeys: ["move_fut_d6.72"],
   },
 ];
 for (const c of moveCases) {
