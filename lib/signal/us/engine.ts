@@ -112,9 +112,15 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
   // TV — 거래량 확인 (사용자 지정 2026-07-13): 미국판 수급 대체 신호. 추세 방향 5분봉의
   // 거래량이 반대 방향 봉의 confirmRatio배 이상이면 '거래량이 추세를 동반'으로 확인 (가중 2).
   // 점수·정규화에 반영 후 등급을 computeTrend와 같은 규칙으로 재산출 (보수 게이트 전에 수행).
+  // 배치: 미국에 존재하지 않는 수급 신호(T4·T5·T8)는 영구 미산출 노이즈라 목록에서 제거하고,
+  // TV를 T5 자리에 넣는다 (사용자 지정 — "가격 방향 + 거래량 동반"을 T5 슬롯으로).
   if (trend !== null) {
+    const t5Idx = trend.signals.findIndex((s) => s.code === "T5");
+    trend.signals = trend.signals.filter((s) => !["T4", "T5", "T8"].includes(s.code));
     const tv = computeVolumeConfirm(rows);
-    trend.signals.push({ code: "TV", label: "거래량 확인(SMH)", available: tv.available, pass: tv.pass, dir: tv.dir, weight: U.volumeConfirm.weight, detail: tv.detail });
+    const tvSignal = { code: "TV", label: "거래량 확인(SMH) — T5 대체", available: tv.available, pass: tv.pass, dir: tv.dir, weight: U.volumeConfirm.weight, detail: tv.detail };
+    const insertAt = t5Idx >= 1 ? Math.min(t5Idx - 1, trend.signals.length) : trend.signals.length;
+    trend.signals.splice(insertAt, 0, tvSignal);
     if (tv.available) {
       trend.maxAvailable += U.volumeConfirm.weight;
       if (tv.pass) trend.score += U.volumeConfirm.weight;
@@ -214,7 +220,7 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
 
   if (trend) {
     const na = trend.signals.filter((s) => !s.available).map((s) => s.code);
-    if (na.length > 0) dataNotes.push(`미산출 신호(만점 제외): ${na.join("·")} — 미국은 수급 데이터 소스 없음`);
+    if (na.length > 0) dataNotes.push(`미산출 신호(만점 제외): ${na.join("·")} — 장 초반 표본 축적 중이거나 데이터 대기 (판정은 가용 만점 대비 비율)`);
   }
   // 과열 참고
   const up = consecutiveUpDays(smhDaily, true);
