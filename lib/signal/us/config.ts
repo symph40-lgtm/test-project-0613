@@ -59,6 +59,22 @@ export const US_SIGNAL_CONFIG = {
   // 추세일은 방향 봉에 거래량이 실리는 게 고전적 확인 지표. SMH 5분봉, 마이그레이션 023 필요.
   volumeConfirm: { minBars: 6, confirmRatio: 1.3, weight: 2 },
 
+  // RV1 — SMH 분봉 모멘텀 즉시 신호 (사용자 지정 2026-07-13 — 한국 RV1의 미국판).
+  // 임계값은 SMH 실측 |변화| 분포의 99% 분위 (1분봉 6일 1,943표본 / 5분봉 37일):
+  //   1분봉 1개 99% 0.352 → 0.35 · 3개 합 99% 0.559 → 0.55 · 5개 합 99% 0.717 → 0.7
+  //   5분봉 1개 95~99% 0.60~0.96 → 0.7 · 3개 합 0.98~1.71 → 1.2 · 5개 1.19~2.08 → 1.5 · 7개 → 1.8
+  // 발송 정책·품질 필터는 한국과 동일 원칙 (진입 시간대만·추세일 정합·윗꼬리·반복 추가 진행).
+  reversal: {
+    m1Single: 0.35, m1Sum3: 0.55, m1Sum5: 0.7,
+    m5Single: 0.7, m5Sum3: 1.2, m5Sum5: 1.5, m5Sum7: 1.8,
+    trendLookbackMin: 30,
+    maxPerDirPerDay: 3,
+    repeatCooldownMins: [10, 5],
+    repeatMinProgressPct: 0.4,   // 한국 0.8의 변동성 스케일 (SMH m1Single 0.35 기준)
+    wickRetraceRatio: 0.4,
+    wickRetraceMinPp: 0.2,
+  },
+
   // 조용 시간 (사용자 지정 2026-07-13) — 이 KST 시간대엔 문자(SMS)만 억제, 이메일·수집·판정은 계속.
   // "1시 이후엔 잠을 자야 해서" — 크론은 새벽 5시(장 마감)까지 돌려 데이터를 온전히 쌓는다.
   quietSms: { fromKstMin: 1 * 60, toKstMin: 7 * 60 }, // 01:00~07:00 KST

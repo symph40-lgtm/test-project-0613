@@ -37,12 +37,24 @@ function preTrend(series: Pt[], startIdx: number, lookbackMin: number): number |
   return series[startIdx].chg - series[prevIdx].chg;
 }
 
-export function detectReversal(ticks: IntradayTick[]): ReversalHit | null {
-  const R = SIGNAL_CONFIG.reversal;
+// 임계값·시리즈 주입 (2026-07-13) — 미국 RV1(SMH)이 같은 감지 엔진을 쓰기 위한 주입점.
+// 미지정이면 한국 기본(하닉·config.reversal) — 기존 동작 불변.
+export type ReversalThresholds = {
+  m1Single: number; m1Sum3: number; m1Sum5: number;
+  m5Single: number; m5Sum3: number; m5Sum5: number; m5Sum7: number;
+  trendLookbackMin: number;
+};
+
+export function detectReversal(
+  ticks: IntradayTick[],
+  opts?: { sel?: (t: IntradayTick) => number | null; cfg?: ReversalThresholds },
+): ReversalHit | null {
+  const R: ReversalThresholds = opts?.cfg ?? SIGNAL_CONFIG.reversal;
+  const sel = opts?.sel ?? ((t: IntradayTick) => t.hynixChg);
   const S = SIGNAL_CONFIG.session;
   const pts: Pt[] = ticks
-    .filter((t) => t.hynixChg !== null && isFinite(t.hynixChg) && t.minuteOfDay >= S.openMin)
-    .map((t) => ({ min: t.minuteOfDay, chg: t.hynixChg as number }));
+    .filter((t) => sel(t) !== null && isFinite(sel(t) as number) && t.minuteOfDay >= S.openMin)
+    .map((t) => ({ min: t.minuteOfDay, chg: sel(t) as number }));
   if (pts.length < 4) return null;
   // 같은 분 중복 틱은 마지막 값만 (1분봉 종가)
   const m1: Pt[] = [];

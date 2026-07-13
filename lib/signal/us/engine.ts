@@ -8,6 +8,7 @@
 import { SIGNAL_CONFIG } from "../config";
 import { US_SIGNAL_CONFIG as U } from "./config";
 import { computeTrend } from "../engine/trend";
+import { detectReversal, type ReversalHit } from "../engine/reversal";
 import { cumReturnPct, consecutiveUpDays, worstCumDeclinePct, gapPct as calcGap } from "../engine/daily";
 import type { BiasResult, DailyBar, IntradayTick, TrendResult } from "../types";
 import type { UsTickRow } from "./data";
@@ -27,6 +28,7 @@ export type UsJudgment = {
   crash: { active: boolean; cumPct: number | null };
   gapPct: number | null;
   quotes: { smhChg: number | null; usdChg: number | null; ssgChg: number | null; soxChg: number | null };
+  reversal: ReversalHit | null; // RV1 미국판 — SMH 분봉 모멘텀 (즉시 문자는 us/alerts.ts)
   dataNotes: string[];
 };
 
@@ -229,12 +231,38 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
     dataNotes.push(`과열 경계: SMH 연속상승 ${up}일 · 5일 누적 ${cum5?.toFixed(1) ?? "?"}% — 반전(SSG) 셋업 감시`);
   }
 
+  // RV1 미국판 — SMH 분봉 모멘텀 감지 (SMH = futChg 계열, 임계값은 SMH 실측 99% 분위)
+  const reversal = inSession ? detectReversal(ticks, { sel: (t) => t.futChg, cfg: U.reversal }) : null;
+
   return {
     date: etDate, ts: nowIso, phase, dayType, headline, action, bias, trend,
     macroGate, crash: { active: crashActive, cumPct: crashCum }, gapPct: gap,
     quotes: { smhChg: last?.smh_chg ?? null, usdChg: last?.usd_chg ?? null, ssgChg: last?.ssg_chg ?? null, soxChg: last?.sox_chg ?? null },
+    reversal,
     dataNotes,
   };
+}
+
+// ── RV1 미국판 문자 — 한국과 동일한 품질 필터 3종 + XS1 (발송 정책·반복은 us/alerts.ts)
+export function buildUsReversalAlert(j: UsJudgment): ChannelAlert | null {
+  const hit = j.reversal;
+  if (!hit) return null;
+  if (j.phase !== "판정") return null;                       // ① 진입 시간대만
+  if (hit.dir === "DOWN" && j.crash.active) return null;      // XS1 — 폭락 후 인버스 금지
+  if (j.trend?.grade === "추세일") {                          // ② 추세일 확정 반대 방향 차단
+    if (hit.dir === "UP" && j.trend.dir === "DOWN") return null;
+    if (hit.dir === "DOWN" && j.trend.dir === "UP") return null;
+  }
+  const RV = U.reversal;                                      // ③ 윗꼬리 필터
+  if (typeof hit.retracePp === "number" && hit.retracePp >= Math.max(RV.wickRetraceMinPp, Math.abs(hit.movePct) * RV.wickRetraceRatio)) return null;
+
+  const pre = hit.preMovePct !== null ? ` (직전 ${hit.preMovePct > 0 ? "+" : ""}${hit.preMovePct.toFixed(1)}%p)` : "";
+  const at = ` [${kstHhmm(j.ts)}]`;
+  return hit.dir === "UP"
+    ? { key: "us_rev_up", severity: "high", smsSubject: "미국 모멘텀 USD",
+        text: `[스탁가드 미국] SMH 상승 모멘텀 — ${hit.cond}${pre} USD(2x) 검토${at}` }
+    : { key: "us_rev_down", severity: "high", smsSubject: "미국 모멘텀 SSG",
+        text: `[스탁가드 미국] SMH 하락 모멘텀 — ${hit.cond}${pre} SSG(-2x) 검토${at}` };
 }
 
 // ── 알림 — ① 판정 확정 문자 ② SMH 급변·스윙 (한국과 같은 극값 에피소드 재무장 방식)

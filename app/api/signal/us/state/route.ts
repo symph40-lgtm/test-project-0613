@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { collectUsTick, appendUsTick, loadUsTicks, fetchSmhDaily, etNow, toVirtualMin } from "@/lib/signal/us/data";
 import { decideUs, buildUsSignalAlert, buildUsMoveAlerts } from "@/lib/signal/us/engine";
+import { maybeSendUsReversalAlert } from "@/lib/signal/us/alerts";
 import { US_SIGNAL_CONFIG } from "@/lib/signal/us/config";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,8 @@ export async function GET(req: NextRequest) {
       for (const alert of buildUsMoveAlerts(rows)) {
         sent += await dispatchToChannels("signal", date, { ...alert, suppressSms: quiet }, `미국 급변 — ${alert.text.slice(10, 40)}`).catch(() => 0);
       }
+      // RV1 미국판 — SMH 분봉 모멘텀 즉시 신호 (반복·쿨다운·추가 진행은 함수 내부에서)
+      sent += await maybeSendUsReversalAlert(judgment, quiet).catch(() => 0);
     }
 
     return NextResponse.json({ judgment, tickCount: rows.length, stored, sent });
