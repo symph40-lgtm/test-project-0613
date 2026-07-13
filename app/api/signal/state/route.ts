@@ -11,6 +11,7 @@ import { decide } from "@/lib/signal/engine/decide";
 import { SIGNAL_CONFIG } from "@/lib/signal/config";
 import { appendTick, loadTicks, logJudgment, upsertDailyFeatures, loadDailyFeatures, loadRecentFeatures } from "@/lib/signal/store";
 import { maybeSendSignalSms, maybeSendMoveAlerts, maybeSendReversalAlert, maybeSendVolumeAlert, maybeSendFlowAlerts } from "@/lib/signal/alerts";
+import { maybeSendEntryBrief } from "@/lib/signal/entryBrief";
 import { autoAnnotateIfNeeded } from "@/lib/signal/autoAnnotate";
 
 export const dynamic = "force-dynamic";
@@ -76,6 +77,8 @@ export async function GET(req: NextRequest) {
         maybeSendVolumeAlert(date, ticks).catch(() => 0),
         // 외인·프로그램 수급 반전 — 극값 대비 스텝 이상 되돌림 (매수기회/매도기회 관찰)
         maybeSendFlowAlerts(date, ticks).catch(() => 0),
+        // 장중 진입 브리핑 — 개장+1·3·5·10·15·20·30·50분 고정 + 이후 전환·감속·정기 1시간 (2026-07-10)
+        maybeSendEntryBrief(judgment, ticks).catch(() => 0),
       ]);
       sms = smsResult;
     }

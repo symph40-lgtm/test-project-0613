@@ -6,10 +6,15 @@
 //    레버리지 진입 금지 — 매크로가 널뛰면 주가도 널뛰어 변동이 너무 큼.
 //  - L1(Bias 상방) 필수에서 제외 — 참고 표기만. L8(컨센서스 가점)·S5(디커플링 가점) 제거.
 //  - L10 근사·S2 매크로 악화 판정에서 SOX를 나스닥보다 우선.
+// 2026-07-10 사용자 개정:
+//  - FG(외인 현물 게이트) 신설·양쪽 필수: 장중 외국인 코스피 현물 순매수 30분 기울기(T8과 같은
+//    눈금 ±150억)가 뚜렷한 이탈이면 레버리지 금지, 뚜렷한 개선이면 인버스 금지.
+//    데이터 부재·중립은 통과 — 수급은 차단 조건이지 단독 진입 근거가 아님 (백테스트 판정 불변).
 
 import { SIGNAL_CONFIG } from "../config";
 import type { BiasResult, CheckItem, IntradayTick, PremarketContext, SetupResult, TrendResult } from "../types";
 import { cumReturnPct, consecutiveUpDays } from "./daily";
+import { flowDelta } from "./trend";
 
 const S = SIGNAL_CONFIG.session;
 
@@ -39,6 +44,16 @@ export function computeSetups(inp: Inputs): SetupResult {
   ];
   const macroBad = macroBadItems.filter(Boolean).length;
 
+  // ── FG 외인 현물 게이트 (2026-07-10) — 코스피 외국인 현물 순매수(KIS 억원) 30분 기울기.
+  // T8과 같은 눈금(±t8MinDelta30). null(데이터 부재·중립)은 양쪽 통과.
+  const kfFlow = flowDelta(ticks, (t) => t.kospiFrgn);
+  const fgTh = SIGNAL_CONFIG.trend.t8MinDelta30;
+  const fgDir: "UP" | "DOWN" | null =
+    kfFlow === null ? null : kfFlow.delta >= fgTh ? "UP" : kfFlow.delta <= -fgTh ? "DOWN" : null;
+  const fgDetail = kfFlow === null
+    ? "KIS 수급 대기 — 통과"
+    : `외인현물 누적 ${fmtBil(kfFlow.cur)} · Δ${kfFlow.spanMin}분 ${fmtBil(kfFlow.delta)} (기준 ±${fgTh}억)`;
+
   // ══ 레버리지(롱) ══
   const L: CheckItem[] = [];
   const push = (arr: CheckItem[]) => (code: string, label: string, kind: CheckItem["kind"], pass: boolean | null, points: number, detail: string) =>
@@ -48,6 +63,8 @@ export function computeSetups(inp: Inputs): SetupResult {
   // LM — 매크로 게이트 (필수, 2026-07-09 신설): 매크로 악화 2개 이상이면 레버리지 진입 금지.
   l("LM", "매크로 게이트(악화 2개 미만)", "필수", macroBad < 2, 0,
     `악화 ${macroBad}/3 (금리↑ ${fmtB(macroBadItems[0])} · 환율↑ ${fmtB(macroBadItems[1])} · SOX↓ ${fmtB(macroBadItems[2])})`);
+  // FG — 외인 현물 게이트 (필수, 2026-07-10 신설): 외인 현물이 뚜렷이 이탈 중이면 레버리지 금지.
+  l("FG", "외인 현물 게이트(이탈 아님)", "필수", fgDir !== "DOWN", 0, fgDetail);
   // L1 — Bias 상방: 필수에서 제외, 참고 표기만 (사용자 개정 2026-07-09. 매크로는 LM 게이트가 담당)
   l("L1", "Bias 상방 (판정 제외 — 참고)", "가점", null, 0, `축1 ${bias.dir} 강도${bias.strength}`);
   // L2 금리·환율 — 셋업 필수에서 제외 (사용자 개정 2026-07-07: Bias C3·C4에서 이미 반영,
@@ -119,6 +136,8 @@ export function computeSetups(inp: Inputs): SetupResult {
   s("S1", "과열 또는 하방 Bias", "필수", overheat || bias.dir === "하방", 0,
     `연속상승 ${upDays}일 · 5일 ${cum5?.toFixed(1) ?? "?"}% · Bias ${bias.dir}`);
   s("S2", "매크로 악화(2개 이상)", "필수", macroBad >= 2, 0, `충족 ${macroBad}/3 (금리↑·환율↑·SOX↓)`);
+  // FG — 외인 현물 게이트 (필수, 2026-07-10 신설): 외인 현물이 뚜렷이 개선 중이면 인버스 금지.
+  s("FG", "외인 현물 게이트(개선 아님)", "필수", fgDir !== "UP", 0, fgDetail);
   const s3 = trend === null ? null : trend.dir === "DOWN" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
   s("S3", "하방 방향 형성·유지 확인", "필수", s3, 0,
     trend === null ? "장중 데이터 대기" : `방향 ${trend.dir ?? "-"} · ${trend.grade}`);
@@ -206,6 +225,9 @@ function foreignThreeFactor(ticks: IntradayTick[], avg20: number | null): {
 
 function fmtB(v: boolean | null): string {
   return v === null ? "?" : v ? "충족" : "미충족";
+}
+function fmtBil(v: number): string {
+  return `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString("ko-KR")}억`;
 }
 function fmt(v: number | null): string {
   return v === null ? "?" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`;

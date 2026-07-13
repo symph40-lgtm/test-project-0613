@@ -42,8 +42,9 @@ function resample(pts: Pt[], barMin: number): { open: number; close: number; sta
   return [...bars.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
 }
 
-// ── 수급 시계열 헬퍼 — 최근 windowMin분 누적 순매수 변화 (억원)
-function flowDelta(ticks: IntradayTick[], sel: (t: IntradayTick) => number | null, windowMin = 30): {
+// ── 수급 시계열 헬퍼 — 최근 windowMin분 누적 순매수 변화 (억원).
+// setups.ts의 FG 외인 현물 게이트(2026-07-10)도 같은 눈금을 쓰므로 export.
+export function flowDelta(ticks: IntradayTick[], sel: (t: IntradayTick) => number | null, windowMin = 30): {
   cur: number; delta: number; spanMin: number;
 } | null {
   const pts = ticks
