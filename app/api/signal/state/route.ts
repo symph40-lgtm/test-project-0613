@@ -72,7 +72,8 @@ export async function GET(req: NextRequest) {
         // 반전 스윙(당일 고점 대비 반락·저점 대비 반등 0.7%p 등간격, 단계별 1일 1회)
         maybeSendMoveAlerts(date, ticks).catch(() => 0),
         // RV1 하닉 분봉 반전 진입신호 — 상승=레버리지·하락=인버스, 즉시 문자
-        maybeSendReversalAlert(judgment).catch(() => 0),
+        // (반복 2·3차는 직전 발송 대비 추가 진행 시에만 — ticks로 현재 레벨 전달)
+        maybeSendReversalAlert(judgment, ticks).catch(() => 0),
         // 거래량 급증 — 하닉 5분봉이 당일 평균 1.3배 이상 (30분 창 최대 2건)
         maybeSendVolumeAlert(date, ticks).catch(() => 0),
         // 외인·프로그램 수급 반전 — 극값 대비 스텝 이상 되돌림 (매수기회/매도기회 관찰)

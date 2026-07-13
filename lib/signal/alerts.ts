@@ -358,32 +358,49 @@ export function buildReversalAlert(j: Judgment): SignalAlert | null {
 // 발송 정책 (사용자 확정 2026-07-07): 같은 방향(추세)은 하루 최대 maxPerDirPerDay회
 // (최초 rev_up + 추가분 rev_up_2·rev_up_3), 반복 사이 최소 repeatCooldownMin분 간격 —
 // 조건이 수 분간 연속 성립해도 1분 간격 연속 발송이 되지 않게.
-export async function maybeSendReversalAlert(j: Judgment): Promise<number> {
+// 반복 추가 조건 (사용자 피드백 2026-07-13): 직전 발송 시점의 하닉 등락률 대비 그 방향으로
+// repeatMinProgressPct 이상 추가 진행했을 때만 — 같은 반등을 다른 조건(1분봉5개 ↔ 5분봉)이
+// 재감지해 "같은 내용 (2차)(3차)"로 나가던 중복 제거.
+export async function maybeSendReversalAlert(j: Judgment, ticks: IntradayTick[]): Promise<number> {
   const alert = buildReversalAlert(j);
   if (!alert) return 0;
   const R = SIGNAL_CONFIG.reversal;
+  const curLevel = ticks.length > 0 ? ticks[ticks.length - 1].hynixChg : null; // 하닉 당일 등락률
 
-  // 오늘 이 방향으로 이미 나간 회차·마지막 발송 시각 (사용자 무관 — 키 집합 기준)
+  // 오늘 이 방향으로 이미 나간 회차·마지막 발송 시각·발송 시점 등락률 (사용자 무관 — 키 집합 기준)
   const admin = createAdminClient();
   const kstDayStartUtc = new Date(`${j.date}T00:00:00+09:00`).toISOString();
   const { data } = await admin
     .from("alerts")
-    .select("created_at, message")
+    .select("created_at, message, market_snapshot")
     .eq("trigger_key", "signal")
     .gte("created_at", kstDayStartUtc);
   const sentKeys = new Map<string, number>(); // alertKey → 마지막 발송 epoch ms
+  let lastMs = 0;
+  let lastLevel: number | null = null; // 마지막 발송 시점의 하닉 등락률
   for (const r of data ?? []) {
     const k = (r.message as { alertKey?: string } | null)?.alertKey;
     if (k && (k === alert.key || k.startsWith(`${alert.key}_`))) {
       const t = Date.parse(r.created_at as string);
       sentKeys.set(k, Math.max(sentKeys.get(k) ?? 0, t));
+      if (t > lastMs) {
+        lastMs = t;
+        const snap = r.market_snapshot as { levelPct?: number | null } | null;
+        lastLevel = typeof snap?.levelPct === "number" ? snap.levelPct : null;
+      }
     }
   }
   const n = sentKeys.size; // 오늘 이 방향 발송 회차
   if (n >= R.maxPerDirPerDay) return 0;
   // 반복 간격: 1차→2차 10분, 2차→3차 5분 (배열 초과분은 마지막 값)
   const cooldownMin = R.repeatCooldownMins[Math.min(n - 1, R.repeatCooldownMins.length - 1)] ?? 0;
-  if (n > 0 && Date.now() - Math.max(...sentKeys.values()) < cooldownMin * 60000) return 0;
+  if (n > 0 && Date.now() - lastMs < cooldownMin * 60000) return 0;
+  // 반복은 '새 정보'가 있을 때만 — 직전 발송 시점보다 그 방향으로 추가 진행 (레벨 기록 없던
+  // 과거 발송분은 판정 불가 → 기존 쿨다운 정책만 적용)
+  if (n > 0 && lastLevel !== null && curLevel !== null) {
+    const progress = alert.key === "rev_up" ? curLevel - lastLevel : lastLevel - curLevel;
+    if (progress < R.repeatMinProgressPct) return 0;
+  }
 
   const keyed: SignalAlert = {
     ...alert,
@@ -394,6 +411,7 @@ export async function maybeSendReversalAlert(j: Judgment): Promise<number> {
     reversal: j.ext.reversal,
     dayType: j.dayType,
     ts: j.ts,
+    levelPct: curLevel,
   });
 }
 
