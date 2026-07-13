@@ -44,6 +44,7 @@ const menuGroups = [
     title: "시장 · 알림 · 분석",
     items: [
       { name: "레버리지·인버스 신호", href: "/signal" },
+      { name: "레버리지·인버스 신호 (미국)", href: "/signal/us" },
       { name: "장중 시황 요약", href: "/market/intraday" },
       { name: "종목 단기 분석", href: "/analyze" },
       { name: "유망 섹터 모니터", href: "/sectors" },

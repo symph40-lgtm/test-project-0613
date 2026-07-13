@@ -146,7 +146,14 @@ export function computeSwingStructure(pts: Pt[]): SwingResult {
   return { ...base, status: "횡보", dir: null, detail: `${prefix} — 4점까지도 방향 불일치 (횡보)` };
 }
 
-export function computeTrend(ticks: IntradayTick[], gapPct: number | null): TrendResult {
+// opts.dc: DC 임계값 오버라이드 — 미국 신호(SMH 실측 분포가 K200과 다름)가 같은 엔진을 쓰기 위한
+// 주입점 (2026-07-13). 미지정이면 한국 기본값 — 기존 동작 불변.
+export function computeTrend(
+  ticks: IntradayTick[],
+  gapPct: number | null,
+  opts?: { dc?: { barMin: number; dc1Theta: number; dc2Min: number } },
+): TrendResult {
+  const DCC = opts?.dc ?? SIGNAL_CONFIG.dc;
   const { pts, source } = extractSeries(ticks);
   const signals: TSignal[] = [];
   const sig = (code: string, label: string, available: boolean, pass: boolean, dir: "UP" | "DOWN" | null, detail: string) =>
@@ -320,8 +327,8 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
       `갭 ${gapPct > 0 ? "+" : ""}${gapPct.toFixed(2)}% · 초반 ${earlyDir > 0 ? "상승" : earlyDir < 0 ? "하락" : "보합"}${match ? " (일치)" : " (역방향 → 반전일 후보)"}`);
   }
 
-  // ── DC1/DC2 (봉 주기 = config.dc.barMin, 실시간 라벨 — 2.5.6)
-  const barsDc = resample(pts, SIGNAL_CONFIG.dc.barMin).filter((b) => b.startMin >= S.openMin);
+  // ── DC1/DC2 (봉 주기 = DCC.barMin, 실시간 라벨 — 2.5.6)
+  const barsDc = resample(pts, DCC.barMin).filter((b) => b.startMin >= S.openMin);
   let dc1: number | null = null, dc2: number | null = null;
   if (barsDc.length >= 3 && dayDir !== null) {
     const daySign = dayDir === "UP" ? 1 : -1;
@@ -394,7 +401,7 @@ export function computeTrend(ticks: IntradayTick[], gapPct: number | null): Tren
 
   // DC 이중 확인 (2.5.6) — 전일 기준 충족 또는 장중 재형성 창 충족
   const dcConfirm =
-    (dc1 !== null && dc2 !== null && dc1 >= SIGNAL_CONFIG.dc.dc1Theta && dc2 >= SIGNAL_CONFIG.dc.dc2Min) ||
+    (dc1 !== null && dc2 !== null && dc1 >= DCC.dc1Theta && dc2 >= DCC.dc2Min) ||
     middayAligned;
 
   // 횡보일 선언 = 스윙 구조가 '횡보' (산·골 연결선 4점까지 불일치/평탄) AND 장중 재형성 없음.
