@@ -94,9 +94,12 @@ type SwingResult = NonNullable<TrendResult["swing"]>;
 // 2) 불일치·평탄이면: 고점 3개나 저점 3개가 생길 때까지 대기 후, 3점 연결선(첫→끝)의 지향 방향.
 //    양쪽 다 3점이면 일치할 때만 채택.
 // 3) 3점으로도 불가(평탄·상충)면 4점으로. 4점까지도 불가하면 횡보.
-export function computeSwingStructure(pts: Pt[]): SwingResult {
-  const tol = T.swing.tolPct / 100;
-  const pivots = zigzagPivots(pts, T.swing.minAmpPct);
+// cfg: 스윙 파라미터 오버라이드 — 미국 신호(SMH 변동성이 K200의 ~2배)용 주입점 (2026-07-13).
+// 미지정이면 한국 기본값 — 기존 동작 불변.
+export function computeSwingStructure(pts: Pt[], cfg?: { minAmpPct: number; tolPct: number }): SwingResult {
+  const SW = cfg ?? T.swing;
+  const tol = SW.tolPct / 100;
+  const pivots = zigzagPivots(pts, SW.minAmpPct);
   const highs = pivots.filter((p) => p.kind === "H").map((p) => p.px);
   const lows = pivots.filter((p) => p.kind === "L").map((p) => p.px);
   const base: Omit<SwingResult, "status" | "dir" | "detail"> = { highs: highs.length, lows: lows.length };
@@ -151,7 +154,7 @@ export function computeSwingStructure(pts: Pt[]): SwingResult {
 export function computeTrend(
   ticks: IntradayTick[],
   gapPct: number | null,
-  opts?: { dc?: { barMin: number; dc1Theta: number; dc2Min: number } },
+  opts?: { dc?: { barMin: number; dc1Theta: number; dc2Min: number }; swing?: { minAmpPct: number; tolPct: number } },
 ): TrendResult {
   const DCC = opts?.dc ?? SIGNAL_CONFIG.dc;
   const { pts, source } = extractSeries(ticks);
@@ -245,7 +248,7 @@ export function computeTrend(
   // T6 — 스윙 구조 (산·골 연결선, "변동성의 추세"). 완성된 5분봉 종가만 사용 —
   // 진행 중 봉을 넣으면 피벗이 틱마다 진동한다 (2026-07-07 실측 교훈 동일 적용).
   const doneBars5 = bars5.filter((b) => b.startMin + 5 <= nowMin);
-  const swing = computeSwingStructure(doneBars5.map((b) => ({ min: b.startMin, px: b.close })));
+  const swing = computeSwingStructure(doneBars5.map((b) => ({ min: b.startMin, px: b.close })), opts?.swing);
   sig("T6", "스윙 구조(고점·저점 연결선)", swing.status !== "미정", swing.status === "추세",
     swing.status === "추세" ? swing.dir : null,
     `${swing.detail} [산${swing.highs}·골${swing.lows}]`);
