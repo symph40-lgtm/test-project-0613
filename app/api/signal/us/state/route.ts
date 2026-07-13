@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { collectUsTick, appendUsTick, loadUsTicks, fetchSmhDaily, etNow, toVirtualMin } from "@/lib/signal/us/data";
 import { decideUs, buildUsSignalAlert, buildUsMoveAlerts } from "@/lib/signal/us/engine";
-import { maybeSendUsReversalAlert } from "@/lib/signal/us/alerts";
+import { maybeSendUsReversalAlert, maybeSendUsTrendCancel } from "@/lib/signal/us/alerts";
 import { US_SIGNAL_CONFIG } from "@/lib/signal/us/config";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,13 @@ export async function GET(req: NextRequest) {
     if (rows.length === 0 || rows[rows.length - 1].ts !== tick.ts) rows.push(tick);
 
     const smhDaily = await fetchSmhDaily(15);
-    const judgment = decideUs(rows, smhDaily, toVirtualMin(minuteOfDay), iso, date);
+    const nowVirtual = toVirtualMin(minuteOfDay);
+    const judgment = decideUs(rows, smhDaily, nowVirtual, iso, date);
+
+    // 지속 확인용 — confirmPersistMin분 전 시점 판정 (한 틱 확정/해제 채터링 방지, 2026-07-13)
+    const persistCut = nowVirtual - US_SIGNAL_CONFIG.confirmPersistMin;
+    const prevRows = rows.filter((r) => r.minute_of_day <= persistCut);
+    const prevJudgment = prevRows.length >= 5 ? decideUs(prevRows, smhDaily, persistCut, iso, date) : null;
 
     // 문자 — 판정 확정(1일 1회) + SMH 급변·스윙 (에피소드별 1일 1회는 dispatch가 보장).
     // 조용 시간(01:00~07:00 KST)엔 문자만 억제하고 이메일은 발송 — 수집·판정은 계속 (사용자 지정)
@@ -51,8 +57,13 @@ export async function GET(req: NextRequest) {
     const quiet = kstMin >= Q.fromKstMin && kstMin < Q.toKstMin;
     let sent = 0;
     if (isWeekday && inSession) {
+      // 확정 문자는 N분 전 판정도 같은 방향 추세일일 때만 (지속 확인 — 실측 23:05 채터링 수정)
       const sig = buildUsSignalAlert(judgment);
-      if (sig) sent += await dispatchToChannels("signal", date, { ...sig, suppressSms: quiet }, undefined, { us: true, dayType: judgment.dayType, ts: iso }).catch(() => 0);
+      const persisted =
+        prevJudgment !== null && prevJudgment.dayType === judgment.dayType && prevJudgment.trend?.grade === "추세일";
+      if (sig && persisted) sent += await dispatchToChannels("signal", date, { ...sig, suppressSms: quiet }, undefined, { us: true, dayType: judgment.dayType, ts: iso }).catch(() => 0);
+      // 확정 후 추세 훼손 시 해제 문자 (1일 1회)
+      sent += await maybeSendUsTrendCancel(judgment, prevJudgment, quiet).catch(() => 0);
       for (const alert of buildUsMoveAlerts(rows)) {
         sent += await dispatchToChannels("signal", date, { ...alert, suppressSms: quiet }, `미국 급변 — ${alert.text.slice(10, 40)}`).catch(() => 0);
       }
