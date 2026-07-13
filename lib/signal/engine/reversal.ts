@@ -19,6 +19,9 @@ export type ReversalHit = {
   cond: string;               // 성립 조건 표기 (예: "5분봉3개 -2.3%p")
   movePct: number;            // 변동 크기 (%p, 부호 = 방향)
   preMovePct: number | null;  // 직전 흐름 (%p) — 표기용, 데이터 부족 시 null
+  // 신호 창 극값 대비 현재 되돌림 (%p) — UP이면 윗꼬리, DOWN이면 아랫꼬리.
+  // 되돌림이 크면 그 모멘텀은 이미 반대 세력에 흡수된 것 (윗꼬리 필터, 2026-07-13)
+  retracePp?: number | null;
 };
 
 type Pt = { min: number; chg: number };
@@ -68,6 +71,7 @@ export function detectReversal(ticks: IntradayTick[]): ReversalHit | null {
   ];
 
   let best: ReversalHit | null = null;
+  let bestStartMin: number | null = null;
   for (const c of conds) {
     const n = c.series.length;
     if (n < c.w + 1) continue;
@@ -82,6 +86,16 @@ export function detectReversal(ticks: IntradayTick[]): ReversalHit | null {
         movePct: Number(move.toFixed(2)),
         preMovePct: pre !== null ? Number(pre.toFixed(2)) : null,
       };
+      bestStartMin = c.series[n - 1 - c.w].min;
+    }
+  }
+  // 신호 창 극값 대비 현재 되돌림 (윗꼬리/아랫꼬리) — 1분 시계열 기준. 필터 판정은 alerts.ts
+  if (best !== null && bestStartMin !== null) {
+    const winPts = m1.filter((p) => p.min >= bestStartMin);
+    const cur = m1[m1.length - 1].chg;
+    if (winPts.length > 0) {
+      const ext = best.dir === "UP" ? Math.max(...winPts.map((p) => p.chg)) : Math.min(...winPts.map((p) => p.chg));
+      best.retracePp = Number(Math.abs(ext - cur).toFixed(2));
     }
   }
   return best;

@@ -18,6 +18,7 @@ type SignalAlert = ChannelAlert;
 // 종목만 다르게 연달아 오면 시각 없인 오류처럼 보임. 실제로는 2분 간격 별개 시점이었음)
 function kstHhmm(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 9 * 3600e3);
+  if (!isFinite(d.getTime())) return "--:--";
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
@@ -335,8 +336,24 @@ export async function maybeSendVolumeAlert(date: string, ticks: IntradayTick[]):
 export function buildReversalAlert(j: Judgment): SignalAlert | null {
   const hit = j.ext.reversal;
   if (!hit) return null;
-  if (j.phase === "장전" || j.phase === "마감") return null; // 장중(09:00~15:45)만
+  // ① 진입 시간대(판정 구간 09:30~13:30)만 — L4 신규 진입 마감 후 "진입 검토" 문자는 모순
+  // (2026-07-13 실측: 14:03~14:44 레버리지 3차 → 15:05 재급락. 기존엔 장전·마감만 제외했음)
+  if (j.phase !== "판정") return null;
   if (hit.dir === "DOWN" && j.crashContext.active) return null; // XS1 — 폭락 후 인버스 금지
+  // ② 추세일 '확정'과 반대 방향이면 발송 안 함 — 판정-문자 정합 (약한추세·비추세 등 변동장은
+  // 기존 원칙대로 방향 무관 발송 유지, 사용자 확정 2026-07-07)
+  if (j.trend?.grade === "추세일") {
+    if (hit.dir === "UP" && j.trend.dir === "DOWN") return null;
+    if (hit.dir === "DOWN" && j.trend.dir === "UP") return null;
+  }
+  // ③ 윗꼬리(되돌림) 필터 — 신호 창 극값에서 이미 기준 이상 되돌린 반등/반락은 흡수된 모멘텀
+  const RV = SIGNAL_CONFIG.reversal;
+  if (
+    typeof hit.retracePp === "number" &&
+    hit.retracePp >= Math.max(RV.wickRetraceMinPp, Math.abs(hit.movePct) * RV.wickRetraceRatio)
+  ) {
+    return null;
+  }
   const pre = hit.preMovePct !== null ? ` (직전 ${hit.preMovePct > 0 ? "+" : ""}${hit.preMovePct.toFixed(1)}%p)` : "";
   const at = ` [${kstHhmm(j.ts)}]`;
   return hit.dir === "UP"

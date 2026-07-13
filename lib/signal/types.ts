@@ -172,8 +172,9 @@ export type ExtRecord = {
   basisSlope: number | null;
   basisBlackout: boolean;      // 만기 주간 제외
   vkospiPeak: number | null;   // 소스 부재 — null
-  // RV1 하닉 분봉 반전 감지 (engine/reversal.ts) — 성립 시 즉시 진입신호 문자
-  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number | null } | null;
+  // RV1 하닉 분봉 반전 감지 (engine/reversal.ts) — 성립 시 즉시 진입신호 문자.
+  // retracePp: 신호 창 극값 대비 되돌림 (윗꼬리 필터용, 2026-07-13)
+  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number | null; retracePp?: number | null } | null;
 };
 
 // ── 통합 판정
