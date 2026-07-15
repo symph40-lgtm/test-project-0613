@@ -160,6 +160,56 @@ export async function fetchKisInvestorFlow(market: "kospi" | "k200fut"): Promise
   }
 }
 
+// ── 외국인·기관 매매종목가집계 (FHPTJ04400000, HTS [0440]) — 종목별 '당일 추정' 순매매량(주).
+// 네이버 종목 잠정치가 장중 미제공으로 판명(2026-07-15, L5가 가동 이래 항상 null이던 원인)되어
+// 이 API로 대체. 금액 기준 순매수 상위 30 + 순매도 상위 30을 합쳐 요청 종목을 찾는다 —
+// 하닉·삼전은 거래대금 최상위라 사실상 항상 포함 (양쪽에 없으면 그 종목은 null = 순매매 미미).
+// 부호 실측: 매도 목록은 음수로 반환 — 그대로 사용.
+export type KisStockEstimate = { frgnQty: number; orgnQty: number };
+
+export async function fetchKisStockEstimates(codes: string[]): Promise<Map<string, KisStockEstimate> | null> {
+  const appkey = process.env.KIS_APP_KEY;
+  const appsecret = process.env.KIS_APP_SECRET;
+  if (!appkey || !appsecret) return null;
+  const token = await getToken();
+  if (!token) return null;
+  const want = new Set(codes);
+  const map = new Map<string, KisStockEstimate>();
+  try {
+    for (const sortCode of ["0", "1"]) { // 0=순매수 상위, 1=순매도 상위 (금액 기준)
+      const url = new URL(`${KIS_BASE}/uapi/domestic-stock/v1/quotations/foreign-institution-total`);
+      url.searchParams.set("FID_COND_MRKT_DIV_CODE", "V");
+      url.searchParams.set("FID_COND_SCR_DIV_CODE", "16449");
+      url.searchParams.set("FID_INPUT_ISCD", "0000");
+      url.searchParams.set("FID_DIV_CLS_CODE", "1"); // 금액 기준 — 고가주(하닉) 수량 불리 보정
+      url.searchParams.set("FID_RANK_SORT_CLS_CODE", sortCode);
+      url.searchParams.set("FID_ETC_CLS_CODE", "0");
+      const r = await fetch(url, {
+        headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPTJ04400000", custtype: "P" },
+        cache: "no-store",
+      });
+      if (!r.ok) continue;
+      const j = (await r.json()) as { rt_cd?: string; output?: Record<string, unknown>[] };
+      if (j.rt_cd !== "0" || !Array.isArray(j.output)) continue;
+      for (const row of j.output) {
+        const code = String(row.mksc_shrn_iscd ?? "");
+        if (!want.has(code) || map.has(code)) continue;
+        const num = (v: unknown): number => {
+          const n = typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : typeof v === "number" ? v : NaN;
+          return isFinite(n) ? n : NaN;
+        };
+        const frgn = num(row.frgn_ntby_qty);
+        const orgn = num(row.orgn_ntby_qty);
+        if (isFinite(frgn)) map.set(code, { frgnQty: frgn, orgnQty: isFinite(orgn) ? orgn : 0 });
+      }
+      if ([...want].every((c) => map.has(c))) break; // 순매수 목록에서 다 찾으면 매도 목록 생략
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
 // ── 프로그램매매 종합현황(시간) (FHPPG04600101, HTS [0460]) — 코스피 차익+비차익 순매수.
 // 최신 시각 행의 whol_smtn_ntby_tr_pbmn(백만원)을 억원으로 환산. 장중 최근 30분 시계열만 제공되므로
 // 60초 폴링으로 최신 값을 틱에 적재해 자체 시계열을 만든다.

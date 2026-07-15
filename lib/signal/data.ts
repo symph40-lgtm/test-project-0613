@@ -4,7 +4,7 @@
 
 import YahooFinance from "yahoo-finance2";
 import { fetchKospi200Futures, fetchKoreanQuote, fetchStockFlow, fetchAccVolume } from "@/lib/market/naver-flow";
-import { hasKisKeys, fetchKisInvestorFlow, fetchKisProgramNet } from "@/lib/market/kis";
+import { hasKisKeys, fetchKisInvestorFlow, fetchKisProgramNet, fetchKisStockEstimates } from "@/lib/market/kis";
 import { fetchMarketData, fetchBondEtf } from "@/lib/market/fetch";
 import { SIGNAL_CONFIG, EVENT_CALENDAR, rebalanceMonthBias } from "./config";
 import type { DailyBar, IntradayTick, PremarketContext } from "./types";
@@ -136,7 +136,7 @@ export async function collectTick(): Promise<IntradayTick> {
   // KIS 수급 (T4·T5·T8, 2026-07-09) — 정규장 시간에만 호출 (장외엔 마감 스냅샷이라 시계열 왜곡)
   const inRegular = minuteOfDay >= SIGNAL_CONFIG.session.openMin && minuteOfDay <= SIGNAL_CONFIG.session.endMin + 15;
   const useKis = hasKisKeys() && inRegular;
-  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol, kospiInv, futInv, prgmNet] = await Promise.all([
+  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol, kospiInv, futInv, prgmNet, stockEst] = await Promise.all([
     fetchKospi200Futures().catch(() => null),
     fetchKpi200().catch(() => null),
     fetchKoreanQuote(hynix).catch(() => null),
@@ -149,6 +149,9 @@ export async function collectTick(): Promise<IntradayTick> {
     useKis ? fetchKisInvestorFlow("kospi").catch(() => null) : Promise.resolve(null),
     useKis ? fetchKisInvestorFlow("k200fut").catch(() => null) : Promise.resolve(null),
     useKis ? fetchKisProgramNet().catch(() => null) : Promise.resolve(null),
+    // 종목별 외인·기관 당일 추정치 (KIS [0440] 가집계, 2026-07-15) — L5·L9의 잠정치 소스.
+    // 네이버 잠정치는 장중 미제공 판명 (첫 행이 항상 전일) — 폴백으로만 유지
+    useKis ? fetchKisStockEstimates([hynix, samsung]).catch(() => null) : Promise.resolve(null),
   ]);
 
   const futPx = fut?.session === "정규" && !fut.stale ? fut.price : fut?.price ?? null;
@@ -164,10 +167,10 @@ export async function collectTick(): Promise<IntradayTick> {
     hynixChg: hynixQ?.changePercent ?? null,
     samsungPx: samsungQ?.price ?? null,
     samsungChg: samsungQ?.changePercent ?? null,
-    hynixFrgn: hynixFlow?.provisional ? hynixFlow.foreign : null,
-    samsungFrgn: samsungFlow?.provisional ? samsungFlow.foreign : null,
-    hynixInst: hynixFlow?.provisional ? hynixFlow.institution : null,
-    samsungInst: samsungFlow?.provisional ? samsungFlow.institution : null,
+    hynixFrgn: stockEst?.get(hynix)?.frgnQty ?? (hynixFlow?.provisional ? hynixFlow.foreign : null),
+    samsungFrgn: stockEst?.get(samsung)?.frgnQty ?? (samsungFlow?.provisional ? samsungFlow.foreign : null),
+    hynixInst: stockEst?.get(hynix)?.orgnQty ?? (hynixFlow?.provisional ? hynixFlow.institution : null),
+    samsungInst: stockEst?.get(samsung)?.orgnQty ?? (samsungFlow?.provisional ? samsungFlow.institution : null),
     hynixVol,
     kospiFrgn: kospiInv?.frgnNetAmt ?? null,
     kospiPrgm: prgmNet,
