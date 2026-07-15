@@ -22,8 +22,24 @@ function kstHhmm(iso: string): string {
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
+// ── 진입가 적정성 (사용자 지정 2026-07-15: "신호가 켜졌다"만이 아니라 "지금 가격이 진입할
+// 자리인가"까지 문자에 담는다 — 실측: 개장 +10% 진행 후 10시 판정 문자를 보고 추격매수한 사례).
+// 당일 진행폭을 ATR14(통상 하루 변동) 대비 소진율로 평가 — ATR 없으면 절대 % 기준 폴백.
+function entryQualityLine(hynixChg: number | null | undefined, atrPct: number | null): string | null {
+  if (hynixChg == null || !isFinite(hynixChg)) return null;
+  const mag = Math.abs(hynixChg);
+  const ratio = atrPct !== null && atrPct > 0 ? mag / atrPct : null;
+  const level = ratio !== null ? (ratio >= 1.2 ? 2 : ratio >= 0.7 ? 1 : 0) : mag >= 8 ? 2 : mag >= 4 ? 1 : 0;
+  const chgTxt = `하닉 당일 ${hynixChg > 0 ? "+" : ""}${hynixChg.toFixed(1)}%`;
+  const ratioTxt = ratio !== null ? ` = 통상 하루 변동(ATR)의 ${ratio.toFixed(1)}배 소진` : "";
+  if (level === 2) return `진입가 주의: ${chgTxt}${ratioTxt} — 추격 구간, 신규 진입 비추·눌림/재형성 대기`;
+  if (level === 1) return `진입가 참고: ${chgTxt}${ratioTxt} — 중반 진행, 신규는 1/3 이하·타이트 스탑`;
+  return `진입가 참고: ${chgTxt}${ratioTxt} — 초입 구간`;
+}
+
 // 판정 → 알림 여부·문구 결정 (없으면 null)
-export function buildSignalAlert(j: Judgment): SignalAlert | null {
+// ticks: 진입가 적정성 평가용 (미전달 시 해당 줄 생략 — 백테스트 호환)
+export function buildSignalAlert(j: Judgment, ticks?: IntradayTick[]): SignalAlert | null {
   if (j.phase !== "판정") return null; // 진입 시간대(L4)에만 문자 — 그 외는 화면으로 충분
 
   const t = j.trend;
@@ -32,6 +48,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
     : "";
   const stop = `스탑 -${j.risk.stopFixedPct}%${j.risk.stopAtrPct !== null ? `(ATR -${j.risk.stopAtrPct.toFixed(1)}%)` : ""}`;
   const at = kstHhmm(j.ts); // 판정 기준 시각 (사용자 지정 2026-07-13 — 전 문자 시각 표기)
+  const eq = entryQualityLine(ticks && ticks.length > 0 ? ticks[ticks.length - 1].hynixChg : null, j.risk.atr14Pct);
+  const eqLine = eq ? `\n${eq}` : "";
 
   // 약한 추세(장중 재형성 포함)는 확정과 구분 — 비중 1/3·타이트 트레일링 안내
   const weak = t?.grade === "약한추세";
@@ -47,8 +65,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       severity: "high",
       smsSubject: "*판정 확정 레버리지",
       text: weak
-        ? `[스탁가드 신호] 상방 약한 추세${late} (${stat}·${at})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
-        : `[스탁가드 신호] 추세일 상방 확정${late} (${stat}·${at})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산`,
+        ? `[스탁가드 신호] 상방 약한 추세${late} (${stat}·${at})\n레버리지 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산${eqLine}`
+        : `[스탁가드 신호] 추세일 상방 확정${late} (${stat}·${at})\n레버리지 진입 검토 — ${j.risk.sizeGuide}\n${stop} · 15:00 당일 청산${eqLine}`,
     };
   }
   if (j.dayType === "추세일_하방" && j.setups.short.blocked.length === 0 && j.setups.short.requiredOk) {
@@ -57,8 +75,8 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       severity: "high",
       smsSubject: "*판정 확정 인버스",
       text: weak
-        ? `[스탁가드 신호] 하방 약한 추세${late} (${stat}·${at})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산`
-        : `[스탁가드 신호] 추세일 하방 확정${late} (${stat}·${at})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산`,
+        ? `[스탁가드 신호] 하방 약한 추세${late} (${stat}·${at})\n인버스 1/3 비중만 검토 · 트레일링 -${j.risk.trailPct}%\n${stop} · 15:00 당일 청산${eqLine}`
+        : `[스탁가드 신호] 추세일 하방 확정${late} (${stat}·${at})\n인버스 진입 검토 — 총자산 ${j.risk.inverseCapPct}% 상한\n${stop} · 15:00 당일 청산${eqLine}`,
     };
   }
   if (j.dayType === "V반등후보" && (j.setups.long.verdict === "진입후보" || j.setups.long.verdict === "강한신호")) {
@@ -66,7 +84,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       key: "vrebound_long",
       severity: "high",
       smsSubject: "*판정 확정 V반등",
-      text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat}·${at})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)`,
+      text: `[스탁가드 신호] V반등 ${j.setups.long.verdict} (가점 ${j.setups.long.bonus}점, ${stat}·${at})\n반전 후 진행 확인됨 — 레버리지 검토, ${j.risk.sizeGuide}\n${stop} · 인버스 금지(XS1)${eqLine}`,
     };
   }
   // V반등 조기 반전 — 지속 확인 전 1/3 비중 선진입 (2단계 진입의 1차. 늦으면 수익이 줄어드는 문제 대응)
@@ -75,7 +93,7 @@ export function buildSignalAlert(j: Judgment): SignalAlert | null {
       key: "vrebound_early",
       severity: "high",
       smsSubject: "*판정 확정 V반등(조기)",
-      text: `[스탁가드 신호] V반등 조기 반전 감지 [${at}]\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)`,
+      text: `[스탁가드 신호] V반등 조기 반전 감지 [${at}]\n${j.headline}\n레버리지 1/3 비중만 선진입 검토 · ${stop} 타이트\n지속 확인 시 본진입 신호 추가 발송 · 인버스 금지(XS1)${eqLine}`,
     };
   }
   if (j.dayType === "횡보일") {
@@ -433,10 +451,12 @@ export async function maybeSendReversalAlert(j: Judgment, ticks: IntradayTick[])
     if (progress < R.repeatMinProgressPct) return 0;
   }
 
+  // 진입가 적정성 줄 — 모멘텀 문자에도 동일 적용 (사용자 지정 2026-07-15: 추격매수 방지 맥락)
+  const eq = entryQualityLine(curLevel, j.risk.atr14Pct);
   const keyed: SignalAlert = {
     ...alert,
     key: n === 0 ? alert.key : `${alert.key}_${n + 1}`,
-    text: n === 0 ? alert.text : `${alert.text} (${n + 1}차)`,
+    text: `${n === 0 ? alert.text : `${alert.text} (${n + 1}차)`}${eq ? `\n${eq}` : ""}`,
   };
   return dispatchToChannels("signal", j.date, keyed, `분봉 모멘텀 — ${keyed.text.slice(10, 45)}`, {
     reversal: j.ext.reversal,
@@ -460,8 +480,8 @@ export async function maybeSendMoveAlerts(date: string, ticks: IntradayTick[]): 
 
 // 발송 실행 — state 라우트에서 판정마다 호출 (내부에서 중복·수신자 판단)
 // 공용 발송 경로(1일 1회 중복 방지·채널 조회)는 lib/alerts/dispatch.ts로 이동.
-export async function maybeSendSignalSms(j: Judgment): Promise<{ sent: number; skipped: string | null }> {
-  const alert = buildSignalAlert(j);
+export async function maybeSendSignalSms(j: Judgment, ticks?: IntradayTick[]): Promise<{ sent: number; skipped: string | null }> {
+  const alert = buildSignalAlert(j, ticks);
   if (!alert) return { sent: 0, skipped: "알림 대상 아님" };
   const sent = await dispatchToChannels("signal", j.date, alert, undefined, { headline: j.headline, dayType: j.dayType, ts: j.ts });
   return { sent, skipped: sent === 0 ? "기발송 또는 채널 없음" : null };
