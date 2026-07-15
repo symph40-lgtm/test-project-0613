@@ -108,10 +108,11 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
   const targets: {
     name: string; sym: string; chg: number | null;
     levels: readonly number[]; swingStep: number;
+    swingOff?: boolean; // 스윙(반락·반등) 문자 제외 — 삼성전자 (사용자 지정 2026-07-15)
     series: (t: IntradayTick) => number | null;
   }[] = [
     { name: "SK하이닉스", sym: "hynix", chg: tick.hynixChg, levels: M.stockLevels, swingStep: M.stockSwingStep, series: (t) => t.hynixChg },
-    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: M.stockLevels, swingStep: M.stockSwingStep, series: (t) => t.samsungChg },
+    { name: "삼성전자", sym: "samsung", chg: tick.samsungChg, levels: M.stockLevels, swingStep: M.stockSwingStep, swingOff: true, series: (t) => t.samsungChg },
     { name: "코스피200선물", sym: "fut", chg: tick.futChg, levels: M.futLevels, swingStep: M.futSwingStep, series: (t) => t.futChg },
   ];
 
@@ -119,7 +120,13 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
   for (const t of targets) {
     if (t.chg === null || !isFinite(t.chg)) continue;
     const cur = t.chg;
-    const chgs = ticks.map(t.series).filter((v): v is number => v !== null && isFinite(v));
+    // 극값(고점·저점) 계산에서 세션 첫 2분 제외 — 09:00 직후 시세 API가 전일 등락률을 잠깐
+    // 반환하는 스테일 틱이 극값을 오염 (실측 2026-07-14 09:06: 삼전 '저점 -10.7%' = 전일 마감값
+    // → 가짜 "반등 +9.7%p" 문자. 사용자 지정: 시초가 기준 왜곡 제거)
+    const chgs = ticks
+      .filter((x) => x.minuteOfDay >= S.openMin + 2)
+      .map(t.series)
+      .filter((v): v is number => v !== null && isFinite(v));
     const hi = chgs.length > 0 ? Math.max(...chgs) : cur;
     const lo = chgs.length > 0 ? Math.min(...chgs) : cur;
 
@@ -152,6 +159,7 @@ export function buildMoveAlerts(ticks: IntradayTick[]): SignalAlert[] {
 
     // ② 반락·반등 스윙 — 당일 극값 대비 스텝 등간격. 키에 극값 에피소드(스텝 격자 버킷)를 넣어
     // 극값이 스텝 이상 갱신되면 같은 단계도 다시 발송된다 (새 저점 기준의 새 반등이므로).
+    if (t.swingOff) continue; // 삼성전자 — 스윙 문자 발송 중단 (사용자 지정 2026-07-15. 급변 절대 단계는 유지)
     if (chgs.length < 2) continue;
     const step = t.swingStep;
 
@@ -220,9 +228,9 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
     const riseIntoHi = hiIdx > 0 ? hi - Math.min(...vals.slice(0, hiIdx + 1)) : 0;
     const fallIntoLo = loIdx > 0 ? Math.max(...vals.slice(0, loIdx + 1)) - lo : 0;
 
-    // 고점 대비 반락 — 매수세 이탈 (순매수 축소 or 순매도 확대)
+    // 고점 대비 반락 — 매수세 이탈 (순매수 축소 or 순매도 확대). 고점이 +minExtreme 이상일 때만
     const down = hi - cur;
-    if (down >= t.step && riseIntoHi >= F.minSpan) {
+    if (down >= t.step && riseIntoHi >= F.minSpan && hi >= F.minExtreme) {
       const level = Math.floor(down / t.step + 1e-9) * t.step;
       const epi = Math.floor(hi / t.step + 1e-9);
       alerts.push({
@@ -233,9 +241,10 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
       });
     }
 
-    // 저점 대비 반등 — 매수세 유입 (순매도 감속 or 순매수 확대)
+    // 저점 대비 반등 — 매수세 유입 (순매도 감속 or 순매수 확대). 저점이 -minExtreme 이하일 때만
+    // (0 근처 저점에서의 상승은 반전이 아니라 당일 순매수 확대 — 사용자 지정 2026-07-15)
     const up = cur - lo;
-    if (up >= t.step && fallIntoLo >= F.minSpan) {
+    if (up >= t.step && fallIntoLo >= F.minSpan && lo <= -F.minExtreme) {
       const level = Math.floor(up / t.step + 1e-9) * t.step;
       const epi = Math.floor(lo / t.step + 1e-9);
       alerts.push({

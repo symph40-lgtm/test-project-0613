@@ -146,6 +146,14 @@ export function decideUs(rows: UsTickRow[], smhDaily: DailyBar[], nowVirtualMin:
       dataNotes.push(`보수 게이트 강등: ${aligned ? "" : `매크로 미정렬(${bias.dir} 강도${bias.strength})`}${!aligned && !efficient ? " · " : ""}${efficient ? "" : `DC2 ${trend.dc2?.toFixed(2) ?? "-"} < ${U.strongDay.dc2Min}`}`);
     }
   }
+  // 축1·축2 상충 보수화 (사용자 지정 2026-07-15, 한국과 동일) — 약한추세 + 반대 매크로(강도 2↑) → 비추세
+  if (trend !== null && trend.grade === "약한추세" && trend.dir !== null && bias.strength >= 2) {
+    const opposed = (trend.dir === "UP" && bias.dir === "하방") || (trend.dir === "DOWN" && bias.dir === "상방");
+    if (opposed) {
+      trend.grade = "비추세";
+      dataNotes.push(`축1·축2 상충 — 관망 (축1 ${bias.dir} 강도${bias.strength} vs 축2 ${trend.dir === "UP" ? "상방" : "하방"})`);
+    }
+  }
 
   // LM 매크로 게이트 — 악화(금리↑·강달러·VIX 급등) 2개 이상이면 레버리지(USD) 금지
   const badItems = [

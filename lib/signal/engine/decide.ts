@@ -54,6 +54,17 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
       dataNotes.push(`보수 게이트 강등: ${why} — 1/3 비중·타이트 트레일링`);
     }
   }
+  // 축1·축2 상충 보수화 (사용자 지정 2026-07-15: 개장 초반 레버리지·인버스 판정이 왔다갔다) —
+  // 약한추세인데 매크로(축1)가 반대 방향으로 강하면(강도 2↑) 비추세(대기)로 강등.
+  // 차트가 잠깐 만드는 방향보다 매크로 역풍을 우선 — 상충 구간에선 관망이 정답.
+  if (trend !== null && trend.grade === "약한추세" && trend.dir !== null && bias.strength >= 2) {
+    const opposed = (trend.dir === "UP" && bias.dir === "하방") || (trend.dir === "DOWN" && bias.dir === "상방");
+    if (opposed) {
+      trend.grade = "비추세";
+      trend.extNotes.push(`약한추세→비추세 강등: 축1(${bias.dir} 강도${bias.strength})과 축2(${trend.dir === "UP" ? "상방" : "하방"}) 상충 — 보수 판정`);
+      dataNotes.push(`축1·축2 상충 — 관망 (축1 ${bias.dir} 강도${bias.strength} vs 축2 ${trend.dir === "UP" ? "상방" : "하방"})`);
+    }
+  }
 
   const divergence = inSession ? computeDivergence(ticks, trend?.dir ?? null) : null;
   const setups = computeSetups({ ctx, bias, trend, ticks, gapPct: gap, minuteOfDay: nowMinuteOfDay, crashActive, crashCumPct: crashCum });
