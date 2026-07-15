@@ -136,7 +136,7 @@ export async function collectTick(): Promise<IntradayTick> {
   // KIS 수급 (T4·T5·T8, 2026-07-09) — 정규장 시간에만 호출 (장외엔 마감 스냅샷이라 시계열 왜곡)
   const inRegular = minuteOfDay >= SIGNAL_CONFIG.session.openMin && minuteOfDay <= SIGNAL_CONFIG.session.endMin + 15;
   const useKis = hasKisKeys() && inRegular;
-  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol, kospiInv, futInv, prgmNet, stockEst] = await Promise.all([
+  const [fut, kpi200, hynixQ, samsungQ, hynixFlow, samsungFlow, cross, breadth, hynixVol, samsungVol, kospiInv, futInv, prgmNet, stockEst] = await Promise.all([
     fetchKospi200Futures().catch(() => null),
     fetchKpi200().catch(() => null),
     fetchKoreanQuote(hynix).catch(() => null),
@@ -146,6 +146,7 @@ export async function collectTick(): Promise<IntradayTick> {
     fetchCrossMarkets().catch(() => ({ nikkeiChg: null, twiiChg: null, nqChg: null })),
     fetchBreadth().catch(() => null),
     fetchAccVolume(hynix).catch(() => null),
+    fetchAccVolume(samsung).catch(() => null), // 삼전 거래량 — 브리핑 거래량 라인 (2026-07-15)
     useKis ? fetchKisInvestorFlow("kospi").catch(() => null) : Promise.resolve(null),
     useKis ? fetchKisInvestorFlow("k200fut").catch(() => null) : Promise.resolve(null),
     useKis ? fetchKisProgramNet().catch(() => null) : Promise.resolve(null),
@@ -172,6 +173,7 @@ export async function collectTick(): Promise<IntradayTick> {
     hynixInst: stockEst?.get(hynix)?.orgnQty ?? (hynixFlow?.provisional ? hynixFlow.institution : null),
     samsungInst: stockEst?.get(samsung)?.orgnQty ?? (samsungFlow?.provisional ? samsungFlow.institution : null),
     hynixVol,
+    samsungVol,
     kospiFrgn: kospiInv?.frgnNetAmt ?? null,
     kospiPrgm: prgmNet,
     futFrgn: futInv?.frgnNetAmt ?? null,

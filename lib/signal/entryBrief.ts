@@ -47,6 +47,38 @@ const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${Stri
 const fmtBil = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString("ko-KR")}억`;
 const signed = (v: number, d: number) => `${v >= 0 ? "+" : ""}${v.toFixed(d)}`;
 
+// 거래량 배율 — 최근 완성 5분봉 거래량 ÷ 당일 평균 (buildVolumeAlert와 동일 계산.
+// 사용자 지정 2026-07-15: 개별 거래량 문자를 중단하고 브리핑 본문에 급증/급감으로 포함)
+function volRatio(ticks: IntradayTick[], sel: (t: IntradayTick) => number | null | undefined): number | null {
+  const V = SIGNAL_CONFIG.volumeAlert;
+  const pts = ticks.filter((t) => {
+    const v = sel(t);
+    return v != null && isFinite(v) && t.minuteOfDay >= S.openMin;
+  });
+  if (pts.length < 4) return null;
+  const nowMin = ticks[ticks.length - 1].minuteOfDay;
+  const byBucket = new Map<number, number>();
+  for (const p of pts) byBucket.set(Math.floor(p.minuteOfDay / 5), sel(p) as number);
+  const buckets = [...byBucket.entries()].filter(([b]) => (b + 1) * 5 <= nowMin).sort(([a], [b]) => a - b);
+  const bars: number[] = [];
+  for (let i = 1; i < buckets.length; i++) {
+    if (buckets[i][0] - buckets[i - 1][0] !== 1) continue;
+    const vol = buckets[i][1] - buckets[i - 1][1];
+    if (vol >= 0) bars.push(vol);
+  }
+  if (bars.length < V.minBars + 1) return null;
+  const last = bars[bars.length - 1];
+  const avg = bars.slice(0, -1).reduce((s, x) => s + x, 0) / (bars.length - 1);
+  return avg > 0 ? last / avg : null;
+}
+
+function volNote(ratio: number | null): string {
+  if (ratio === null) return "?";
+  const V = SIGNAL_CONFIG.volumeAlert;
+  const tag = ratio >= V.ratio ? "급증" : ratio <= V.lowRatio ? "급감" : "보통";
+  return `${ratio.toFixed(1)}배(${tag})`;
+}
+
 // K200 선물 등락률의 최근 30분 기울기 (%p) — 전환·감속 판정용 (스펙 부록 B 2026-07-10)
 export function futSlope30(ticks: IntradayTick[]): number | null {
   const pts = ticks
@@ -177,10 +209,14 @@ export function buildEntryBriefText(args: {
   if (last?.futFrgn != null) flowParts.push(`선물외인 ${fmtBil(last.futFrgn)}`);
   const flowLine = flowParts.length > 0 ? flowParts.join(" · ") : "수급(KIS) 데이터 대기";
 
+  // 거래량 라인 — 하닉·삼전 최근 5분봉 거래량 배율 (당일 평균 대비, 급증 ≥1.3배 / 급감 ≤0.6배)
+  const volLine = `거래량(5분봉) 하닉 ${volNote(volRatio(ticks, (x) => x.hynixVol))} · 삼전 ${volNote(volRatio(ticks, (x) => x.samsungVol))}`;
+
   const lines = [
     `[스탁가드] 장중브리핑 ${reason} (${hhmm})`,
     judgeLine,
     flowLine,
+    volLine,
     `미2Y ${pp(vals.y2, prev?.vals.y2, day.y2Pp)} 10Y ${pp(vals.y10, prev?.vals.y10, null)}`,
     `환율 ${px("fx", 1)}원 · WTI ${px("oil", 2)}$`,
     `K200선물 ${px("fut", 2)} · 닛케이 ${day.nkClosed && vals.nk === null ? "휴장" : px("nk", 0, true)}`,

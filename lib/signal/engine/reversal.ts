@@ -22,6 +22,8 @@ export type ReversalHit = {
   // 신호 창 극값 대비 현재 되돌림 (%p) — UP이면 윗꼬리, DOWN이면 아랫꼬리.
   // 되돌림이 크면 그 모멘텀은 이미 반대 세력에 흡수된 것 (윗꼬리 필터, 2026-07-13)
   retracePp?: number | null;
+  // 변동폭 ÷ 조건 임계값 — '강한 신호' 판별용 (2026-07-15: 문자는 strongRatio배 이상만)
+  strengthRatio?: number;
 };
 
 type Pt = { min: number; chg: number };
@@ -97,6 +99,7 @@ export function detectReversal(
         cond: `${c.label} ${move > 0 ? "+" : ""}${move.toFixed(1)}%p`,
         movePct: Number(move.toFixed(2)),
         preMovePct: pre !== null ? Number(pre.toFixed(2)) : null,
+        strengthRatio: Number((Math.abs(move) / c.th).toFixed(2)),
       };
       bestStartMin = c.series[n - 1 - c.w].min;
     }

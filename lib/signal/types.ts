@@ -26,7 +26,8 @@ export type IntradayTick = {
   samsungFrgn: number | null;
   hynixInst: number | null;   // 기관 잠정 순매매량 (L9)
   samsungInst: number | null;
-  hynixVol: number | null;    // 하닉 누적 거래량(주) — 거래량 급증 알람용 (2026-07-08)
+  hynixVol: number | null;    // 하닉 누적 거래량(주) — 거래량 급증 판정용 (2026-07-08)
+  samsungVol?: number | null; // 삼전 누적 거래량(주) — 장중브리핑 거래량 라인용 (2026-07-15, 마이그레이션 024)
   // KIS 수급 (2026-07-09 연동) — 당일 누적 순매수, 단위 억원 (KIS tr_pbmn 백만원 ÷ 100)
   kospiFrgn: number | null;   // 코스피 현물 외국인 (T8·수급 반전 알림)
   kospiPrgm: number | null;   // 코스피 프로그램 차익+비차익 (T5·T8·수급 반전 알림)
@@ -175,7 +176,8 @@ export type ExtRecord = {
   vkospiPeak: number | null;   // 소스 부재 — null
   // RV1 하닉 분봉 반전 감지 (engine/reversal.ts) — 성립 시 즉시 진입신호 문자.
   // retracePp: 신호 창 극값 대비 되돌림 (윗꼬리 필터용, 2026-07-13)
-  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number | null; retracePp?: number | null } | null;
+  // strengthRatio: 변동폭÷임계값 — 문자는 강한 신호(1.5배↑)만 (2026-07-15)
+  reversal: { dir: "UP" | "DOWN"; cond: string; movePct: number; preMovePct: number | null; retracePp?: number | null; strengthRatio?: number } | null;
 };
 
 // ── 통합 판정

@@ -259,6 +259,7 @@ export function buildFlowAlerts(ticks: IntradayTick[]): SignalAlert[] {
 
 // 수급 반전 발송 — state 라우트에서 틱마다 호출 (에피소드 키별 1일 1회는 dispatch가 보장)
 export async function maybeSendFlowAlerts(date: string, ticks: IntradayTick[]): Promise<number> {
+  if (!SIGNAL_CONFIG.flowAlert.smsEnabled) return 0; // 2026-07-15 사용자 지정 — 개별 문자 중단
   const alerts = buildFlowAlerts(ticks);
   if (alerts.length === 0) return 0;
   let sent = 0;
@@ -320,6 +321,7 @@ export function buildVolumeAlert(ticks: IntradayTick[]): SignalAlert | null {
 
 // 거래량 알람 발송 — 30분 창 안에서 최대 maxPerWindow건 (최초 + 1건 추가, 사용자 지정)
 export async function maybeSendVolumeAlert(date: string, ticks: IntradayTick[]): Promise<number> {
+  if (!SIGNAL_CONFIG.volumeAlert.smsEnabled) return 0; // 2026-07-15 사용자 지정 — 브리핑 본문으로 대체
   const alert = buildVolumeAlert(ticks);
   if (!alert) return 0;
   const V = SIGNAL_CONFIG.volumeAlert;
@@ -391,6 +393,9 @@ export async function maybeSendReversalAlert(j: Judgment, ticks: IntradayTick[])
   const alert = buildReversalAlert(j);
   if (!alert) return 0;
   const R = SIGNAL_CONFIG.reversal;
+  // 강한 신호만 문자 (사용자 지정 2026-07-15) — 변동폭이 조건 임계값의 strongRatio배 미만이면
+  // 문자 없이 판정·대시보드에만 반영
+  if (R.smsStrongOnly && (j.ext.reversal?.strengthRatio ?? 1) < R.strongRatio) return 0;
   const curLevel = ticks.length > 0 ? ticks[ticks.length - 1].hynixChg : null; // 하닉 당일 등락률
 
   // 오늘 이 방향으로 이미 나간 회차·마지막 발송 시각·발송 시점 등락률 (사용자 무관 — 키 집합 기준)
@@ -443,6 +448,7 @@ export async function maybeSendReversalAlert(j: Judgment, ticks: IntradayTick[])
 
 // 급변 알림 발송 — state 라우트에서 틱마다 호출 (단계별 1일 1회 중복 방지)
 export async function maybeSendMoveAlerts(date: string, ticks: IntradayTick[]): Promise<number> {
+  if (!SIGNAL_CONFIG.moveAlert.smsEnabled) return 0; // 2026-07-15 사용자 지정 — 개별 문자 중단
   const alerts = buildMoveAlerts(ticks);
   if (alerts.length === 0) return 0;
   let sent = 0;
