@@ -60,35 +60,32 @@ export function computeSetups(inp: Inputs): SetupResult {
     arr.push({ code, label, kind, pass, points, detail });
   const l = push(L);
 
-  // LM — 매크로 게이트 (필수, 2026-07-09 신설): 매크로 악화 2개 이상이면 레버리지 진입 금지.
+  // ══ 재설계 2026-07-15 (사용자 지정): 필수는 "이것 아니면 절대 안 되는" 조건만 —
+  // 방향(L3)·시간대(L4)·차단형 게이트(LM·FG). 나머지는 배점 차등 가점 (만점 14).
+  // LM — 매크로 게이트 (필수): 매크로 악화 2개 이상이면 레버리지 진입 금지 (차단형).
   l("LM", "매크로 게이트(악화 2개 미만)", "필수", macroBad < 2, 0,
     `악화 ${macroBad}/3 (금리↑ ${fmtB(macroBadItems[0])} · 환율↑ ${fmtB(macroBadItems[1])} · SOX↓ ${fmtB(macroBadItems[2])})`);
-  // FG — 외인 현물 게이트 (필수, 2026-07-10 신설): 외인 현물이 뚜렷이 이탈 중이면 레버리지 금지.
+  // FG — 외인 현물 게이트 (필수): 외인 현물이 뚜렷이 이탈 중이면 레버리지 금지 (차단형 — 부재·중립 통과).
   l("FG", "외인 현물 게이트(이탈 아님)", "필수", fgDir !== "DOWN", 0, fgDetail);
-  // L1 — Bias 상방: 필수에서 제외, 참고 표기만 (사용자 개정 2026-07-09. 매크로는 LM 게이트가 담당)
-  l("L1", "Bias 상방 (판정 제외 — 참고)", "가점", null, 0, `축1 ${bias.dir} 강도${bias.strength}`);
-  // L2 금리·환율 — 셋업 필수에서 제외 (사용자 개정 2026-07-07: Bias C3·C4에서 이미 반영,
-  // 셋업에서 또 요구하면 이중 계산). 참고 표기용 행으로만 유지 (가점 0점·판정 미참여).
-  const fxOk = ctx.usdkrw.changePercent !== null ? ctx.usdkrw.changePercent <= 0.1 : null;
-  const rateOk = ctx.usRates.regime !== null ? ctx.usRates.regime !== "상승" : null;
-  l("L2", "금리·환율 (Bias 반영 — 판정 제외)", "가점",
-    null, 0,
-    `환율 ${fmtB(fxOk)} · 금리(2Y) ${fmtB(rateOk)} — 참고 표기`);
   const l3 = trend === null ? null : trend.dir === "UP" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
   l("L3", "상방 방향 형성·유지 확인", "필수", l3, 0,
     trend === null ? "장중 데이터 대기" : `방향 ${trend.dir ?? "-"} · ${trend.grade} · DC1 ${pctOrDash(trend.dc1)}`);
   const inWindow = minuteOfDay >= S.observeEndMin && minuteOfDay <= S.entryEndMin;
   l("L4", `진입 시간대(${hm(S.observeEndMin)}~${hm(S.entryEndMin)})`, "필수", inWindow, 0, minuteToStr(minuteOfDay));
-  l("L5", "외인 수급(①수준+②감속 필수)", "필수", l5.pass, 0, l5.detail);
 
+  // ── 가점 (배점 차등 — 2026-07-15 재설계)
+  // L5 외인 수급 +3 (필수→고배점 가점): 외인이 팔아도 상방인 날이 있어 절대 조건이 아니며,
+  // 실측상 네이버 잠정치가 장중 미제공이라 필수로 두면 레버리지 확정이 영구 불가능했음.
+  l("L5", "외인 수급(①수준+②감속)", "가점", l5.pass, 3, l5.detail);
   const cum3 = cumReturnPct(ctx.hynixDaily, 3, true);
   const qualSrc = ctx.qualSource === "user" ? "사용자 입력" : ctx.qualSource === "ai" ? "AI 자동 분석" : "입력";
   l("L6", `직전 1~3일 누적 ${SIGNAL_CONFIG.crashCumPct}% 이상 낙폭`, "가점", crashActive, 3, `누적 ${inp.crashCumPct?.toFixed(1) ?? cum3?.toFixed(1) ?? "?"}%`);
+  // L1 Bias 상방 +2/+1 (참고→가점 승격, 사용자 지정 2026-07-15): 강도 2↑ +2, 강도 1 +1
+  l("L1", "Bias 상방(축1)", "가점", bias.dir === "상방", bias.dir === "상방" && bias.strength >= 2 ? 2 : 1,
+    `축1 ${bias.dir} 강도${bias.strength}${bias.dir === "상방" ? (bias.strength >= 2 ? " (+2)" : " (+1)") : ""}`);
   l("L7", "낙폭 원인 비실적", "가점", ctx.causeNonEarnings, 2, ctx.causeNonEarnings === null ? "AI 분석 대기" : qualSrc);
   // (L8 이익 컨센서스 가점 — 사용자 개정 2026-07-09로 제거. XS2 차단 판단에는 계속 사용)
-  l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
   // L10 — AI 서프라이즈 판정(컨센서스 대비 발표값) 우선, 없으면 시장 반응으로 근사.
-  // 근사의 해외장은 SOX 우선 — 나스닥보다 중요 (사용자 개정 2026-07-09)
   const l10 = ctx.macroSurprise !== null
     ? ctx.macroSurprise === "easing"
     : ctx.usRates.changePp !== null && usEquity !== null
@@ -96,7 +93,13 @@ export function computeSetups(inp: Inputs): SetupResult {
       : null;
   l("L10", "전일 매크로 서프라이즈 완화적", "가점", l10, 2,
     ctx.macroSurprise !== null ? `지표 서프라이즈 ${ctx.macroSurprise === "easing" ? "완화" : "긴축"} (AI 판정)` : l10 === null ? "자동 근사 불가" : "금리↓+SOX↑ 근사");
-  l("L11", "기대인플레 하락 추세", "가점", null, 1, "데이터 소스 없음 — 수동 확인");
+  // L2 금리·환율 안정 +1 (참고→저배점 가점 — Bias C3·C4와 부분 중복이라 배점 최소)
+  const fxOk = ctx.usdkrw.changePercent !== null ? ctx.usdkrw.changePercent <= 0.1 : null;
+  const rateOk = ctx.usRates.regime !== null ? ctx.usRates.regime !== "상승" : null;
+  l("L2", "금리·환율 안정", "가점", fxOk === null || rateOk === null ? null : fxOk && rateOk, 1,
+    `환율 ${fmtB(fxOk)} · 금리(2Y) ${fmtB(rateOk)} (Bias 중복이라 +1만)`);
+  l("L9", "개인·기관이 외인 물량 흡수", "가점", l5.absorb, 1, l5.absorbDetail);
+  // (L11 기대인플레 — 데이터 소스가 없어 영구 미산출이라 목록에서 제거, 2026-07-15)
 
   // 금지 X1~X3
   const longBlocked: string[] = [];
@@ -121,22 +124,21 @@ export function computeSetups(inp: Inputs): SetupResult {
   const longRequiredOk = requiredL.every((i) => i.pass === true);
   const longBonus = L.filter((i) => i.kind === "가점" && i.pass === true).reduce((s, i) => s + i.points, 0);
   const hardBlockedL = longBlocked.some((b) => b.startsWith("X1"));
+  // 상방 추세일 확정이면 가점 미달이어도 진입후보 — 판정-카드 정합 (숏과 대칭, 2026-07-15)
+  const trendUpConfirmed = trend !== null && trend.dir === "UP" && trend.grade === "추세일";
   const longVerdict = hardBlockedL ? "차단"
     : !longRequiredOk ? "대기"
     : longBonus >= SIGNAL_CONFIG.score.longStrong ? "강한신호"
-    : longBonus >= SIGNAL_CONFIG.score.longCandidate ? "진입후보"
+    : longBonus >= SIGNAL_CONFIG.score.longCandidate || trendUpConfirmed ? "진입후보"
     : "대기";
 
   // ══ 인버스 ══
   const Sh: CheckItem[] = [];
   const s = push(Sh);
-  const upDays = consecutiveUpDays(ctx.hynixDaily, true);
-  const cum5 = cumReturnPct(ctx.hynixDaily, 5, true);
-  const overheat = upDays >= 2 || (cum5 !== null && cum5 >= SIGNAL_CONFIG.overheatCumPct);
-  s("S1", "과열 또는 하방 Bias", "필수", overheat || bias.dir === "하방", 0,
-    `연속상승 ${upDays}일 · 5일 ${cum5?.toFixed(1) ?? "?"}% · Bias ${bias.dir}`);
-  s("S2", "매크로 악화(2개 이상)", "필수", macroBad >= 2, 0, `충족 ${macroBad}/3 (금리↑·환율↑·SOX↓)`);
-  // FG — 외인 현물 게이트 (필수, 2026-07-10 신설): 외인 현물이 뚜렷이 개선 중이면 인버스 금지.
+  // ══ 재설계 2026-07-15 (사용자 지정): 필수는 방향(S3·S4)·차단형 게이트(FG)만.
+  // S1(과열)·S2(매크로 악화)는 하락 확률을 높이는 근거이지 "이것 아니면 안 되는" 절대 조건이
+  // 아님 — 차트 주도 하락일(매크로 악화 1개뿐)도 실재. 배점 차등 가점으로 (만점 8).
+  // FG — 외인 현물 게이트 (필수·차단형): 외인 현물이 뚜렷이 개선 중이면 인버스 금지.
   s("FG", "외인 현물 게이트(개선 아님)", "필수", fgDir !== "UP", 0, fgDetail);
   const s3 = trend === null ? null : trend.dir === "DOWN" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
   s("S3", "하방 방향 형성·유지 확인", "필수", s3, 0,
@@ -144,6 +146,15 @@ export function computeSetups(inp: Inputs): SetupResult {
   const s4 = trend === null ? null : trend.dir === "DOWN" && trend.dc1 !== null && trend.dc1 >= 0.5;
   s("S4", "FKS200 꺾임/하방 지속", "필수", s4, 0, trend === null ? "장중 데이터 대기" : `DC1 ${pctOrDash(trend.dc1)}`);
 
+  // ── 가점 (배점 차등 — 2026-07-15 재설계)
+  // S2 매크로 악화 +3 (필수→고배점 가점): 인버스의 가장 강한 근거이지만 절대 조건은 아님
+  s("S2", "매크로 악화(2개 이상)", "가점", macroBad >= 2, 3, `충족 ${macroBad}/3 (금리↑·환율↑·SOX↓)`);
+  // S1 과열/하방 Bias +2 (필수→가점)
+  const upDays = consecutiveUpDays(ctx.hynixDaily, true);
+  const cum5 = cumReturnPct(ctx.hynixDaily, 5, true);
+  const overheat = upDays >= 2 || (cum5 !== null && cum5 >= SIGNAL_CONFIG.overheatCumPct);
+  s("S1", "과열 또는 하방 Bias", "가점", overheat || bias.dir === "하방", 2,
+    `연속상승 ${upDays}일 · 5일 ${cum5?.toFixed(1) ?? "?"}% · Bias ${bias.dir}`);
   // S5 — 디커플링 과열: 판정 제외, 참고 표기만 (사용자 개정 2026-07-09)
   const lastTick = ticks[ticks.length - 1];
   s("S5", "디커플링 과열 (판정 제외 — 참고)", "가점", null, 0, lastTick ? `니케이 ${fmt(lastTick.nikkeiChg)}% · 하닉 ${fmt(lastTick.hynixChg)}%` : "데이터 대기");
