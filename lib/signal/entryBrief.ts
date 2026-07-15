@@ -9,7 +9,6 @@ import YahooFinance from "yahoo-finance2";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { fetchUs2yYield, fetchUs10yYield } from "@/lib/market/rateAlert";
-import { fetchKospi200Futures } from "@/lib/market/naver-flow";
 import { SIGNAL_CONFIG } from "./config";
 import { flowDelta } from "./engine/trend";
 import type { IntradayTick, Judgment } from "./types";
@@ -61,8 +60,11 @@ export function futSlope30(ticks: IntradayTick[]): number | null {
   return cur.v - base.v;
 }
 
-// ── 지표 9종 수집 — 발송이 확정된 호출에서만 (매 틱 네트워크 낭비 방지)
-async function fetchBriefIndicators(): Promise<{ vals: BriefVals; day: DayChg }> {
+// ── 지표 9종 수집 — 발송이 확정된 호출에서만 (매 틱 네트워크 낭비 방지).
+// K200 선물은 여기서 수집하지 않는다 — 판정 라인과 같은 틱(futPx·futChg)을 쓴다
+// (실측 2026-07-14 14:03: 별도 호출이 스테일 값(전일대)을 반환해 직전比 +2.46% 왜곡.
+//  헤드라인 +0.51%와 지표 라인이 서로 다른 소스였던 문제 — 사용자 지적).
+async function fetchBriefIndicators(): Promise<{ vals: Omit<BriefVals, "fut">; day: DayChg }> {
   const q = async (sym: string) => {
     try {
       return await yf.quote(sym);
@@ -70,12 +72,21 @@ async function fetchBriefIndicators(): Promise<{ vals: BriefVals; day: DayChg }>
       return null;
     }
   };
-  const [y2, y10, fxq, oilq, nkq, soxxq, nqq, esq, fut] = await Promise.all([
+  // 신선도 가드 — 24시간 거래 상품(선물·환율)이 30분 이상 오래된 체결가면 스테일로 보고 제외
+  // (실측 2026-07-14: NQ·ES·WTI가 브리핑마다 같은 값·+0.00%로 고정 — 사용자 지적)
+  const freshOr = <T,>(qq: T | null, maxMin = 30): T | null => {
+    if (!qq) return null;
+    const t = (qq as { regularMarketTime?: unknown }).regularMarketTime;
+    const ms = t instanceof Date ? t.getTime() : typeof t === "number" ? t * 1000 : null;
+    if (ms === null || Date.now() - ms > maxMin * 60000) return null;
+    return qq;
+  };
+  const [y2, y10, fxq0, oilq0, nkq, soxxq, nqq0, esq0] = await Promise.all([
     fetchUs2yYield().catch(() => ({ value: null, change: null, tradedAt: null })),
     fetchUs10yYield().catch(() => ({ value: null, change: null, tradedAt: null })),
     q("KRW=X"), q("CL=F"), q("^N225"), q("SOXX"), q("NQ=F"), q("ES=F"),
-    fetchKospi200Futures().catch(() => null),
   ]);
+  const fxq = freshOr(fxq0), oilq = freshOr(oilq0), nqq = freshOr(nqq0), esq = freshOr(esq0);
 
   // 닛케이 당일 체결 가드 (data.ts D1과 동일 근거 — 휴장이면 어제 값·등락률 오용 방지)
   let nkPx: number | null = nkq?.regularMarketPrice ?? null;
@@ -92,12 +103,11 @@ async function fetchBriefIndicators(): Promise<{ vals: BriefVals; day: DayChg }>
     }
   }
 
-  const vals: BriefVals = {
+  const vals: Omit<BriefVals, "fut"> = {
     y2: y2.value,
     y10: y10.value,
     fx: fxq?.regularMarketPrice ?? null,
     oil: oilq?.regularMarketPrice ?? null,
-    fut: fut?.price ?? null,
     nk: nkPx,
     soxx: soxxq?.postMarketPrice ?? soxxq?.regularMarketPrice ?? null, // 시간외 포함 마지막 값
     nq: nqq?.regularMarketPrice ?? null,
@@ -108,7 +118,6 @@ async function fetchBriefIndicators(): Promise<{ vals: BriefVals; day: DayChg }>
     others: {
       fx: fxq?.regularMarketChangePercent ?? null,
       oil: oilq?.regularMarketChangePercent ?? null,
-      fut: fut?.changePercent ?? null,
       nk: nkChg,
       soxx: soxxq?.postMarketChangePercent ?? soxxq?.regularMarketChangePercent ?? null,
       nq: nqq?.regularMarketChangePercent ?? null,
@@ -155,7 +164,8 @@ export function buildEntryBriefText(args: {
   const judgeLine = t
     ? `판정 ${j.dayType}·${dirLabel} T${t.score.toFixed(0)}/${t.maxAvailable}` +
       ` · K200선물 ${last?.futChg !== null && last?.futChg !== undefined ? signed(last.futChg, 2) + "%" : "?"}` +
-      ` 하닉 ${last?.hynixChg !== null && last?.hynixChg !== undefined ? signed(last.hynixChg, 2) + "%" : "?"}`
+      ` 하닉 ${last?.hynixChg !== null && last?.hynixChg !== undefined ? signed(last.hynixChg, 2) + "%" : "?"}` +
+      ` 삼전 ${last?.samsungChg !== null && last?.samsungChg !== undefined ? signed(last.samsungChg, 2) + "%" : "?"}`
     : `판정 ${j.dayType} · 장중 데이터 수집 중`;
 
   // 수급 — 외인 현물(누적+Δ30분)이 주요 팩터 (2026-07-10)
@@ -246,7 +256,11 @@ export async function maybeSendEntryBrief(j: Judgment, ticks: IntradayTick[]): P
   if (key === null || reason === null) return 0;
 
   const hhmm = hm(now);
-  const { vals, day } = await fetchBriefIndicators();
+  const { vals: fetched, day } = await fetchBriefIndicators();
+  // K200 선물은 판정 라인과 같은 틱 소스 — 헤드라인·지표 라인 불일치 제거 (2026-07-15)
+  const lastTick = ticks[ticks.length - 1];
+  const vals: BriefVals = { ...fetched, fut: lastTick?.futPx ?? null };
+  day.others.fut = lastTick?.futChg ?? null;
   const text = buildEntryBriefText({ reason, hhmm, j, ticks, vals, day, prev });
   const snapshot: EntryBriefSnapshot = {
     kind: "entry_brief",

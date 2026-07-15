@@ -64,7 +64,9 @@ async function getToken(): Promise<string | null> {
   }
 }
 
-export type KisFutures = { price: number; changePercent: number } | null;
+// changePercent null = 등락률 필드 파싱 실패 (실측 2026-07-15 아침 브리핑: 야간 마감 후 응답에
+// 등락률이 없어 0으로 강제하니 "1105.0 0.0%"처럼 오해 유발 — 사용자 지적. 모르면 ?로 표기)
+export type KisFutures = { price: number; changePercent: number | null } | null;
 
 // 야간 코스피200 선물 현재가·전일대비율. 키 미설정/실패 시 null(호출부에서 네이버 폴백).
 export async function fetchKisNightFutures(): Promise<KisFutures> {
@@ -99,11 +101,11 @@ export async function fetchKisNightFutures(): Promise<KisFutures> {
     };
     // 선물 현재가/전일대비율 — 응답 필드명이 환경에 따라 다를 수 있어 여러 후보를 시도
     const price = num(o.futs_prpr ?? o.stck_prpr ?? o.prpr ?? o.last);
-    let chg = num(o.futs_prdy_ctrt ?? o.prdy_ctrt ?? o.prdy_vrss_ctrt);
-    if (!isFinite(chg)) chg = 0;
+    let chg: number | null = num(o.futs_prdy_ctrt ?? o.prdy_ctrt ?? o.prdy_vrss_ctrt);
+    if (!isFinite(chg)) chg = null; // 파싱 실패 시 0으로 위장하지 않는다 (2026-07-15)
     // 부호 필드(prdy_vrss_sign: 1·2=상승, 4·5=하락)가 있으면 반영
     const sign = String(o.prdy_vrss_sign ?? "");
-    if (chg > 0 && (sign === "4" || sign === "5")) chg = -chg;
+    if (chg !== null && chg > 0 && (sign === "4" || sign === "5")) chg = -chg;
     if (!isFinite(price) || price <= 0) return null;
     return { price, changePercent: chg };
   } catch {
