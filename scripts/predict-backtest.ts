@@ -16,7 +16,7 @@ import { runAllModels } from "../lib/predict/runner";
 import { runEnsemble } from "../lib/predict/ensemble";
 import { fetchDayMinutes, clipToJudgeWindow } from "../lib/predict/kisMinute";
 import { fetchDailyPredict } from "../lib/predict/data";
-import { MODEL_IDS, MODEL_LABELS } from "../lib/predict/types";
+import { MODEL_IDS, MODEL_LABELS, emptyStat } from "../lib/predict/types";
 import type { AccuracyStat, MinuteBar, ModelId, PredictDailyBar, Verdict } from "../lib/predict/types";
 
 // ── .env.local 로드 (스크립트 전용 — Next 밖이라 수동)
@@ -95,7 +95,7 @@ async function main() {
   console.log(`\r분봉 수집 완료: ${minutes.size}/${needDates.length}일 확보\n`);
 
   // ── 워크포워드 실행
-  const acc: Record<ModelId, AccuracyStat> = Object.fromEntries(MODEL_IDS.map((m) => [m, { correct: 0, total: 0 }])) as Record<ModelId, AccuracyStat>;
+  const acc: Record<ModelId, AccuracyStat> = Object.fromEntries(MODEL_IDS.map((m) => [m, emptyStat()])) as Record<ModelId, AccuracyStat>;
   const results: DayResult[] = [];
   const skipped: string[] = [];
 
@@ -138,6 +138,8 @@ async function main() {
       r.confidences[o.model] = o.confidence;
       r.reasons[o.model] = o.reason;
       acc[o.model].total += 1;
+      acc[o.model].verdicts[o.verdict] += 1;
+      acc[o.model].labels[label] += 1;
       if (o.verdict === label) acc[o.model].correct += 1;
     }
     results.push(r);

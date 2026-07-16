@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { loadAccuracyStats, loadModelRows, loadRecentDays, predictTablesReady } from "@/lib/predict/store";
-import { smoothedAccuracy } from "@/lib/predict/ensemble";
+import { liftWeight, chanceBaseline } from "@/lib/predict/ensemble";
 import { MODEL_IDS, MODEL_LABELS } from "@/lib/predict/types";
 import type { Verdict } from "@/lib/predict/types";
 import RunButton from "./RunButton";
@@ -106,7 +106,7 @@ export default async function PredictPage() {
 
       {/* 누적 정확도 = 앙상블 가중치 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
-        <p className="mb-2 text-[14px] font-semibold">모델별 누적 정확도 (앙상블 가중치)</p>
+        <p className="mb-2 text-[14px] font-semibold">모델별 누적 정확도 → 리프트 가중치 (우연 이하 모델은 0 = 침묵)</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {MODEL_IDS.map((m) => {
             const s = acc[m];
@@ -115,7 +115,9 @@ export default async function PredictPage() {
               <div key={m} className="rounded-[12px] border border-hairline p-3 text-[12px]">
                 <p className="font-semibold leading-tight">{MODEL_LABELS[m]}</p>
                 <p className="mt-1 text-[16px] font-semibold">{pct === null ? "—" : `${pct.toFixed(1)}%`}</p>
-                <p className="text-ink-48">{s.correct}/{s.total}일 · 가중치 {smoothedAccuracy(s).toFixed(3)}</p>
+                <p className="text-ink-48">
+                  {s.correct}/{s.total}일 · 우연 {(chanceBaseline(s) * 100).toFixed(0)}% · 가중치 {liftWeight(s).toFixed(3)}
+                </p>
               </div>
             );
           })}

@@ -3,7 +3,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AccuracyStat, EnsembleResult, ModelId, ModelOutput, Verdict } from "./types";
-import { MODEL_IDS } from "./types";
+import { MODEL_IDS, emptyStat } from "./types";
 
 export type PredictDayRow = {
   date: string;
@@ -33,19 +33,23 @@ export async function predictTablesReady(): Promise<boolean> {
   return !error;
 }
 
-// 누적 정확도 (채점 완료분 전체 — 백테스트 시딩분 포함)
+// 누적 성적 (채점 완료분 전체 — 백테스트 시딩분 포함). 리프트 가중치용 분포 포함
 export async function loadAccuracyStats(): Promise<Record<ModelId, AccuracyStat>> {
   const admin = createAdminClient();
-  const stats = Object.fromEntries(MODEL_IDS.map((m) => [m, { correct: 0, total: 0 }])) as Record<ModelId, AccuracyStat>;
+  const stats = Object.fromEntries(MODEL_IDS.map((m) => [m, emptyStat()])) as Record<ModelId, AccuracyStat>;
   const { data } = await admin
     .from("predict_model_days")
-    .select("model, correct")
+    .select("model, verdict, label, correct")
     .not("correct", "is", null)
     .limit(20000);
   for (const row of data ?? []) {
     const m = row.model as ModelId;
-    if (!stats[m]) continue;
+    const v = row.verdict as Verdict;
+    const l = row.label as Verdict;
+    if (!stats[m] || !(v in stats[m].verdicts) || !(l in stats[m].labels)) continue;
     stats[m].total += 1;
+    stats[m].verdicts[v] += 1;
+    stats[m].labels[l] += 1;
     if (row.correct) stats[m].correct += 1;
   }
   return stats;

@@ -1,4 +1,6 @@
-// 앙상블 — 모델별 누적 정확도(라플라스 평활)를 가중치로 한 최종 판정. 스펙 1.2·1.3절.
+// 앙상블 — 모델별 리프트(우연 대비 초과 정확도)를 가중치로 한 최종 판정. 스펙 1.2·1.3절.
+// 2026-07-16 개정: 정확도 → 리프트 가중. 엣지 없는 모델(리프트 ≤0)은 가중치 0으로 자동 침묵 —
+// 90일 실측에서 균등가중 앙상블이 세 종목 모두 피셔 단독보다 낮았던 희석 문제의 해법.
 
 import type { AccuracyStat, EnsembleResult, ModelId, ModelOutput, Verdict } from "./types";
 import { MODEL_IDS } from "./types";
@@ -10,9 +12,26 @@ export function smoothedAccuracy(stat: AccuracyStat | undefined): number {
   return (c + 1) / (t + 3);
 }
 
+// 우연 기준선: 모델의 판정 분포 × 라벨 분포 내적 — "그 비율로 아무렇게나 질렀어도 맞을 확률"
+export function chanceBaseline(stat: AccuracyStat | undefined): number {
+  const t = stat?.total ?? 0;
+  if (!stat || t === 0) return 1 / 3;
+  return (["leverage", "inverse", "none"] as Verdict[]).reduce(
+    (s, v) => s + (stat.verdicts[v] / t) * (stat.labels[v] / t),
+    0,
+  );
+}
+
+// 리프트 가중치 — 우연보다 나은 만큼만 발언권. 음수(우연 이하)는 0
+export function liftWeight(stat: AccuracyStat | undefined): number {
+  return Math.max(smoothedAccuracy(stat) - chanceBaseline(stat), 0);
+}
+
 export function runEnsemble(outputs: ModelOutput[], acc: Partial<Record<ModelId, AccuracyStat>>): EnsembleResult {
   const weights = {} as Record<ModelId, number>;
-  for (const id of MODEL_IDS) weights[id] = Number(smoothedAccuracy(acc[id]).toFixed(4));
+  for (const id of MODEL_IDS) weights[id] = Number(liftWeight(acc[id]).toFixed(4));
+  // 전 모델 리프트 0(기록 없음 포함) — 균등 가중 폴백 (가동 초기·시딩 전)
+  if (MODEL_IDS.every((id) => weights[id] === 0)) for (const id of MODEL_IDS) weights[id] = 1 / 3;
 
   const scores: Record<Verdict, number> = { leverage: 0, inverse: 0, none: 0 };
   for (const o of outputs) scores[o.verdict] += weights[o.model] * o.confidence;

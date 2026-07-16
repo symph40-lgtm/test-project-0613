@@ -55,7 +55,22 @@ export type DayLabelResult = {
   pos: number; // 종가의 레인지 내 위치 0~1
 };
 
-export type AccuracyStat = { correct: number; total: number };
+// 채점된 날들의 성적 + 분포 — 리프트(우연 대비 초과) 가중치 산출에 분포가 필요
+export type AccuracyStat = {
+  correct: number;
+  total: number;
+  verdicts: Record<Verdict, number>; // 모델의 판정 분포
+  labels: Record<Verdict, number>; // 같은 날들의 실제 라벨 분포
+};
+
+export function emptyStat(): AccuracyStat {
+  return {
+    correct: 0,
+    total: 0,
+    verdicts: { leverage: 0, inverse: 0, none: 0 },
+    labels: { leverage: 0, inverse: 0, none: 0 },
+  };
+}
 
 export type EnsembleResult = {
   finalVerdict: Verdict;
