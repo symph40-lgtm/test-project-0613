@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { AccuracyStat, EnsembleResult, ModelId, ModelOutput, Verdict } from "./types";
 import { MODEL_IDS, emptyStat } from "./types";
 
-export type Revision = { at: string; verdict: Verdict; strength: number };
+export type Revision = { at: string; verdict: Verdict; strength: number; checkpoint?: string };
 
 export type PredictDayRow = {
   date: string;
@@ -77,44 +77,37 @@ export async function loadDayRow(date: string): Promise<PredictDayRow | null> {
   return (data as PredictDayRow | null) ?? null;
 }
 
-// 조기 판정(09:31) 저장 / 모니터링 구간(~10:30) 판정 변경 누적.
-// final_verdict에는 잠정값을 넣고 stage='early' — 10:31 확정 시 saveJudgment가 덮어쓴다.
-export async function saveEarlyJudgment(
+// 체크포인트 판정 스트림 저장 — 최신 판정을 final_verdict에, 전체 타임라인을 revisions에.
+// 14:00 체크포인트가 기록되면 stage='final'. early_*는 첫 기록에서 한 번만 채운다.
+export async function upsertCheckpointDay(
   date: string,
-  verdict: Verdict,
-  strengthPct: number,
+  latest: Revision,
+  revisions: Revision[],
+  isFinal: boolean,
   prior: PredictDayRow | null,
 ): Promise<void> {
   const admin = createAdminClient();
-  const nowIso = new Date().toISOString();
-  if (!prior) {
-    await admin.from("predict_days").upsert(
-      {
-        date,
-        final_verdict: verdict,
-        strength: strengthPct,
-        stage: "early",
-        early_verdict: verdict,
-        early_strength: strengthPct,
-        early_at: nowIso,
-        revisions: [{ at: nowIso, verdict, strength: strengthPct }],
-        source: "live",
-      },
-      { onConflict: "date" },
-    );
-    return;
+  const payload: Record<string, unknown> = {
+    date,
+    final_verdict: latest.verdict,
+    strength: latest.strength,
+    stage: isFinal ? "final" : "early",
+    revisions,
+    source: "live",
+  };
+  if (!prior?.early_verdict && revisions.length > 0) {
+    payload.early_verdict = revisions[0].verdict;
+    payload.early_strength = revisions[0].strength;
+    payload.early_at = revisions[0].at;
   }
-  const revs = prior.revisions ?? [];
-  const last = revs[revs.length - 1];
-  if (last && last.verdict === verdict) return; // 판정 유지 — 기록 없음
-  await admin
-    .from("predict_days")
-    .update({
-      final_verdict: verdict,
-      strength: strengthPct,
-      revisions: [...revs, { at: nowIso, verdict, strength: strengthPct }],
-    })
-    .eq("date", date);
+  await admin.from("predict_days").upsert(payload, { onConflict: "date" });
+}
+
+// 모델별 판정 행 존재 여부 — 확정(14:01+) 모델 스냅샷의 중복 실행 방지
+export async function hasModelRows(date: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("predict_model_days").select("date").eq("date", date).limit(1);
+  return Boolean(data && data.length > 0);
 }
 
 export async function saveJudgment(

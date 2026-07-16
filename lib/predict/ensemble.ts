@@ -33,9 +33,10 @@ export function liftWeight(stat: AccuracyStat | undefined): number {
 export function finalizeJudgment(
   outputs: ModelOutput[],
   ens: EnsembleResult,
+  primaryOverride?: ModelId, // 체크포인트별 판정자 교체 (예: 09:30 전 프리마켓 구간은 user)
 ): { finalVerdict: Verdict; strengthPct: number } {
   if (PREDICT_CONFIG.judgeMode === "fisher") {
-    const primary = outputs.find((o) => o.model === PREDICT_CONFIG.primaryModel);
+    const primary = outputs.find((o) => o.model === (primaryOverride ?? PREDICT_CONFIG.primaryModel));
     if (primary) {
       return { finalVerdict: primary.verdict, strengthPct: Number((primary.confidence * 100).toFixed(1)) };
     }

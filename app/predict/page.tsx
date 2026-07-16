@@ -61,10 +61,10 @@ export default async function PredictPage() {
   return (
     <PageShell title="대가 예측 모델" badge="PREDICT" width="wide">
       <p className="mb-4 text-[13px] leading-relaxed text-ink-48">
-        크레이블·라쉬케·피셔·달튼·그라임스 5개 방법론을 <b>독립 모델</b>로 돌립니다.
-        <b> 최종 판정은 피셔(ACD) 단독</b> — 220거래일×3종목 검증에서 앙상블이 피셔를 넘지 못해
-        확정(2026-07-16). 나머지 4개는 대조군으로 매일 채점만 계속하며, 리프트 가중 앙상블은 참고
-        지표로 병기합니다. 판정 확정 10:31 · 대상 하닉 본주 · 기존 /signal 판정과 무관.
+        크레이블·라쉬케·피셔·달튼·그라임스 + 사용자(RV1+T6) 6개 <b>독립 모델</b>.
+        판정은 <b>08:30 첫 판정 → 30분마다 체크포인트 → 14:00 확정</b> (09:30 전엔 사용자 모델,
+        이후 피셔 — 220일 실측 최적 조합. 14:00 피셔 정확도 64.3%). 사이 구간 모니터링에서 판정이
+        바뀌면 타임라인 기록 + 문자. 대상 하닉 본주 · 기존 /signal 판정과 무관.
       </p>
 
       <div className="mb-4"><RunButton /></div>
@@ -75,12 +75,11 @@ export default async function PredictPage() {
         {today ? (
           <>
             <p className="text-[15px]">
-              {today.stage === "early" ? "조기 판정(잠정, 10:31 확정 전)" : "최종 판정"}: {verdictCell(today.final_verdict)}{" "}
+              {today.stage === "early" ? "현재 판정(잠정, 14:00 확정 전)" : "확정 판정(14:00)"}: {verdictCell(today.final_verdict)}{" "}
               <span className="text-[13px] text-ink-48">강도 {today.strength?.toFixed(1)}%</span>
-              {today.stage === "final" && today.early_verdict && (
+              {today.early_verdict && (
                 <span className="ml-2 text-[12px] text-ink-48">
-                  (조기 09:31 {V_LABEL[(today.early_verdict ?? "none") as Verdict]}
-                  {today.revisions && today.revisions.length > 1 ? ` · 변경 ${today.revisions.length - 1}회` : ""})
+                  (첫 판정 {V_LABEL[(today.early_verdict ?? "none") as Verdict]})
                 </span>
               )}
               {today.label && (
@@ -90,15 +89,16 @@ export default async function PredictPage() {
                 </span>
               )}
             </p>
-            {today.stage === "early" && today.revisions && today.revisions.length > 0 && (
-              <p className="mt-1 text-[12px] text-ink-48">
-                모니터링 (10:31 확정 전 변경 추적):{" "}
+            {today.revisions && today.revisions.length > 0 && (
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-48">
+                판정 타임라인:{" "}
                 {today.revisions
                   .map((r) => {
-                    const kst = new Date(new Date(r.at).getTime() + 9 * 3600e3).toISOString().slice(11, 16);
-                    return `${kst} ${V_LABEL[(r.verdict ?? "none") as Verdict]}`;
+                    const t = r.checkpoint ?? new Date(new Date(r.at).getTime() + 9 * 3600e3).toISOString().slice(11, 16) + "*";
+                    return `${t} ${V_LABEL[(r.verdict ?? "none") as Verdict]}`;
                   })
-                  .join(" → ")}
+                  .join(" → ")}{" "}
+                (*표시는 체크포인트 사이 변경 감지)
               </p>
             )}
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

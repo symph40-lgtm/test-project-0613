@@ -195,7 +195,8 @@ async function main() {
   const lev = results.filter((r) => r.finalVerdict === "leverage");
   const inv = results.filter((r) => r.finalVerdict === "inverse");
   const fmtAvg = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
-  console.log(`\n10:30→종가 평균 (본주 기준): 레버리지 판정일 ${fmtAvg(avg(lev))} (${lev.length}일) · 인버스 판정일 ${fmtAvg(avg(inv))} (${inv.length}일)`);
+  const judgeLabel = `${PREDICT_CONFIG.judgeHour.slice(0, 2)}:${PREDICT_CONFIG.judgeHour.slice(2, 4)}`;
+  console.log(`\n${judgeLabel}→종가 평균 (본주 기준): 레버리지 판정일 ${fmtAvg(avg(lev))} (${lev.length}일) · 인버스 판정일 ${fmtAvg(avg(inv))} (${inv.length}일)`);
   const invAvg = avg(inv);
   const levAvg = avg(lev);
   const edge = (levAvg ?? 0) * lev.length - (invAvg ?? 0) * inv.length;

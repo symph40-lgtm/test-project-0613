@@ -84,7 +84,7 @@ async function nxtPre(code: string, date: string): Promise<MinuteBar[] | null> {
   } catch { return null; }
 }
 
-type Variant = "A" | "B" | "C" | "D" | "E" | "F";
+type Variant = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H";
 const VARIANTS: { key: Variant; label: string; preStart: boolean; judge: string }[] = [
   { key: "A", label: "09:00시작·10:30판정 (현행)", preStart: false, judge: "10:30" },
   { key: "B", label: "08:00시작·10:30판정", preStart: true, judge: "10:30" },
@@ -92,6 +92,8 @@ const VARIANTS: { key: Variant; label: string; preStart: boolean; judge: string 
   { key: "D", label: "08:00시작·09:00판정 (개장즉시)", preStart: true, judge: "09:00" },
   { key: "E", label: "08:00시작·08:30판정 (프리마켓 30분)", preStart: true, judge: "08:30" },
   { key: "F", label: "08:00시작·08:50판정 (프리마켓 전체)", preStart: true, judge: "08:50" },
+  { key: "G", label: "09:00시작·12:00판정", preStart: false, judge: "12:00" },
+  { key: "H", label: "09:00시작·14:00판정 (M7 판정 확정 시각)", preStart: false, judge: "14:00" },
 ];
 
 async function main() {

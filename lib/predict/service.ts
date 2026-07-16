@@ -8,12 +8,19 @@ import { fetchDayMinutes, fetchTodayMinutes, fetchNxtPremarket, clipToJudgeWindo
 import { labelDay } from "./label";
 import { runAllModels } from "./runner";
 import { finalizeJudgment, runEnsemble } from "./ensemble";
-import { hasJudgment, listUnscoredDates, loadAccuracyStats, loadDayRow, saveEarlyJudgment, saveJudgment, scoreDay } from "./store";
-import type { PredictDailyBar } from "./types";
+import { dispatchToChannels } from "@/lib/alerts/dispatch";
+import {
+  hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
+  saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
+} from "./store";
+import type { PredictDailyBar, Verdict } from "./types";
 
-const EARLY_MIN = 9 * 60 + 31; // 09:31 조기 판정 (08:00 NXT 프리마켓 포함 창 — 220일 분석에서 유일하게 경제성 양수)
-const JUDGE_MIN = 10 * 60 + 31; // 10:31 확정 판정 (09:00 창 — 정확도 최고). 09:31~10:30은 모니터링(변경 누적)
+const STREAM_MIN = 8 * 60 + 31; // 08:31부터 체크포인트 스트림 (첫 판정 08:30 완성봉 기준)
+const JUDGE_MIN = 14 * 60 + 1; // 14:01 확정 — 모델별 스냅샷(대조군 채점) 기록 (v1.4: 창 09:00~13:59)
 const SCORE_MIN = 15 * 60 + 35; // 15:35부터 당일 채점
+
+const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
+const V_KO: Record<Verdict, string> = { leverage: "레버리지", inverse: "인버스", none: "추세없음" };
 
 async function judgeOneDay(
   date: string,
@@ -54,40 +61,94 @@ export type PredictRunResult = {
   scored: string[];
 };
 
-// 조기 판정·모니터링 (09:31~10:30) — 08:00 NXT 프리마켓 + 정규장 완성봉으로 잠정 판정.
-// NXT 데이터가 없으면 정규장 봉만으로 판정 (봉 수 부족 시 모델이 스스로 보수 판정).
-async function earlyJudge(
+// 체크포인트 판정 스트림 (사용자 지정 2026-07-16): 08:30 첫 판정 → 30분마다 → 14:00 확정.
+// 지나간 미기록 체크포인트는 과거 분봉으로 소급 기록 (크론이 띄엄띄엄 와도 타임라인 완성).
+// 사이 구간(라이브 호출)은 모니터링 — 직전 기록과 판정이 다르면 변경 엔트리 + 문자.
+// 판정자: 09:30 전 = user(RV1+T6, 프리마켓 유일 유효 신호) / 이후 = 피셔.
+// 창: 10:30 전 = 08:00(NXT) 시작 / 이후 = 09:00 시작 (220일 실측 최적 조합).
+async function checkpointStream(
   today: string,
   complete: PredictDailyBar[],
   minuteOfDay: number,
 ): Promise<boolean> {
+  const cfg = PREDICT_CONFIG.schedule;
+  const prior = await loadDayRow(today);
+  if (prior && prior.stage === "final") return false;
   const code = PREDICT_CONFIG.symbol;
   const ymd = today.replace(/-/g, "");
-  const prior = await loadDayRow(today);
-  if (prior && prior.stage === "final") return false; // 이미 확정 — 조기 단계 지남
-  const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
-  const cutoff = nowHHMM < "10:30" ? nowHHMM : "10:30";
   const [pre, krxRaw] = await Promise.all([
     fetchNxtPremarket(code, ymd),
     fetchDayMinutes(code, ymd, PREDICT_CONFIG.judgeHour).then(
       (bars) => bars ?? fetchTodayMinutes(code, PREDICT_CONFIG.judgeHour),
     ),
   ]);
-  const krx = (krxRaw ?? []).filter((b) => b.time < cutoff);
-  const morning = [...(pre ?? []), ...krx];
-  if (morning.length < 20) return false;
-  const openPx = pre?.[0]?.open ?? krx[0]?.open;
-  if (!openPx) return false;
-  const outputs = runAllModels({
-    date: today,
-    dailyHistory: complete.slice(-120),
-    openPx,
-    morning,
-    prevDayMinutes: null, // 조기 단계는 달튼 VA 생략 (확정 판정에서 반영)
-  });
+  const krx = krxRaw ?? [];
   const acc = await loadAccuracyStats();
-  const final = finalizeJudgment(outputs, runEnsemble(outputs, acc));
-  await saveEarlyJudgment(today, final.finalVerdict, final.strengthPct, prior);
+
+  const judgeAt = (cutHHMM: string): { verdict: Verdict; strength: number } | null => {
+    const usePre = cutHHMM < cfg.preWindowBefore;
+    const bars = [...(usePre ? pre ?? [] : []), ...krx].filter((b) => b.time < cutHHMM);
+    if (bars.length < 10) return null;
+    const openPx = usePre ? pre?.[0]?.open ?? bars[0].open : krx[0]?.open ?? bars[0].open;
+    const outputs = runAllModels({
+      date: today,
+      dailyHistory: complete.slice(-120),
+      openPx,
+      morning: bars,
+      prevDayMinutes: null, // 스트림 단계는 달튼 VA 생략 (확정 모델 스냅샷에서 반영)
+    });
+    const primary = cutHHMM < cfg.earlyModelBefore ? ("user" as const) : undefined;
+    const fin = finalizeJudgment(outputs, runEnsemble(outputs, acc), primary);
+    return { verdict: fin.finalVerdict, strength: fin.strengthPct };
+  };
+
+  const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
+    if (!PREDICT_CONFIG.sms.enabled) return;
+    const text = prev === null
+      ? `[예측] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} (${Math.round(next.strength)}%)`
+      : `[예측] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} (${Math.round(next.strength)}%)`;
+    try {
+      await dispatchToChannels("signal", today, {
+        key: `predict_${whenLabel.replace(":", "")}_${next.verdict}`,
+        severity: "medium",
+        text,
+        smsSubject: "예측 판정",
+      });
+    } catch { /* 발송 실패는 판정 기록을 막지 않는다 */ }
+  };
+
+  let revs: Revision[] = prior?.revisions ?? [];
+  let changed = false;
+  const done = new Set(revs.map((r) => r.checkpoint).filter(Boolean));
+  const lastCp = cfg.checkpoints[cfg.checkpoints.length - 1];
+
+  // ① 지나간 체크포인트 소급 기록 (완성봉 보장: 체크포인트 +1분 경과분만)
+  for (const cp of cfg.checkpoints) {
+    if (hhmmToMin(cp) + 1 > minuteOfDay || done.has(cp)) continue;
+    const fin = judgeAt(cp);
+    if (!fin) continue;
+    const prev = revs.length ? revs[revs.length - 1].verdict : null;
+    revs = [...revs, { at: new Date().toISOString(), checkpoint: cp, verdict: fin.verdict, strength: fin.strength }];
+    changed = true;
+    // 문자: 방향 등장·소멸·전환만 (첫 기록이 '추세없음'이면 조용)
+    if (fin.verdict !== prev && !(prev === null && fin.verdict === "none")) await smsChange(cp, prev, fin);
+  }
+
+  // ② 체크포인트 사이 모니터링 — 현재 완성봉 기준 판정이 직전 기록과 다르면 변경 기록
+  if (minuteOfDay > hhmmToMin(cfg.checkpoints[0]) && minuteOfDay <= hhmmToMin(lastCp) && revs.length > 0) {
+    const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+    const fin = judgeAt(nowHHMM < lastCp ? nowHHMM : lastCp);
+    const last = revs[revs.length - 1];
+    if (fin && fin.verdict !== last.verdict) {
+      revs = [...revs, { at: new Date().toISOString(), verdict: fin.verdict, strength: fin.strength }];
+      changed = true;
+      await smsChange(nowHHMM, last.verdict, fin);
+    }
+  }
+
+  if (!changed || revs.length === 0) return false;
+  const isFinal = revs.some((r) => r.checkpoint === lastCp);
+  await upsertCheckpointDay(today, revs[revs.length - 1], revs, isFinal, prior);
   return true;
 }
 
@@ -121,18 +182,15 @@ export async function runPredictService(): Promise<PredictRunResult> {
     result.scored.push(d);
   }
 
-  // ③a 조기 판정·모니터링 (09:31~10:30) — 확정 전 잠정 판정, 변경은 revisions에 누적
+  // ③a 체크포인트 스트림 (08:31~) — 08:30 첫 판정, 30분마다, 14:00 확정. 사이는 모니터링
   const todayBar = daily.find((b) => b.date === today);
-  if (todayBar && minuteOfDay >= EARLY_MIN && minuteOfDay < JUDGE_MIN) {
-    result.earlyToday = await earlyJudge(today, complete, minuteOfDay);
+  if (todayBar && minuteOfDay >= STREAM_MIN) {
+    result.earlyToday = await checkpointStream(today, complete, minuteOfDay);
   }
 
-  // ③b 당일 확정 판정 (10:31 이후, 09:00 창 — 조기 행이 있으면 확정으로 전환)
-  if (todayBar && minuteOfDay >= JUDGE_MIN) {
-    const row = await loadDayRow(today);
-    if (!row || row.stage === "early") {
-      result.judgedToday = await judgeOneDay(today, complete, todayBar.open, "live", true);
-    }
+  // ③b 모델별 확정 스냅샷 (14:01 이후, 09:00~13:59 창) — 대조군 채점용 모델 행 + 가중치 기록
+  if (todayBar && minuteOfDay >= JUDGE_MIN && !(await hasModelRows(today))) {
+    result.judgedToday = await judgeOneDay(today, complete, todayBar.open, "live", true);
   }
 
   // ④ 당일 채점 (15:35 이후 — 일봉 확정)
