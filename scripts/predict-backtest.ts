@@ -1,7 +1,8 @@
 // 대가 방법론 예측 모델 — 과거 90거래일 검증 러너. 기획: docs/predict-models-spec.md 3장.
-//   npx tsx scripts/predict-backtest.ts            # 검증만
-//   npx tsx scripts/predict-backtest.ts --days 90  # 기간 지정
-//   npx tsx scripts/predict-backtest.ts --seed     # 결과를 predict_* 테이블에 초기 이력으로 적재
+//   npx tsx scripts/predict-backtest.ts                  # 검증만 (기본 종목 000660)
+//   npx tsx scripts/predict-backtest.ts --days 90        # 기간 지정
+//   npx tsx scripts/predict-backtest.ts --symbol 005930  # 다른 종목으로 동일 검증 (시딩과 무관)
+//   npx tsx scripts/predict-backtest.ts --seed           # 결과를 predict_* 테이블에 초기 이력으로 적재
 //
 // 미래 정보 차단: 각 날짜에 일봉은 전일까지, 분봉은 10:30 직전 완성봉까지만 입력.
 // 앙상블은 워크포워드 — 그날 이전 기록만으로 가중치 산출.
@@ -33,6 +34,10 @@ const DAYS = (() => {
   return i >= 0 ? parseInt(args[i + 1], 10) : 90;
 })();
 const SEED = args.includes("--seed");
+const SYMBOL = (() => {
+  const i = args.indexOf("--symbol");
+  return i >= 0 ? args[i + 1] : PREDICT_CONFIG.symbol;
+})();
 const CACHE_DIR = resolve(process.cwd(), ".predict-cache");
 
 // ── 분봉 캐시
@@ -65,7 +70,8 @@ type DayResult = {
 };
 
 async function main() {
-  const code = PREDICT_CONFIG.symbol;
+  const code = SYMBOL;
+  if (SEED && code !== PREDICT_CONFIG.symbol) throw new Error("--seed는 기본 종목에서만 허용 (운영 테이블 오염 방지)");
   console.log(`=== 대가 방법론 예측 모델 백테스트 — ${code} 최근 ${DAYS}거래일 ===\n`);
 
   const daily = await fetchDailyPredict(code, DAYS + 140);
