@@ -8,7 +8,7 @@ export const SIGNAL_CONFIG = {
     premarketMin: 8 * 60 + 30,   // 08:30 장전 브리핑
     openMin: 9 * 60,             // 09:00 개장
     observeEndMin: 9 * 60 + 30,  // 09:30 관찰 종료 (진입 금지 구간 끝)
-    entryEndMin: 13 * 60 + 30,   // 13:30 신규 진입 마감 (L4 — 원 스펙 10:30에서 사용자 요청으로 연장)
+    entryEndMin: 14 * 60,        // 14:00 신규 진입 마감 (L4 — 원 스펙 10:30 → 13:30 → 14:00, 사용자 지정 2026-07-16)
     closeDecideMin: 14 * 60 + 50,// 14:50 C1 마감 증폭 판정
     exitMin: 15 * 60,            // 15:00 당일 청산 (R3)
     endMin: 15 * 60 + 30,        // 15:30 장 마감
@@ -118,6 +118,8 @@ export const SIGNAL_CONFIG = {
 
   // ── 리스크 (R1~R8)
   risk: {
+    // 2026-07-16 사용자 지정: 레버리지·인버스 비중은 총자산의 최대 10% — 그 안에서 강도 비례
+    maxPositionPct: 10,
     stopPct: 3,            // R1 고정 스탑 -3%
     trailPct: 4,           // R2 트레일링 -4% (설정 변경 가능)
     weakTrailPct: 2,       // 약한 추세일 타이트 트레일링
@@ -133,7 +135,10 @@ export const SIGNAL_CONFIG = {
     b1: { enabled: false, zThreshold: 1.0, lookbackDays: 20, expiryBlackoutDays: 3, smoothMin: 3 },
     w1: { enabled: false, trendTh: 0.7, distortionBand: [0.45, 0.55] as [number, number], discount: 0.5 },
     v1: { enabled: false, peakoutDrop: 0.05, holdMin: 30, crashPrereq: -0.03 },
-    a1: { stopMode: "fixed" as "fixed" | "atr", k: 0.7, kTrail: 0.9, minStop: 0.03, maxStop: 0.08 },
+    // 2026-07-16 사용자 지정("트레일링과 스탑을 네가 결정해줘"): ATR 자동 모드 활성화 —
+    // 고변동장(요즘 ATR 8%+)에서 고정 -3%는 노이즈에 걸린다. 스탑 = 0.7×ATR×배수 (3~8% 클램프),
+    // 트레일링 = 0.9×ATR×배수 (동일 클램프). 고정값은 참고 표기로 유지.
+    a1: { stopMode: "atr" as "fixed" | "atr", k: 0.7, kTrail: 0.9, minStop: 0.03, maxStop: 0.08 },
     c1: { enabled: false, dc1Min: 0.55, indexMoveMin: 0.03, extendTo: "15:15" }, // dc1Min은 dc.dc1Theta와 동조
     bonusCapRatio: 0.3,    // 8.5 확장 가점 합산 ≤ T-스코어 총점의 30%
   },
@@ -208,6 +213,9 @@ export const SIGNAL_CONFIG = {
   // WTI·K200선물·닛케이·SOXX·나스닥선물·S&P선물)을 직전 브리핑 값 대비 변화율과 함께 장문(LMS).
   // 기울기 기준 시계열은 K200 선물 등락률(FKS200). 스펙 부록 B 2026-07-10.
   entryBrief: {
+    // 2026-07-16 사용자 지정: 전환·감속 브리핑 발송 중단 — "추세(기울기)는 문자 보내지 말고
+    // 추세 판정·판정 변경만". 체크포인트·정기·판정변경 브리핑은 유지.
+    slopeAlertsEnabled: false,
     checkpoints: [1, 3, 5, 10, 15, 20, 30, 50], // 개장(09:00) 후 분
     checkpointGraceMin: 10, // 유예 — 수집이 늦게 시작되면 지난 체크포인트는 건너뛰고 최신 것만
     hourlyMin: 60,          // 정기 발송: 직전 브리핑 후 경과 분

@@ -15,6 +15,17 @@ export type ChannelAlert = {
   suppressSms?: boolean;
 };
 
+// ── 조용일 (사용자 지정 2026-07-16: "7/17·18은 조용한 곳에서 집중 — 국장·미장 문자 보내지 마,
+// 강한 추세 판정 문자만 예외"). 해당 KST 날짜에는 아래 허용 키만 발송하고 나머지는 전부 억제.
+const QUIET_DATES = new Set(["2026-07-17", "2026-07-18"]);
+const QUIET_ALLOW_KEYS = /^(trend_up|trend_down|vrebound_long|us_trend_up|us_trend_down)(_cancel)?$/;
+
+function quietDayBlocked(alertKey: string): boolean {
+  const kstToday = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  if (!QUIET_DATES.has(kstToday)) return false;
+  return !QUIET_ALLOW_KEYS.test(alertKey);
+}
+
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
   date: string, // KST 거래일 (YYYY-MM-DD) — 이 날짜 기준 1일 1회 중복 방지
@@ -22,6 +33,7 @@ export async function dispatchToChannels(
   emailSubject?: string,
   snapshot?: Record<string, unknown>,
 ): Promise<number> {
+  if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
 
   // 오늘(KST) 이미 발송된 alertKey인지 확인

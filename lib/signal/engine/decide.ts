@@ -212,10 +212,13 @@ function computeDivergence(ticks: IntradayTick[], dir: "UP" | "DOWN" | null): Di
   };
   const d1ok = cmp(last?.nikkeiChg ?? null);
   const d3ok = cmp(last?.twiiChg ?? null);
+  // 이탈 판정 강화 (사용자 지정 2026-07-16: 13:19 하방→역발상→13:39 하방 재전환 왕복 —
+  // 한 시장의 일시적 어긋남만으로 역발상 라우팅하지 않는다): 어긋난 시장이 있고 '정합인 시장이
+  // 하나도 없을 때만' 이탈. 혼재(하나 정합·하나 이탈)는 미상 — 추세 유지도 역발상도 선언 안 함.
+  const anyTrue = d1ok === true || d3ok === true;
+  const anyFalse = d1ok === false || d3ok === false;
   const status: DivergenceResult["status"] =
-    d1ok === null && d3ok === null ? "미상"
-    : d1ok === false || d3ok === false ? "이탈"
-    : "정합";
+    anyFalse && !anyTrue ? "이탈" : anyTrue && !anyFalse ? "정합" : "미상";
   return {
     d1: { ok: d1ok, detail: `니케이 ${fmt(last?.nikkeiChg)} vs FKS200 ${fmt(futChg)}` },
     d2: { detail: `나스닥 선물 ${fmt(last?.nqChg)} — 기록 전용(판정 미사용, v2.3)` },

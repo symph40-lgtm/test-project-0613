@@ -61,13 +61,18 @@ export async function GET(req: NextRequest) {
 
     const judgment = decide(ctx, ticks, minuteOfDay, iso);
 
+    // 판정 확정 문자 5분 지속 조건 (2026-07-16) — 5분 전 시점 데이터로 재판정해 같은 dayType일 때만 발송
+    const persistCut = minuteOfDay - 5;
+    const prevTicks = ticks.filter((t) => t.minuteOfDay <= persistCut);
+    const prevDayType = prevTicks.length >= 5 ? decide(ctx, prevTicks, persistCut, iso).dayType : null;
+
     // 기록 + 신호 SMS (실패해도 응답은 반환. SMS는 판정 구간에 행동 가능 판정 확정 시 1일 1회)
     let sms: { sent: number; skipped: string | null } | null = null;
     if (isWeekday) {
       const [, , smsResult] = await Promise.all([
         logJudgment(judgment).catch(() => undefined),
         upsertDailyFeatures(judgment).catch(() => undefined),
-        maybeSendSignalSms(judgment, ticks).catch((): { sent: number; skipped: string | null } => ({ sent: 0, skipped: "발송 오류" })),
+        maybeSendSignalSms(judgment, ticks, prevDayType).catch((): { sent: number; skipped: string | null } => ({ sent: 0, skipped: "발송 오류" })),
         // 장중 급변 알림 — 절대 단계(하닉·삼전 ±3/5/7/10%, 선물 ±0.7% 등간격) +
         // 반전 스윙(당일 고점 대비 반락·저점 대비 반등 0.7%p 등간격, 단계별 1일 1회)
         maybeSendMoveAlerts(date, ticks).catch(() => 0),

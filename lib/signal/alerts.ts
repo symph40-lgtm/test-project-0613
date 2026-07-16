@@ -46,7 +46,10 @@ export function buildSignalAlert(j: Judgment, ticks?: IntradayTick[]): SignalAle
   const stat = t
     ? `T ${t.score.toFixed(1)}/${t.maxAvailable}·DC1 ${t.dc1 !== null ? (t.dc1 * 100).toFixed(0) + "%" : "-"}`
     : "";
-  const stop = `스탑 -${j.risk.stopFixedPct}%${j.risk.stopAtrPct !== null ? `(ATR -${j.risk.stopAtrPct.toFixed(1)}%)` : ""}`;
+  // 스탑·트레일 — ATR 자동 모드(2026-07-16)면 ATR 값이 주값, 고정 -3%는 참고
+  const stop = j.risk.stopMode === "atr" && j.risk.stopAtrPct !== null
+    ? `스탑 -${j.risk.stopAtrPct.toFixed(1)}%(ATR 자동)·트레일 -${j.risk.trailPct}%`
+    : `스탑 -${j.risk.stopFixedPct}%${j.risk.stopAtrPct !== null ? `(ATR -${j.risk.stopAtrPct.toFixed(1)}%)` : ""}`;
   const at = kstHhmm(j.ts); // 판정 기준 시각 (사용자 지정 2026-07-13 — 전 문자 시각 표기)
   const eq = entryQualityLine(ticks && ticks.length > 0 ? ticks[ticks.length - 1].hynixChg : null, j.risk.atr14Pct);
   const eqLine = eq ? `\n${eq}` : "";
@@ -480,9 +483,14 @@ export async function maybeSendMoveAlerts(date: string, ticks: IntradayTick[]): 
 
 // 발송 실행 — state 라우트에서 판정마다 호출 (내부에서 중복·수신자 판단)
 // 공용 발송 경로(1일 1회 중복 방지·채널 조회)는 lib/alerts/dispatch.ts로 이동.
-export async function maybeSendSignalSms(j: Judgment, ticks?: IntradayTick[]): Promise<{ sent: number; skipped: string | null }> {
+// prevDayType: 5분 전 시점 판정의 dayType — 확정 문자는 판정이 5분 지속됐을 때만 (2026-07-16
+// 사용자 지정: 잦은 판정 번복으로 샀다 팔았다 손실 — 미국(7/13 도입)과 동일한 채터링 방지)
+export async function maybeSendSignalSms(j: Judgment, ticks?: IntradayTick[], prevDayType?: string | null): Promise<{ sent: number; skipped: string | null }> {
   const alert = buildSignalAlert(j, ticks);
   if (!alert) return { sent: 0, skipped: "알림 대상 아님" };
+  if (prevDayType !== undefined && prevDayType !== null && prevDayType !== j.dayType) {
+    return { sent: 0, skipped: `지속 미충족 (5분 전 ${prevDayType})` };
+  }
   const sent = await dispatchToChannels("signal", j.date, alert, undefined, { headline: j.headline, dayType: j.dayType, ts: j.ts });
   return { sent, skipped: sent === 0 ? "기발송 또는 채널 없음" : null };
 }

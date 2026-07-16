@@ -193,12 +193,19 @@ export function buildEntryBriefText(args: {
   };
 
   const dirLabel = t?.dir === "UP" ? "상방" : t?.dir === "DOWN" ? "하방" : "방향 미형성";
+  // 시초 스테일 가드 (2026-07-16 사용자 지적: 09:01 브리핑에 선물·삼전이 +0.00%로 고정 —
+  // 시세 API가 개장 직후 전일 기준 0을 반환) — 첫 2분 내 정확히 0.00이면 '?'로 표기
+  const chgOr = (v: number | null | undefined): string => {
+    if (v == null) return "?";
+    if (last && last.minuteOfDay <= S.openMin + 2 && v === 0) return "?";
+    return signed(v, 2) + "%";
+  };
   const judgeLine = t
     ? `판정 ${j.dayType}·${dirLabel} T${t.score.toFixed(0)}/${t.maxAvailable}` +
-      ` · K200선물 ${last?.futChg !== null && last?.futChg !== undefined ? signed(last.futChg, 2) + "%" : "?"}` +
-      ` 하닉 ${last?.hynixChg !== null && last?.hynixChg !== undefined ? signed(last.hynixChg, 2) + "%" : "?"}` +
-      ` 삼전 ${last?.samsungChg !== null && last?.samsungChg !== undefined ? signed(last.samsungChg, 2) + "%" : "?"}`
+      ` · K200선물 ${chgOr(last?.futChg)} 하닉 ${chgOr(last?.hynixChg)} 삼전 ${chgOr(last?.samsungChg)}`
     : `판정 ${j.dayType} · 장중 데이터 수집 중`;
+  // 액션 라인 (2026-07-16 사용자 지정: "판정이 계속 바뀌니 내가 해야 할 행동 위주로")
+  const actionLine = `할 일: ${(j.action ?? "").slice(0, 100)}`;
 
   // 수급 — 외인 현물(누적+Δ30분)이 주요 팩터 (2026-07-10)
   const kf = flowDelta(ticks, (x) => x.kospiFrgn);
@@ -215,11 +222,14 @@ export function buildEntryBriefText(args: {
   const lines = [
     `[스탁가드] 장중브리핑 ${reason} (${hhmm})`,
     judgeLine,
+    actionLine,
     flowLine,
     volLine,
     `미2Y ${pp(vals.y2, prev?.vals.y2, day.y2Pp)} 10Y ${pp(vals.y10, prev?.vals.y10, null)}`,
     `환율 ${px("fx", 1)}원 · WTI ${px("oil", 2)}$`,
-    `K200선물 ${px("fut", 2)} · 닛케이 ${day.nkClosed && vals.nk === null ? "휴장" : px("nk", 0, true)}`,
+    // K200선물은 판정 라인과 같은 전일比로 표기 (2026-07-16 사용자 지적: 같은 이름에 변동률이
+    // 다르면 혼란 — 직전 브리핑比가 아니라 전일比가 맞다)
+    `K200선물 ${vals.fut !== null ? `${vals.fut.toFixed(2)}(전일比${day.others.fut != null ? signed(day.others.fut, 2) + "%" : "?"})` : "?"} · 닛케이 ${day.nkClosed && vals.nk === null ? "휴장" : px("nk", 0, true)}`,
     `SOXX ${px("soxx", 2)}$ · 나스닥선물 ${px("nq", 0, true)} · S&P선물 ${px("es", 0, true)}`,
     `※괄호=${prev ? `직전 ${prev.hhmm}` : "전일종가"}比`,
   ];
@@ -272,6 +282,7 @@ export async function maybeSendEntryBrief(j: Judgment, ticks: IntradayTick[]): P
         key = `ebrief_m${now}`;
         reason = `판정 변경(${prev.dayType}→${j.dayType})`;
       } else if (
+        E.slopeAlertsEnabled &&
         cur !== null && prev?.slope30 != null &&
         Math.abs(cur) >= E.minSlopePct && Math.abs(prev.slope30) >= E.minSlopePct &&
         Math.sign(cur) !== Math.sign(prev.slope30)
@@ -279,6 +290,7 @@ export async function maybeSendEntryBrief(j: Judgment, ticks: IntradayTick[]): P
         key = `ebrief_m${now}`;
         reason = "추세 전환";
       } else if (
+        E.slopeAlertsEnabled &&
         cur !== null && prev?.slope30 != null &&
         Math.sign(cur) === Math.sign(prev.slope30) &&
         Math.abs(prev.slope30) >= E.decelBasePct &&

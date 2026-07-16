@@ -24,12 +24,24 @@ export function computeRisk(
     stopAtr = Math.min(A.maxStop, Math.max(A.minStop, raw)) * 100;
   }
 
-  // R2 트레일링 — 약한 추세일은 타이트(-2%)
-  const trailPct = trend?.grade === "약한추세" ? R.weakTrailPct : R.trailPct;
+  // R2 트레일링 — ATR 자동 모드(2026-07-16 사용자 지정)면 0.9×ATR×배수 (클램프), 약한 추세일은 60%
+  let trailPct: number = trend?.grade === "약한추세" ? R.weakTrailPct : R.trailPct;
+  if (A.stopMode === "atr" && atr !== null) {
+    const rawTrail = A.kTrail * (atr / 100) * SIGNAL_CONFIG.symbols.leverageMultiple;
+    const atrTrail = Math.min(A.maxStop, Math.max(A.minStop, rawTrail)) * 100;
+    trailPct = Number((trend?.grade === "약한추세" ? Math.max(R.weakTrailPct, atrTrail * 0.6) : atrTrail).toFixed(1));
+  }
 
-  // R5·R7 — Bias 강도 연동 비중 + 분할 진입
-  const frac = bias.strength >= 3 ? "최대 비중" : bias.strength === 2 ? "최대 비중의 2/3" : bias.strength === 1 ? "최대 비중의 1/3" : "진입 보류";
-  const sizeGuide = `${frac} · 분할 1/3씩(시초 확인→지지 확인→방향 확인)`;
+  // R5·R7 — 비중: 총자산의 최대 10% 상한 안에서 강도 비례 (2026-07-16 사용자 지정)
+  // 추세일 확정 + 강도3 = 10% / 강도2 = 7% / 강도1 = 5% / 약한추세 = 3%
+  const cap = R.maxPositionPct;
+  const posPct =
+    trend?.grade === "추세일"
+      ? bias.strength >= 3 ? cap : bias.strength === 2 ? Math.round(cap * 0.7) : Math.round(cap * 0.5)
+      : trend?.grade === "약한추세" ? Math.round(cap * 0.3) : 0;
+  const sizeGuide = posPct > 0
+    ? `총자산의 ${posPct}% (레버리지·인버스 상한 ${cap}%) · 분할 1/3씩(시초 확인→지지 확인→방향 확인)`
+    : `진입 보류 (추세 미확정)`;
 
   // 이벤트일 보수 모드 — 비중 절반
   if (ctx.events.some((e) => e.binary)) notes.push("이벤트일 — 비중 절반 또는 관망 (2.5.4)");
@@ -56,7 +68,7 @@ export function computeRisk(
     trailPct,
     sizeGuide,
     biasStrength: bias.strength,
-    inverseCapPct: R.inverseMaxPct,
+    inverseCapPct: posPct > 0 ? posPct : R.inverseMaxPct, // 인버스도 같은 강도 비례 % (상한 10)
     dailyLossLimitPct: R.dailyLossLimitPct,
     closeExtendSuggested,
     notes,
