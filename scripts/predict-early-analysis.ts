@@ -84,12 +84,14 @@ async function nxtPre(code: string, date: string): Promise<MinuteBar[] | null> {
   } catch { return null; }
 }
 
-type Variant = "A" | "B" | "C" | "D";
+type Variant = "A" | "B" | "C" | "D" | "E" | "F";
 const VARIANTS: { key: Variant; label: string; preStart: boolean; judge: string }[] = [
   { key: "A", label: "09:00시작·10:30판정 (현행)", preStart: false, judge: "10:30" },
   { key: "B", label: "08:00시작·10:30판정", preStart: true, judge: "10:30" },
   { key: "C", label: "08:00시작·09:30판정 (조기)", preStart: true, judge: "09:30" },
   { key: "D", label: "08:00시작·09:00판정 (개장즉시)", preStart: true, judge: "09:00" },
+  { key: "E", label: "08:00시작·08:30판정 (프리마켓 30분)", preStart: true, judge: "08:30" },
+  { key: "F", label: "08:00시작·08:50판정 (프리마켓 전체)", preStart: true, judge: "08:50" },
 ];
 
 async function main() {
@@ -102,9 +104,13 @@ async function main() {
 
   // 결과 집계 구조
   const acc: Record<Variant, Record<ModelId, { c: number; t: number; dirC: number; dirT: number }>> = {} as never;
-  for (const v of VARIANTS) acc[v.key] = Object.fromEntries(MODEL_IDS.map((m) => [m, { c: 0, t: 0, dirC: 0, dirT: 0 }])) as never;
-  const fisherVerdicts: Record<Variant, Map<string, Verdict>> = { A: new Map(), B: new Map(), C: new Map(), D: new Map() };
-  const exploit: Record<Variant, { sum: number; n: number }> = { A: { sum: 0, n: 0 }, B: { sum: 0, n: 0 }, C: { sum: 0, n: 0 }, D: { sum: 0, n: 0 } };
+  const fisherVerdicts = {} as Record<Variant, Map<string, Verdict>>;
+  const exploit = {} as Record<Variant, { sum: number; n: number }>;
+  for (const v of VARIANTS) {
+    acc[v.key] = Object.fromEntries(MODEL_IDS.map((m) => [m, { c: 0, t: 0, dirC: 0, dirT: 0 }])) as never;
+    fisherVerdicts[v.key] = new Map();
+    exploit[v.key] = { sum: 0, n: 0 };
+  }
   let used = 0, noPre = 0;
 
   for (const bar of testDays) {
@@ -138,9 +144,10 @@ async function main() {
         if (o.verdict !== "none") { a.dirT++; if (o.verdict === label) a.dirC++; }
         if (o.model === "fisher") {
           fisherVerdicts[v.key].set(bar.date, o.verdict);
-          // 경제성: 판정 시각 가격 → 종가 (방향 판정일만, 방향 부호 반영)
+          // 경제성: 진입가 → 종가 (방향 판정일만, 방향 부호 반영).
+          // 판정이 09:00 이전이면 실제 진입은 정규장 시가로 가정 (프리마켓 ETF 체결 가정 회피)
           if (o.verdict !== "none") {
-            const at = morning[morning.length - 1].close;
+            const at = v.judge <= "09:00" ? bar.open : morning[morning.length - 1].close;
             const ret = ((bar.close - at) / at) * 100 * (o.verdict === "leverage" ? 1 : -1);
             exploit[v.key].sum += ret; exploit[v.key].n++;
           }
