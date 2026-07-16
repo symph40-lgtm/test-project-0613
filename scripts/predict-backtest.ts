@@ -13,7 +13,7 @@ import { resolve } from "path";
 import { PREDICT_CONFIG } from "../lib/predict/config";
 import { labelDay } from "../lib/predict/label";
 import { runAllModels } from "../lib/predict/runner";
-import { runEnsemble } from "../lib/predict/ensemble";
+import { finalizeJudgment, runEnsemble } from "../lib/predict/ensemble";
 import { fetchDayMinutes, clipToJudgeWindow } from "../lib/predict/kisMinute";
 import { fetchDailyPredict } from "../lib/predict/data";
 import { MODEL_IDS, MODEL_LABELS, emptyStat } from "../lib/predict/types";
@@ -63,8 +63,9 @@ type DayResult = {
   verdicts: Record<ModelId, Verdict>;
   confidences: Record<ModelId, number>;
   reasons: Record<ModelId, string>;
-  finalVerdict: Verdict;
+  finalVerdict: Verdict; // 판정 모드(config.judgeMode) 적용 후 최종
   strengthPct: number;
+  ensembleVerdict: Verdict; // 앙상블 참고 판정 (대조용)
   weights: Record<ModelId, number>;
   ret1030ToClose: number | null; // 10:30→종가 % (경제적 가치)
 };
@@ -118,6 +119,7 @@ async function main() {
     };
     const outputs = runAllModels(input);
     const ens = runEnsemble(outputs, acc); // 이 시점까지의 누적 정확도만 사용 (워크포워드)
+    const fin = finalizeJudgment(outputs, ens); // 판정 모드 적용 (기본: 피셔 단독)
     const { label, rOC } = labelDay(bar);
 
     const px1030 = morning.length ? morning[morning.length - 1].close : null;
@@ -128,8 +130,9 @@ async function main() {
       verdicts: {} as Record<ModelId, Verdict>,
       confidences: {} as Record<ModelId, number>,
       reasons: {} as Record<ModelId, string>,
-      finalVerdict: ens.finalVerdict,
-      strengthPct: ens.strengthPct,
+      finalVerdict: fin.finalVerdict,
+      strengthPct: fin.strengthPct,
+      ensembleVerdict: ens.finalVerdict,
       weights: ens.weights,
       ret1030ToClose: px1030 ? Number((((bar.close - px1030) / px1030) * 100).toFixed(2)) : null,
     };
@@ -176,13 +179,16 @@ async function main() {
     );
   }
 
-  // ── 앙상블 (워크포워드)
-  const ensCorrect = results.filter((r) => r.finalVerdict === r.label).length;
-  const ensCalled = results.filter((r) => r.finalVerdict !== "none");
-  const ensDirHit = ensCalled.filter((r) => r.finalVerdict === r.label).length;
-  console.log("\n── 앙상블 (워크포워드 — 그날 이전 정확도만 가중치로 사용) ──");
-  console.log(`3분류 정확도: ${((ensCorrect / n) * 100).toFixed(1)}% (${ensCorrect}/${n})`);
-  console.log(`방향 판정 시 적중: ${ensCalled.length ? ((ensDirHit / ensCalled.length) * 100).toFixed(1) : "—"}% (${ensDirHit}/${ensCalled.length})`);
+  // ── 최종 판정 성적 (판정 모드 적용)
+  const modeLabel = PREDICT_CONFIG.judgeMode === "fisher" ? "피셔 단독" : "앙상블";
+  const finCorrect = results.filter((r) => r.finalVerdict === r.label).length;
+  const finCalled = results.filter((r) => r.finalVerdict !== "none");
+  const finDirHit = finCalled.filter((r) => r.finalVerdict === r.label).length;
+  console.log(`\n── 최종 판정 (모드: ${modeLabel}) ──`);
+  console.log(`3분류 정확도: ${((finCorrect / n) * 100).toFixed(1)}% (${finCorrect}/${n})`);
+  console.log(`방향 판정 시 적중: ${finCalled.length ? ((finDirHit / finCalled.length) * 100).toFixed(1) : "—"}% (${finDirHit}/${finCalled.length})`);
+  const ensCorrect = results.filter((r) => r.ensembleVerdict === r.label).length;
+  console.log(`(참고) 앙상블 워크포워드 3분류: ${((ensCorrect / n) * 100).toFixed(1)}%`);
 
   // 경제적 가치 — 최종 판정별 10:30→종가 평균 수익률
   const avg = (rows: DayResult[]) => (rows.length ? rows.reduce((s, r) => s + (r.ret1030ToClose ?? 0), 0) / rows.length : null);

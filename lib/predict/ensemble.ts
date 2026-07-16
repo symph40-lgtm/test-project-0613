@@ -2,6 +2,7 @@
 // 2026-07-16 개정: 정확도 → 리프트 가중. 엣지 없는 모델(리프트 ≤0)은 가중치 0으로 자동 침묵 —
 // 90일 실측에서 균등가중 앙상블이 세 종목 모두 피셔 단독보다 낮았던 희석 문제의 해법.
 
+import { PREDICT_CONFIG } from "./config";
 import type { AccuracyStat, EnsembleResult, ModelId, ModelOutput, Verdict } from "./types";
 import { MODEL_IDS } from "./types";
 
@@ -25,6 +26,21 @@ export function chanceBaseline(stat: AccuracyStat | undefined): number {
 // 리프트 가중치 — 우연보다 나은 만큼만 발언권. 음수(우연 이하)는 0
 export function liftWeight(stat: AccuracyStat | undefined): number {
   return Math.max(smoothedAccuracy(stat) - chanceBaseline(stat), 0);
+}
+
+// 최종 판정 확정 — 피셔 단독 모드(기본)면 피셔의 판정·신뢰도가 그대로 최종.
+// 앙상블은 참고 지표로 계속 산출·기록된다 (피셔 고장 감지·타 모델 복귀 근거).
+export function finalizeJudgment(
+  outputs: ModelOutput[],
+  ens: EnsembleResult,
+): { finalVerdict: Verdict; strengthPct: number } {
+  if (PREDICT_CONFIG.judgeMode === "fisher") {
+    const primary = outputs.find((o) => o.model === PREDICT_CONFIG.primaryModel);
+    if (primary) {
+      return { finalVerdict: primary.verdict, strengthPct: Number((primary.confidence * 100).toFixed(1)) };
+    }
+  }
+  return { finalVerdict: ens.finalVerdict, strengthPct: ens.strengthPct };
 }
 
 export function runEnsemble(outputs: ModelOutput[], acc: Partial<Record<ModelId, AccuracyStat>>): EnsembleResult {

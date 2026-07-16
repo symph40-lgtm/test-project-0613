@@ -64,7 +64,8 @@ export async function hasJudgment(date: string): Promise<boolean> {
 export async function saveJudgment(
   date: string,
   outputs: ModelOutput[],
-  ens: EnsembleResult,
+  final: { finalVerdict: Verdict; strengthPct: number },
+  ens: EnsembleResult, // 참고 기록 — 가중치 스냅샷 + 앙상블 판정(_ensemble 키)
   source: "live" | "backfill",
 ): Promise<void> {
   const admin = createAdminClient();
@@ -77,12 +78,13 @@ export async function saveJudgment(
     source,
   }));
   await admin.from("predict_model_days").upsert(modelRows, { onConflict: "date,model" });
-  const verdicts = Object.fromEntries(outputs.map((o) => [o.model, o.verdict]));
+  const verdicts: Record<string, string> = Object.fromEntries(outputs.map((o) => [o.model, o.verdict]));
+  verdicts._ensemble = ens.finalVerdict; // 앙상블 참고 판정 (피셔 단독 모드에서의 대조용)
   await admin.from("predict_days").upsert(
     {
       date,
-      final_verdict: ens.finalVerdict,
-      strength: ens.strengthPct,
+      final_verdict: final.finalVerdict,
+      strength: final.strengthPct,
       weights: ens.weights,
       model_verdicts: verdicts,
       source,

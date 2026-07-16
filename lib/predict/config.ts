@@ -3,6 +3,10 @@
 export const PREDICT_CONFIG = {
   symbol: "000660", // SK하이닉스 본주 (레버리지/인버스 ETF의 기초)
   judgeHour: "103000", // 판정 확정 시각 (관찰창 끝)
+  // 판정 모드 (사용자 확정 2026-07-16): 220일×3종목 검증에서 앙상블(균등·리프트 가중 모두)이
+  // 피셔 단독을 넘지 못해 최종 판정은 피셔 단독. 나머지 4개 모델은 대조군으로 계속 채점만.
+  judgeMode: "fisher" as "fisher" | "ensemble",
+  primaryModel: "fisher" as const,
   label: {
     trendMinPct: 1.2, // 시가→종가 최소 등락
     posUp: 0.65, // 종가 위치 — 상승 추세일은 고가권 마감

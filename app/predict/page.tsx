@@ -61,9 +61,10 @@ export default async function PredictPage() {
   return (
     <PageShell title="대가 예측 모델" badge="PREDICT" width="wide">
       <p className="mb-4 text-[13px] leading-relaxed text-ink-48">
-        크레이블·라쉬케·피셔·달튼·그라임스 5개 방법론을 <b>독립 모델</b>로 돌리고, 각 모델의 누적 정확도를
-        가중치로 한 앙상블이 최종 판정합니다. 매일 15:35 이후 실제 추세로 채점해 가중치가 갱신됩니다.
-        판정 확정 10:31 · 대상 하닉 본주 · 기존 /signal 판정과 무관.
+        크레이블·라쉬케·피셔·달튼·그라임스 5개 방법론을 <b>독립 모델</b>로 돌립니다.
+        <b> 최종 판정은 피셔(ACD) 단독</b> — 220거래일×3종목 검증에서 앙상블이 피셔를 넘지 못해
+        확정(2026-07-16). 나머지 4개는 대조군으로 매일 채점만 계속하며, 리프트 가중 앙상블은 참고
+        지표로 병기합니다. 판정 확정 10:31 · 대상 하닉 본주 · 기존 /signal 판정과 무관.
       </p>
 
       <div className="mb-4"><RunButton /></div>

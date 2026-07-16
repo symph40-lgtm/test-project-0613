@@ -7,7 +7,7 @@ import { fetchDailyPredict, kstNowPredict } from "./data";
 import { fetchDayMinutes, fetchTodayMinutes, clipToJudgeWindow } from "./kisMinute";
 import { labelDay } from "./label";
 import { runAllModels } from "./runner";
-import { runEnsemble } from "./ensemble";
+import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { hasJudgment, listUnscoredDates, loadAccuracyStats, saveJudgment, scoreDay } from "./store";
 import type { PredictDailyBar } from "./types";
 
@@ -40,7 +40,8 @@ async function judgeOneDay(
   });
   const acc = await loadAccuracyStats();
   const ens = runEnsemble(outputs, acc);
-  await saveJudgment(date, outputs, ens, source);
+  const final = finalizeJudgment(outputs, ens); // 피셔 단독 모드 — 앙상블은 참고 기록
+  await saveJudgment(date, outputs, final, ens, source);
   return true;
 }
 
