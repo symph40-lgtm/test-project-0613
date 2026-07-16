@@ -2,13 +2,29 @@
 
 // 예측 모델 실행 버튼 — /api/predict/run 호출(백필·판정·채점) 후 페이지 갱신.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function RunButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const busyRef = useRef(false);
+
+  // 페이지가 열려 있는 동안 120초 폴링 — 09:31 조기 판정, ~10:30 모니터링(판정 변경 추적),
+  // 10:31 확정, 15:35 채점이 사람 개입 없이 진행되게 한다 (/signal의 60초 폴링과 같은 원리)
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      try {
+        await fetch("/api/predict/run");
+        router.refresh();
+      } catch { /* 다음 주기에 재시도 */ }
+      busyRef.current = false;
+    }, 120_000);
+    return () => clearInterval(id);
+  }, [router]);
 
   async function run() {
     setBusy(true);

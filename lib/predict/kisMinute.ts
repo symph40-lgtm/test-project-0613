@@ -103,6 +103,41 @@ export async function fetchDayMinutes(code: string, dateYmd: string, upToHour = 
   return [...byTime.values()].sort((a, b) => (a.time < b.time ? -1 : 1));
 }
 
+// NXT(넥스트레이드) 프리마켓 1분봉 08:00~08:49 — 한 호출로 전부 (시장구분 NX).
+// 실측(2026-07-16): 과거 최소 9개월 제공. NXT 미거래일(휴장·비대상일)은 null.
+export async function fetchNxtPremarket(code: string, dateYmd: string): Promise<MinuteBar[] | null> {
+  const appkey = process.env.KIS_APP_KEY;
+  const appsecret = process.env.KIS_APP_SECRET;
+  const token = await getToken();
+  if (!token || !appkey || !appsecret) return null;
+  try {
+    const url = new URL(`${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice`);
+    url.searchParams.set("FID_COND_MRKT_DIV_CODE", "NX");
+    url.searchParams.set("FID_INPUT_ISCD", code);
+    url.searchParams.set("FID_INPUT_DATE_1", dateYmd);
+    url.searchParams.set("FID_INPUT_HOUR_1", "085000");
+    url.searchParams.set("FID_PW_DATA_INCU_YN", "N");
+    url.searchParams.set("FID_FAKE_TICK_INCU_YN", "");
+    const r = await fetch(url, {
+      headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
+      cache: "no-store",
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
+    if (j.rt_cd !== "0" || !Array.isArray(j.output2)) return null;
+    const bars: MinuteBar[] = [];
+    for (const row of j.output2) {
+      if (String(row.stck_bsop_date ?? "") !== dateYmd) continue;
+      const bar = rowToBar(row);
+      if (bar) bars.push(bar);
+    }
+    bars.sort((a, b) => (a.time < b.time ? -1 : 1));
+    return bars.length ? bars : null;
+  } catch {
+    return null;
+  }
+}
+
 // 당일 장중 폴백 (FHKST03010200 — 요청 시각에서 과거 30봉씩)
 export async function fetchTodayMinutes(code: string, upToHour: string): Promise<MinuteBar[] | null> {
   const appkey = process.env.KIS_APP_KEY;

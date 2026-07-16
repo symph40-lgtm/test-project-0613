@@ -5,12 +5,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { AccuracyStat, EnsembleResult, ModelId, ModelOutput, Verdict } from "./types";
 import { MODEL_IDS, emptyStat } from "./types";
 
+export type Revision = { at: string; verdict: Verdict; strength: number };
+
 export type PredictDayRow = {
   date: string;
   label: Verdict | null;
   r_oc: number | null;
   final_verdict: Verdict;
   strength: number;
+  stage: "early" | "final";
+  early_verdict: Verdict | null;
+  early_strength: number | null;
+  revisions: Revision[] | null;
   weights: Record<ModelId, number> | null;
   model_verdicts: Record<ModelId, Verdict> | null;
   source: string;
@@ -61,6 +67,56 @@ export async function hasJudgment(date: string): Promise<boolean> {
   return Boolean(data && data.length > 0);
 }
 
+export async function loadDayRow(date: string): Promise<PredictDayRow | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("predict_days")
+    .select("date, label, r_oc, final_verdict, strength, stage, early_verdict, early_strength, revisions, weights, model_verdicts, source")
+    .eq("date", date)
+    .maybeSingle();
+  return (data as PredictDayRow | null) ?? null;
+}
+
+// 조기 판정(09:31) 저장 / 모니터링 구간(~10:30) 판정 변경 누적.
+// final_verdict에는 잠정값을 넣고 stage='early' — 10:31 확정 시 saveJudgment가 덮어쓴다.
+export async function saveEarlyJudgment(
+  date: string,
+  verdict: Verdict,
+  strengthPct: number,
+  prior: PredictDayRow | null,
+): Promise<void> {
+  const admin = createAdminClient();
+  const nowIso = new Date().toISOString();
+  if (!prior) {
+    await admin.from("predict_days").upsert(
+      {
+        date,
+        final_verdict: verdict,
+        strength: strengthPct,
+        stage: "early",
+        early_verdict: verdict,
+        early_strength: strengthPct,
+        early_at: nowIso,
+        revisions: [{ at: nowIso, verdict, strength: strengthPct }],
+        source: "live",
+      },
+      { onConflict: "date" },
+    );
+    return;
+  }
+  const revs = prior.revisions ?? [];
+  const last = revs[revs.length - 1];
+  if (last && last.verdict === verdict) return; // 판정 유지 — 기록 없음
+  await admin
+    .from("predict_days")
+    .update({
+      final_verdict: verdict,
+      strength: strengthPct,
+      revisions: [...revs, { at: nowIso, verdict, strength: strengthPct }],
+    })
+    .eq("date", date);
+}
+
 export async function saveJudgment(
   date: string,
   outputs: ModelOutput[],
@@ -85,6 +141,7 @@ export async function saveJudgment(
       date,
       final_verdict: final.finalVerdict,
       strength: final.strengthPct,
+      stage: "final", // 조기(early) 행이 있으면 확정으로 전환 — early_*·revisions는 보존
       weights: ens.weights,
       model_verdicts: verdicts,
       source,
@@ -127,7 +184,7 @@ export async function loadRecentDays(n: number): Promise<PredictDayRow[]> {
   const admin = createAdminClient();
   const { data } = await admin
     .from("predict_days")
-    .select("date, label, r_oc, final_verdict, strength, weights, model_verdicts, source")
+    .select("date, label, r_oc, final_verdict, strength, stage, early_verdict, early_strength, revisions, weights, model_verdicts, source")
     .order("date", { ascending: false })
     .limit(n);
   return (data ?? []) as PredictDayRow[];

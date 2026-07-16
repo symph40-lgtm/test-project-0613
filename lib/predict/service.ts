@@ -4,14 +4,15 @@
 
 import { PREDICT_CONFIG } from "./config";
 import { fetchDailyPredict, kstNowPredict } from "./data";
-import { fetchDayMinutes, fetchTodayMinutes, clipToJudgeWindow } from "./kisMinute";
+import { fetchDayMinutes, fetchTodayMinutes, fetchNxtPremarket, clipToJudgeWindow } from "./kisMinute";
 import { labelDay } from "./label";
 import { runAllModels } from "./runner";
 import { finalizeJudgment, runEnsemble } from "./ensemble";
-import { hasJudgment, listUnscoredDates, loadAccuracyStats, saveJudgment, scoreDay } from "./store";
+import { hasJudgment, listUnscoredDates, loadAccuracyStats, loadDayRow, saveEarlyJudgment, saveJudgment, scoreDay } from "./store";
 import type { PredictDailyBar } from "./types";
 
-const JUDGE_MIN = 10 * 60 + 31; // 10:31부터 판정 (10:29봉까지 완성 보장)
+const EARLY_MIN = 9 * 60 + 31; // 09:31 조기 판정 (08:00 NXT 프리마켓 포함 창 — 220일 분석에서 유일하게 경제성 양수)
+const JUDGE_MIN = 10 * 60 + 31; // 10:31 확정 판정 (09:00 창 — 정확도 최고). 09:31~10:30은 모니터링(변경 누적)
 const SCORE_MIN = 15 * 60 + 35; // 15:35부터 당일 채점
 
 async function judgeOneDay(
@@ -48,16 +49,54 @@ async function judgeOneDay(
 export type PredictRunResult = {
   date: string;
   judgedToday: boolean;
+  earlyToday: boolean; // 조기 판정/모니터링 갱신 수행 여부
   backfilled: string[];
   scored: string[];
 };
+
+// 조기 판정·모니터링 (09:31~10:30) — 08:00 NXT 프리마켓 + 정규장 완성봉으로 잠정 판정.
+// NXT 데이터가 없으면 정규장 봉만으로 판정 (봉 수 부족 시 모델이 스스로 보수 판정).
+async function earlyJudge(
+  today: string,
+  complete: PredictDailyBar[],
+  minuteOfDay: number,
+): Promise<boolean> {
+  const code = PREDICT_CONFIG.symbol;
+  const ymd = today.replace(/-/g, "");
+  const prior = await loadDayRow(today);
+  if (prior && prior.stage === "final") return false; // 이미 확정 — 조기 단계 지남
+  const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+  const cutoff = nowHHMM < "10:30" ? nowHHMM : "10:30";
+  const [pre, krxRaw] = await Promise.all([
+    fetchNxtPremarket(code, ymd),
+    fetchDayMinutes(code, ymd, PREDICT_CONFIG.judgeHour).then(
+      (bars) => bars ?? fetchTodayMinutes(code, PREDICT_CONFIG.judgeHour),
+    ),
+  ]);
+  const krx = (krxRaw ?? []).filter((b) => b.time < cutoff);
+  const morning = [...(pre ?? []), ...krx];
+  if (morning.length < 20) return false;
+  const openPx = pre?.[0]?.open ?? krx[0]?.open;
+  if (!openPx) return false;
+  const outputs = runAllModels({
+    date: today,
+    dailyHistory: complete.slice(-120),
+    openPx,
+    morning,
+    prevDayMinutes: null, // 조기 단계는 달튼 VA 생략 (확정 판정에서 반영)
+  });
+  const acc = await loadAccuracyStats();
+  const final = finalizeJudgment(outputs, runEnsemble(outputs, acc));
+  await saveEarlyJudgment(today, final.finalVerdict, final.strengthPct, prior);
+  return true;
+}
 
 export async function runPredictService(): Promise<PredictRunResult> {
   const code = PREDICT_CONFIG.symbol;
   const { date: today, minuteOfDay } = kstNowPredict();
   const daily = await fetchDailyPredict(code, 170);
   const complete = daily.filter((b) => b.date < today); // 오늘 제외 = 확정 일봉
-  const result: PredictRunResult = { date: today, judgedToday: false, backfilled: [], scored: [] };
+  const result: PredictRunResult = { date: today, judgedToday: false, earlyToday: false, backfilled: [], scored: [] };
   if (complete.length < 40) return result;
 
   // ① 최근 10거래일 중 판정 자체가 없는 날 백필 (판정→즉시 채점)
@@ -82,10 +121,18 @@ export async function runPredictService(): Promise<PredictRunResult> {
     result.scored.push(d);
   }
 
-  // ③ 당일 판정 (10:31 이후, 거래일에만 — 오늘 일봉이 형성돼 있어야 함)
+  // ③a 조기 판정·모니터링 (09:31~10:30) — 확정 전 잠정 판정, 변경은 revisions에 누적
   const todayBar = daily.find((b) => b.date === today);
-  if (todayBar && minuteOfDay >= JUDGE_MIN && !(await hasJudgment(today))) {
-    result.judgedToday = await judgeOneDay(today, complete, todayBar.open, "live", true);
+  if (todayBar && minuteOfDay >= EARLY_MIN && minuteOfDay < JUDGE_MIN) {
+    result.earlyToday = await earlyJudge(today, complete, minuteOfDay);
+  }
+
+  // ③b 당일 확정 판정 (10:31 이후, 09:00 창 — 조기 행이 있으면 확정으로 전환)
+  if (todayBar && minuteOfDay >= JUDGE_MIN) {
+    const row = await loadDayRow(today);
+    if (!row || row.stage === "early") {
+      result.judgedToday = await judgeOneDay(today, complete, todayBar.open, "live", true);
+    }
   }
 
   // ④ 당일 채점 (15:35 이후 — 일봉 확정)

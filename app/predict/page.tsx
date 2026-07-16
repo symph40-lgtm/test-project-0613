@@ -75,8 +75,14 @@ export default async function PredictPage() {
         {today ? (
           <>
             <p className="text-[15px]">
-              최종 판정: {verdictCell(today.final_verdict)}{" "}
+              {today.stage === "early" ? "조기 판정(잠정, 10:31 확정 전)" : "최종 판정"}: {verdictCell(today.final_verdict)}{" "}
               <span className="text-[13px] text-ink-48">강도 {today.strength?.toFixed(1)}%</span>
+              {today.stage === "final" && today.early_verdict && (
+                <span className="ml-2 text-[12px] text-ink-48">
+                  (조기 09:31 {V_LABEL[(today.early_verdict ?? "none") as Verdict]}
+                  {today.revisions && today.revisions.length > 1 ? ` · 변경 ${today.revisions.length - 1}회` : ""})
+                </span>
+              )}
               {today.label && (
                 <span className="ml-2 text-[13px]">
                   → 실제 {verdictCell(today.label)}{" "}
@@ -84,6 +90,17 @@ export default async function PredictPage() {
                 </span>
               )}
             </p>
+            {today.stage === "early" && today.revisions && today.revisions.length > 0 && (
+              <p className="mt-1 text-[12px] text-ink-48">
+                모니터링 (10:31 확정 전 변경 추적):{" "}
+                {today.revisions
+                  .map((r) => {
+                    const kst = new Date(new Date(r.at).getTime() + 9 * 3600e3).toISOString().slice(11, 16);
+                    return `${kst} ${V_LABEL[(r.verdict ?? "none") as Verdict]}`;
+                  })
+                  .join(" → ")}
+              </p>
+            )}
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {MODEL_IDS.map((m) => {
                 const row = todayModels.find((r) => r.model === m);
