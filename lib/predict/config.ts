@@ -13,6 +13,13 @@ export const PREDICT_CONFIG = {
     preWindowBefore: "10:30", // 이전 체크포인트는 08:00(NXT 프리마켓) 창, 이후는 09:00 창 (실측 최적)
   },
   sms: { enabled: true }, // 판정 변경 문자 — dispatch 공용 경로 (일시정지·조용일 정책 자동 적용)
+  // 신호별 권장 스탑 (220일 실측, 2026-07-16 사용자 확정 — 스펙 3.2절):
+  // 선행형(산·골 시가 진입)은 타이트 스탑이 노이즈컷 유발(21/32회) → ATR 0.7배.
+  // 확인형(피셔)은 역행 자체가 확인 실패 증거 → 고정 ETF -3%가 최적 (+18.5→+43.6%p).
+  stops: {
+    earlySwing: { mode: "atr" as const, k: 0.7, minPct: 1.5, maxPct: 4 }, // 본주 % 기준
+    fisher: { mode: "fixed" as const, etfPct: 3 }, // ETF 기준 -3% (본주 -1.5%)
+  },
   // 판정 모드 (사용자 확정 2026-07-16): 220일×3종목 검증에서 앙상블(균등·리프트 가중 모두)이
   // 피셔 단독을 넘지 못해 최종 판정은 피셔 단독. 나머지 4개 모델은 대조군으로 계속 채점만.
   judgeMode: "fisher" as "fisher" | "ensemble",

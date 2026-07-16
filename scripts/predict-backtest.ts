@@ -16,6 +16,7 @@ import { runAllModels } from "../lib/predict/runner";
 import { finalizeJudgment, runEnsemble } from "../lib/predict/ensemble";
 import { fetchDayMinutes, clipToJudgeWindow } from "../lib/predict/kisMinute";
 import { fetchDailyPredict } from "../lib/predict/data";
+import { loadMacroHistory } from "../lib/predict/macro";
 import { MODEL_IDS, MODEL_LABELS, emptyStat } from "../lib/predict/types";
 import type { AccuracyStat, MinuteBar, ModelId, PredictDailyBar, Verdict } from "../lib/predict/types";
 
@@ -95,6 +96,9 @@ async function main() {
   }
   console.log(`\r분봉 수집 완료: ${minutes.size}/${needDates.length}일 확보\n`);
 
+  // 매크로 이력 (M7 근사 모델 축1) — 야후 3종, 실패 시 null 반환 함수
+  const macroAt = await loadMacroHistory();
+
   // ── 워크포워드 실행
   const acc: Record<ModelId, AccuracyStat> = Object.fromEntries(MODEL_IDS.map((m) => [m, emptyStat()])) as Record<ModelId, AccuracyStat>;
   const results: DayResult[] = [];
@@ -116,6 +120,7 @@ async function main() {
       openPx: bar.open,
       morning,
       prevDayMinutes: prevDate ? minutes.get(prevDate) ?? null : null,
+      macro: macroAt(bar.date),
     };
     const outputs = runAllModels(input);
     const ens = runEnsemble(outputs, acc); // 이 시점까지의 누적 정확도만 사용 (워크포워드)

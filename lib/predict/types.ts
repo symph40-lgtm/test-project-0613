@@ -3,7 +3,7 @@
 
 export type Verdict = "leverage" | "inverse" | "none";
 
-export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes", "user"] as const;
+export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes", "user", "m7"] as const;
 export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MODEL_LABELS: Record<ModelId, string> = {
@@ -13,6 +13,16 @@ export const MODEL_LABELS: Record<ModelId, string> = {
   dalton: "달튼 (가치영역+시가유형)",
   grimes: "그라임스 (레짐+풀백)",
   user: "사용자 (RV1+T6)",
+  m7: "M7근사 (축1×축2)",
+};
+
+// M7 근사 모델용 매크로 (전일·간밤 기준) — 없으면 해당 투표 생략
+export type MacroDay = {
+  soxPrevChg: number | null; // 간밤 SOX %
+  usdkrwPrevChg: number | null; // 전일 환율 %
+  usdkrwLevel: number | null; // 환율 레벨 (LM 게이트)
+  us10yPrevPp: number | null; // 전일 미 10Y 변화 %p (2Y 이력 부재로 근사)
+  us10yLevel: number | null; // 10Y 레벨 (LM 게이트)
 };
 
 export type PredictDailyBar = {
@@ -39,8 +49,9 @@ export type DayInput = {
   date: string;
   dailyHistory: PredictDailyBar[]; // 오래된 → 최신(전일). 최소 60개 권장
   openPx: number; // 당일 공식 시가
-  morning: MinuteBar[]; // 09:00~10:29 완성봉, 시간순
+  morning: MinuteBar[]; // 관찰창 완성봉, 시간순 (v1.4: 확정 판정은 09:00~13:59)
   prevDayMinutes: MinuteBar[] | null; // 전일 전체 1분봉 (달튼 가치영역). 없으면 해당 모델이 보수 판정
+  macro?: MacroDay | null; // M7 근사 모델용 — 없으면 축1 투표 생략(중립)
 };
 
 export type ModelOutput = {

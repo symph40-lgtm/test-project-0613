@@ -9,6 +9,7 @@ import { labelDay } from "./label";
 import { runAllModels } from "./runner";
 import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
+import { loadMacroHistory } from "./macro";
 import {
   hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
   saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
@@ -39,12 +40,17 @@ async function judgeOneDay(
   const morning = clipToJudgeWindow(dayMin, PREDICT_CONFIG.judgeHour);
   const prevDate = complete[complete.length - 1]?.date;
   const prevDayMinutes = prevDate ? await fetchDayMinutes(code, prevDate.replace(/-/g, ""), "153000") : null;
+  let macro = null;
+  try {
+    macro = (await loadMacroHistory())(date); // M7 근사 축1 — 실패해도 판정은 진행
+  } catch { /* 야후 장애 — 축1 중립 처리 */ }
   const outputs = runAllModels({
     date,
     dailyHistory: complete.slice(-120),
     openPx,
     morning,
     prevDayMinutes,
+    macro,
   });
   const acc = await loadAccuracyStats();
   const ens = runEnsemble(outputs, acc);
