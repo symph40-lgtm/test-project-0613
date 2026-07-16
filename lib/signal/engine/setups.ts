@@ -35,7 +35,7 @@ export function computeSetups(inp: Inputs): SetupResult {
   // ── L5 외인 수급 3요소 (하닉 개별 잠정치 — plan.md 편차 2)
   const l5 = foreignThreeFactor(ticks, ctx.frgn20dAvg.hynix);
 
-  // ── 매크로 악화 지표 (LM 게이트·S2 공용) — 해외장은 SOX 우선, 없으면 나스닥 (2026-07-09)
+  // ── 매크로 악화 지표 (S2 숏 가점용) — 해외장은 SOX 우선, 없으면 나스닥 (2026-07-09)
   const usEquity = ctx.overnight.soxPct ?? ctx.overnight.nasdaqPct;
   const macroBadItems = [
     ctx.usRates.regime === "상승",
@@ -43,6 +43,15 @@ export function computeSetups(inp: Inputs): SetupResult {
     (usEquity ?? 0) < -0.5,
   ];
   const macroBad = macroBadItems.filter(Boolean).length;
+
+  // ── LM 매크로 게이트 (사용자 개정 2026-07-16): 상대 변화(악화 2/3) → 절대 위험 레벨.
+  // "매크로가 중요한 건 맞지만 시장이 감내할 수 있는 기준값이 계속 변한다" — 변화율 대신
+  // 레벨 자체로 판정: 2Y ≥ 4.2% 또는 환율 ≥ 1,540원이면 레버리지 진입 금지. 레벨 미상은 통과.
+  const MG = SIGNAL_CONFIG.macroGate;
+  const us2yLevel = ctx.usRates.level ?? null;
+  const fxLevel = ctx.usdkrw.level ?? null;
+  const lmRateDanger = us2yLevel !== null && us2yLevel >= MG.us2yDanger;
+  const lmFxDanger = fxLevel !== null && fxLevel >= MG.usdkrwDanger;
 
   // ── FG 외인 현물 게이트 (2026-07-10) — 코스피 외국인 현물 순매수(KIS 억원) 30분 기울기.
   // T8과 같은 눈금(±t8MinDelta30). null(데이터 부재·중립)은 양쪽 통과.
@@ -62,9 +71,9 @@ export function computeSetups(inp: Inputs): SetupResult {
 
   // ══ 재설계 2026-07-15 (사용자 지정): 필수는 "이것 아니면 절대 안 되는" 조건만 —
   // 방향(L3)·시간대(L4)·차단형 게이트(LM·FG). 나머지는 배점 차등 가점 (만점 14).
-  // LM — 매크로 게이트 (필수): 매크로 악화 2개 이상이면 레버리지 진입 금지 (차단형).
-  l("LM", "매크로 게이트(악화 2개 미만)", "필수", macroBad < 2, 0,
-    `악화 ${macroBad}/3 (금리↑ ${fmtB(macroBadItems[0])} · 환율↑ ${fmtB(macroBadItems[1])} · SOX↓ ${fmtB(macroBadItems[2])})`);
+  // LM — 매크로 게이트 (필수): 절대 위험 레벨 도달 시 레버리지 진입 금지 (차단형, 2026-07-16 개정).
+  l("LM", `매크로 게이트(2Y<${MG.us2yDanger}%·환율<${MG.usdkrwDanger}원)`, "필수", !lmRateDanger && !lmFxDanger, 0,
+    `2Y ${us2yLevel !== null ? us2yLevel.toFixed(2) + "%" : "?"}${lmRateDanger ? " 위험" : ""} · 환율 ${fxLevel !== null ? Math.round(fxLevel) + "원" : "?"}${lmFxDanger ? " 위험" : ""}`);
   // FG — 외인 현물 게이트 (필수): 외인 현물이 뚜렷이 이탈 중이면 레버리지 금지 (차단형 — 부재·중립 통과).
   l("FG", "외인 현물 게이트(이탈 아님)", "필수", fgDir !== "DOWN", 0, fgDetail);
   const l3 = trend === null ? null : trend.dir === "UP" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
