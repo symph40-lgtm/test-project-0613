@@ -6,6 +6,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { loadAccuracyStats, loadModelRows, loadRecentDays, predictTablesReady } from "@/lib/predict/store";
+import { fetchDailyPredict } from "@/lib/predict/data";
+import { atrPct } from "@/lib/predict/indicators";
+import { PREDICT_CONFIG } from "@/lib/predict/config";
 import { liftWeight, chanceBaseline } from "@/lib/predict/ensemble";
 import { MODEL_IDS, MODEL_LABELS } from "@/lib/predict/types";
 import type { Verdict } from "@/lib/predict/types";
@@ -45,7 +48,16 @@ export default async function PredictPage() {
     );
   }
 
-  const [days, acc] = await Promise.all([loadRecentDays(21), loadAccuracyStats()]);
+  const [days, acc, dailyBars] = await Promise.all([
+    loadRecentDays(21),
+    loadAccuracyStats(),
+    fetchDailyPredict(PREDICT_CONFIG.symbol, 40).catch(() => []),
+  ]);
+  // 오늘의 권장 스탑 (스펙 3.3 — 신호 유형별): 산·골 조기 = ATR 0.7배(클램프), 피셔 = ETF -3%
+  const kstTodayStr = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const atr = atrPct(dailyBars.filter((b) => b.date < kstTodayStr), 14); // 오늘의 미완성 봉 제외
+  const sw = PREDICT_CONFIG.stops.earlySwing;
+  const atrStop = atr !== null ? Math.min(sw.maxPct, Math.max(sw.minPct, sw.k * atr)) : null;
   const modelRows = await loadModelRows(days.map((d) => d.date));
   const byDate = new Map<string, typeof modelRows>();
   for (const r of modelRows) {
@@ -68,6 +80,18 @@ export default async function PredictPage() {
       </p>
 
       <div className="mb-4"><RunButton /></div>
+
+      {/* 실전 운용 규칙 (220일 실측 확정 — 스펙 3.3) */}
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5 text-[13px] leading-relaxed">
+        <p className="mb-1 font-semibold">실전 운용 규칙 (검증 확정)</p>
+        <p className="text-ink-48">
+          ① <b>조기 신호(08:30~09:00, 산·골)</b>: 1/3 비중 선진입 · 스탑 ATR 0.7배
+          {atrStop !== null && <b className="text-ink-80"> = 오늘 본주 −{atrStop.toFixed(1)}% (2배 ETF −{(atrStop * 2).toFixed(1)}%)</b>}
+          {" "}— 타이트 스탑 금지(노이즈컷).
+          ② <b>피셔 신호(09:30~, 확인형)</b>: 본진입 · 스탑 <b className="text-ink-80">ETF −3% 고정</b> — 역행은 확인 실패 증거, 빨리 자를 것.
+          ③ 판정은 늦을수록 정확(14:00 확정 65.5%) — 확정과 반대 방향 보유 시 청산 검토. ④ 당일 청산 원칙 유지.
+        </p>
+      </div>
 
       {/* 오늘 판정 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">

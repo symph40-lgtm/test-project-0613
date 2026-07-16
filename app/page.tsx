@@ -43,6 +43,9 @@ const menuGroups = [
   {
     title: "시장 · 알림 · 분석",
     items: [
+      // 1번 (사용자 지정 2026-07-17): 220일 검증 신모델 — 피셔 확정 + 체크포인트 + 신호별 스탑.
+      // 다음 주부터 실투자 기준. 기존 /signal(M7)은 병행 유지.
+      { name: "① 레버리지·인버스 판정 (검증 신모델)", href: "/predict" },
       { name: "레버리지·인버스 신호", href: "/signal" },
       { name: "레버리지·인버스 신호 (미국)", href: "/signal/us" },
       { name: "장중 시황 요약", href: "/market/intraday" },
