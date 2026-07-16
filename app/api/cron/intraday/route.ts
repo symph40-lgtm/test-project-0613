@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchMarketData } from "@/lib/market/fetch";
 import { calculateRiskScores, calculateCompositeScore, classifyStage } from "@/lib/market/risk";
 import { sendEmail } from "@/lib/email";
+import { runPredictService } from "@/lib/predict/service";
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -84,7 +85,16 @@ export async function GET(req: NextRequest) {
       if (isSent) sent++;
     }
 
-    return NextResponse.json({ ok: true, sent, stage, composite });
+    // 대가 예측 모델 편승 실행 (docs/predict-models-spec.md 5장) — 10:00 크론(지연 +34~54분)이
+    // 실질 첫 판정, 다음날 크론이 전일 채점 백필. 실패해도 시황 크론 본연의 기능은 유지.
+    let predict: unknown = null;
+    try {
+      predict = await runPredictService();
+    } catch (e) {
+      console.error("[cron/intraday] predict 실행 실패:", e);
+    }
+
+    return NextResponse.json({ ok: true, sent, stage, composite, predict });
   } catch (e) {
     console.error("[cron/intraday] error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -38,3 +38,6 @@ __pycache__/
 venv/
 
 .vercel
+
+# 대가 예측모델 분봉 캐시
+.predict-cache/
