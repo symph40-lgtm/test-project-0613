@@ -50,6 +50,7 @@ const menuGroups = [
       { name: "유망 섹터 모니터", href: "/sectors" },
       { name: "전문가 Q&A (AI)", href: "/consult" },
       { name: "장중 알림", href: "/alerts/intraday" },
+      { name: "운영 설정 · 지시", href: "/ops" },
     ],
   },
   {

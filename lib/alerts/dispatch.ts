@@ -26,6 +26,30 @@ function quietDayBlocked(alertKey: string): boolean {
   return !QUIET_ALLOW_KEYS.test(alertKey);
 }
 
+// ── 모바일 운영 설정: 문자 일시정지 (/ops 페이지에서 제어, ops_settings.sms_pause) — 60초 캐시.
+// value: { until: "YYYY-MM-DD"(KST, 그날까지 정지), allowStrong: boolean(판정 문자는 허용) }
+let pauseCache: { until: string | null; allowStrong: boolean; at: number } = { until: null, allowStrong: true, at: 0 };
+
+async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, alertKey: string): Promise<boolean> {
+  try {
+    if (Date.now() - pauseCache.at > 60_000) {
+      const { data } = await admin.from("ops_settings").select("value").eq("key", "sms_pause").maybeSingle();
+      const v = (data?.value ?? null) as { until?: string; allowStrong?: boolean } | null;
+      pauseCache = {
+        until: typeof v?.until === "string" ? v.until : null,
+        allowStrong: v?.allowStrong !== false,
+        at: Date.now(),
+      };
+    }
+  } catch {
+    return false; // 테이블 미존재(마이그레이션 025 전)·오류 — 정지 없음으로 처리
+  }
+  if (pauseCache.until === null) return false;
+  const kstToday = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  if (kstToday > pauseCache.until) return false;
+  return pauseCache.allowStrong ? !QUIET_ALLOW_KEYS.test(alertKey) : true;
+}
+
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
   date: string, // KST 거래일 (YYYY-MM-DD) — 이 날짜 기준 1일 1회 중복 방지
@@ -35,6 +59,7 @@ export async function dispatchToChannels(
 ): Promise<number> {
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
+  if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지
 
   // 오늘(KST) 이미 발송된 alertKey인지 확인
   const kstDayStartUtc = new Date(`${date}T00:00:00+09:00`).toISOString();

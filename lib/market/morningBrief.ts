@@ -6,11 +6,53 @@
 // 데이터 한계: ISM PMI·ADP는 FRED 릴리즈 캘린더에 없어 미포함 (민간 발표).
 
 import YahooFinance from "yahoo-finance2";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchUs2yYield, fetchUs10yYield } from "./rateAlert";
 import { fetchKospi200Futures } from "./naver-flow";
 import { fetchUpcomingUsEvents, type EconEvent } from "@/lib/calendar/fred";
 import { fetchNews } from "@/lib/news/fetch";
 import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
+import { loadTicks } from "@/lib/signal/store";
+
+// ── 어제 판정 성과 정량화 (사용자 지정 2026-07-16: "판정대로 3천만원 매수 → 15시 매도 시
+// 손익을 정량화해서 매일 피드백"). 어제 실제 발송된 첫 판정 문자 시점에 진입했다고 가정:
+// 상방(레버리지) = 하닉 2배 / 하방(인버스) = K200선물 -2배. 15:00 청산가와 비교.
+const PERF_CAPITAL = 30_000_000;
+
+export async function judgePerformanceLine(dateKst: string): Promise<string | null> {
+  try {
+    const admin = createAdminClient();
+    const dayStart = new Date(`${dateKst}T00:00:00+09:00`).toISOString();
+    const dayEnd = new Date(`${dateKst}T23:59:59+09:00`).toISOString();
+    const { data } = await admin
+      .from("alerts").select("created_at, message")
+      .eq("trigger_key", "signal").gte("created_at", dayStart).lte("created_at", dayEnd)
+      .order("created_at", { ascending: true });
+    const sig = (data ?? []).find((r) => {
+      const k = (r.message as { alertKey?: string } | null)?.alertKey ?? "";
+      return /^(trend_up|trend_down|vrebound_long|vrebound_early)$/.test(k);
+    });
+    if (!sig) return `어제(${dateKst.slice(5)}) 판정 성과: 진입 신호 없음 — 관망 (손익 0)`;
+    const key = (sig.message as { alertKey?: string }).alertKey as string;
+    const dirUp = key !== "trend_down";
+    const sentMs = Date.parse(sig.created_at as string);
+    const ticks = await loadTicks(dateKst);
+    const sel = dirUp ? (t: { hynixChg: number | null }) => t.hynixChg : (t: { futChg: number | null }) => t.futChg;
+    const entryTick = ticks.filter((t) => Date.parse(t.ts) <= sentMs).pop() ?? ticks.find((t) => Date.parse(t.ts) > sentMs);
+    const exitTick = ticks.filter((t) => t.minuteOfDay <= 15 * 60).pop();
+    const e = entryTick ? sel(entryTick) : null;
+    const x = exitTick ? sel(exitTick) : null;
+    if (e === null || e === undefined || x === null || x === undefined) return null;
+    const rawPp = dirUp ? x - e : e - x;              // 기초지수 %p
+    const pnlPct = rawPp * 2;                          // 2배 상품
+    const won = Math.round((PERF_CAPITAL * pnlPct) / 100 / 10000);
+    const hhmm = new Date(sentMs + 9 * 3600e3).toISOString().slice(11, 16);
+    const label = key === "trend_down" ? "인버스" : key === "trend_up" ? "레버리지" : "V반등 레버리지";
+    return `어제(${dateKst.slice(5)}) 판정 성과: ${label} ${hhmm} 진입 → 15:00 청산 ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}% (3천만 기준 ${won >= 0 ? "+" : ""}${won}만원)`;
+  } catch {
+    return null;
+  }
+}
 
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
@@ -121,6 +163,16 @@ ${news.map((n) => `- ${n.title}`).join("\n") || "없음"}
     }
   }
 
+  // 어제 판정 성과 (전일이 주말이면 금요일까지 거슬러 탐색)
+  let perfLine: string | null = null;
+  for (let back = 1; back <= 3; back++) {
+    const d = new Date(now.getTime() + 9 * 3600e3 - back * 86400e3).toISOString().slice(0, 10);
+    const dow = new Date(`${d}T12:00:00Z`).getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    perfLine = await judgePerformanceLine(d).catch(() => null);
+    break;
+  }
+
   // ── 문자 ①시장
   const lines1 = [
     `[스탁가드] 아침브리핑 ①시장 (${md})`,
@@ -133,6 +185,7 @@ ${news.map((n) => `- ${n.title}`).join("\n") || "없음"}
       (k200f && k200f.price !== null ? ` · K200야간선물 ${k200f.price.toFixed(1)} ${pct(k200f.changePercent)}${k200f.stale ? "(마감값)" : ""}` : ""),
     `평가: ${marketComment}`,
   ];
+  if (perfLine) lines1.push(perfLine);
   const sms1 = lines1.join("\n");
 
   // ── 문자 ②지표 (3일 내 — 발표 시각이 지난 지표 제외)
