@@ -49,8 +49,10 @@ export function computeSetups(inp: Inputs): SetupResult {
   // 레벨 자체로 판정: 2Y ≥ 4.2% 또는 환율 ≥ 1,540원이면 레버리지 진입 금지. 레벨 미상은 통과.
   const MG = SIGNAL_CONFIG.macroGate;
   const us2yLevel = ctx.usRates.level ?? null;
+  const us10yLevel = ctx.macroExtra?.us10y?.level ?? null; // 10Y ≥4.6% 추가 (사용자 2026-07-16 2차)
   const fxLevel = ctx.usdkrw.level ?? null;
   const lmRateDanger = us2yLevel !== null && us2yLevel >= MG.us2yDanger;
+  const lm10yDanger = us10yLevel !== null && us10yLevel >= MG.us10yDanger;
   const lmFxDanger = fxLevel !== null && fxLevel >= MG.usdkrwDanger;
 
   // ── FG 외인 현물 게이트 (2026-07-10) — 코스피 외국인 현물 순매수(KIS 억원) 30분 기울기.
@@ -72,8 +74,9 @@ export function computeSetups(inp: Inputs): SetupResult {
   // ══ 재설계 2026-07-15 (사용자 지정): 필수는 "이것 아니면 절대 안 되는" 조건만 —
   // 방향(L3)·시간대(L4)·차단형 게이트(LM·FG). 나머지는 배점 차등 가점 (만점 14).
   // LM — 매크로 게이트 (필수): 절대 위험 레벨 도달 시 레버리지 진입 금지 (차단형, 2026-07-16 개정).
-  l("LM", `매크로 게이트(2Y<${MG.us2yDanger}%·환율<${MG.usdkrwDanger}원)`, "필수", !lmRateDanger && !lmFxDanger, 0,
-    `2Y ${us2yLevel !== null ? us2yLevel.toFixed(2) + "%" : "?"}${lmRateDanger ? " 위험" : ""} · 환율 ${fxLevel !== null ? Math.round(fxLevel) + "원" : "?"}${lmFxDanger ? " 위험" : ""}`);
+  l("LM", `매크로 게이트(2Y<${MG.us2yDanger}·10Y<${MG.us10yDanger}%·환율<${MG.usdkrwDanger}원)`, "필수",
+    !lmRateDanger && !lm10yDanger && !lmFxDanger, 0,
+    `2Y ${us2yLevel !== null ? us2yLevel.toFixed(2) + "%" : "?"}${lmRateDanger ? " 위험" : ""} · 10Y ${us10yLevel !== null ? us10yLevel.toFixed(2) + "%" : "?"}${lm10yDanger ? " 위험" : ""} · 환율 ${fxLevel !== null ? Math.round(fxLevel) + "원" : "?"}${lmFxDanger ? " 위험" : ""}`);
   // FG — 외인 현물 게이트 (필수): 외인 현물이 뚜렷이 이탈 중이면 레버리지 금지 (차단형 — 부재·중립 통과).
   l("FG", "외인 현물 게이트(이탈 아님)", "필수", fgDir !== "DOWN", 0, fgDetail);
   const l3 = trend === null ? null : trend.dir === "UP" && (trend.grade === "추세일" || trend.grade === "약한추세" || (trend.dc1 !== null && trend.dc1 >= 0.55));
