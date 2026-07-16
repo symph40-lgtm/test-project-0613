@@ -57,6 +57,10 @@ export async function loadAccuracyStats(): Promise<Record<ModelId, AccuracyStat>
     stats[m].verdicts[v] += 1;
     stats[m].labels[l] += 1;
     if (row.correct) stats[m].correct += 1;
+    if (v !== "none") {
+      stats[m].dirTotal += 1;
+      if (row.correct) stats[m].dirCorrect += 1;
+    }
   }
   return stats;
 }

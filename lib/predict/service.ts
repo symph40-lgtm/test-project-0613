@@ -110,9 +110,14 @@ async function checkpointStream(
 
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
+    // 실측 적중률 병기 — 그 시각 판정자(조기=user, 이후=피셔)의 방향 판정 누적 적중률 (표본 10회 이상일 때만)
+    const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
+    const st = acc[judge];
+    const hitPct = next.verdict !== "none" && st && st.dirTotal >= 10 ? Math.round((st.dirCorrect / st.dirTotal) * 100) : null;
+    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·실측적중 ${hitPct}%` : ""})`;
     const text = prev === null
-      ? `[예측] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} (${Math.round(next.strength)}%)`
-      : `[예측] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} (${Math.round(next.strength)}%)`;
+      ? `[예측] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
+      : `[예측] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
     try {
       await dispatchToChannels("signal", today, {
         key: `predict_${whenLabel.replace(":", "")}_${next.verdict}`,

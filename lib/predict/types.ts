@@ -73,6 +73,8 @@ export type AccuracyStat = {
   total: number;
   verdicts: Record<Verdict, number>; // 모델의 판정 분포
   labels: Record<Verdict, number>; // 같은 날들의 실제 라벨 분포
+  dirCorrect: number; // 방향 판정(none 제외) 중 적중 — "실측 확률" 표기용
+  dirTotal: number;
 };
 
 export function emptyStat(): AccuracyStat {
@@ -81,6 +83,8 @@ export function emptyStat(): AccuracyStat {
     total: 0,
     verdicts: { leverage: 0, inverse: 0, none: 0 },
     labels: { leverage: 0, inverse: 0, none: 0 },
+    dirCorrect: 0,
+    dirTotal: 0,
   };
 }
 

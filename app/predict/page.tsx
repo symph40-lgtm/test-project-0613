@@ -70,6 +70,29 @@ export default async function PredictPage() {
   const today = days.find((d) => d.date === kstToday) ?? null;
   const todayModels = today ? byDate.get(today.date) ?? [] : [];
 
+  // 체크포인트 슬롯별 라이브 적중률 (채점 완료 + 타임라인 있는 날만 — 시딩분엔 타임라인 없음)
+  const slotStats = new Map<string, { c: number; t: number }>();
+  for (const d of days) {
+    if (!d.label || !d.revisions) continue;
+    for (const r of d.revisions) {
+      if (!r.checkpoint) continue;
+      const s = slotStats.get(r.checkpoint) ?? { c: 0, t: 0 };
+      s.t++;
+      if (r.verdict === d.label) s.c++;
+      slotStats.set(r.checkpoint, s);
+    }
+  }
+  // 하루치 체크포인트 점수 (채점 후): 타임라인 판정 중 실제와 일치한 비율
+  const cpScore = (d: (typeof days)[number]): { c: number; t: number } | null => {
+    if (!d.label || !d.revisions || d.revisions.length === 0) return null;
+    let c = 0;
+    for (const r of d.revisions) if (r.verdict === d.label) c++;
+    return { c, t: d.revisions.length };
+  };
+  // 오늘 판정의 "실측 확률" — 판정자(피셔)의 방향 판정 누적 적중률
+  const fisherStat = acc.fisher;
+  const fisherDirPct = fisherStat.dirTotal > 0 ? (fisherStat.dirCorrect / fisherStat.dirTotal) * 100 : null;
+
   return (
     <PageShell title="대가 예측 모델" badge="PREDICT" width="wide">
       <p className="mb-4 text-[13px] leading-relaxed text-ink-48">
@@ -106,6 +129,11 @@ export default async function PredictPage() {
                   (첫 판정 {V_LABEL[(today.early_verdict ?? "none") as Verdict]})
                 </span>
               )}
+              {today.final_verdict !== "none" && fisherDirPct !== null && (
+                <span className="ml-2 text-[12px] text-ink-48">
+                  · 실측 확률 {fisherDirPct.toFixed(0)}% (방향 판정 {fisherStat.dirTotal}회 누적)
+                </span>
+              )}
               {today.label && (
                 <span className="ml-2 text-[13px]">
                   → 실제 {verdictCell(today.label)}{" "}
@@ -119,10 +147,17 @@ export default async function PredictPage() {
                 {today.revisions
                   .map((r) => {
                     const t = r.checkpoint ?? new Date(new Date(r.at).getTime() + 9 * 3600e3).toISOString().slice(11, 16) + "*";
-                    return `${t} ${V_LABEL[(r.verdict ?? "none") as Verdict]}`;
+                    const mark = today.label ? (r.verdict === today.label ? "○" : "✕") : "";
+                    return `${t} ${V_LABEL[(r.verdict ?? "none") as Verdict]}${mark}`;
                   })
                   .join(" → ")}{" "}
                 (*표시는 체크포인트 사이 변경 감지)
+                {(() => {
+                  const s = cpScore(today);
+                  return s ? (
+                    <b className="text-ink-80"> — 채점: 실제 {V_LABEL[(today.label ?? "none") as Verdict]}, 체크포인트 점수 {s.c}/{s.t} ({((s.c / s.t) * 100).toFixed(0)}%)</b>
+                  ) : null;
+                })()}
               </p>
             )}
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -149,6 +184,16 @@ export default async function PredictPage() {
       {/* 누적 정확도 = 앙상블 가중치 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
         <p className="mb-2 text-[14px] font-semibold">모델별 누적 정확도 → 리프트 가중치 (우연 이하 모델은 0 = 침묵)</p>
+        {slotStats.size > 0 && (
+          <p className="mb-2 text-[12px] text-ink-48">
+            체크포인트별 라이브 적중률(3분류):{" "}
+            {[...slotStats.entries()]
+              .sort(([a], [b]) => (a < b ? -1 : 1))
+              .map(([cp, s]) => `${cp} ${s.c}/${s.t}`)
+              .join(" · ")}{" "}
+            — 라이브 채점일만 집계 (시딩 이력엔 타임라인 없음)
+          </p>
+        )}
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {MODEL_IDS.map((m) => {
             const s = acc[m];
@@ -178,7 +223,8 @@ export default async function PredictPage() {
                   <th key={m} className="py-1.5 pr-2">{MODEL_LABELS[m].split(" ")[0]}</th>
                 ))}
                 <th className="py-1.5 pr-2">최종 (강도)</th>
-                <th className="py-1.5">실제</th>
+                <th className="py-1.5 pr-2">실제</th>
+                <th className="py-1.5">CP점수</th>
               </tr>
             </thead>
             <tbody>
@@ -205,7 +251,7 @@ export default async function PredictPage() {
                         </span>
                       )}
                     </td>
-                    <td className="py-1.5 whitespace-nowrap">
+                    <td className="py-1.5 pr-2 whitespace-nowrap">
                       {d.label ? (
                         <>
                           {verdictCell(d.label)}{" "}
@@ -214,6 +260,12 @@ export default async function PredictPage() {
                       ) : (
                         <span className="text-ink-48">채점 전</span>
                       )}
+                    </td>
+                    <td className="py-1.5 whitespace-nowrap text-ink-48">
+                      {(() => {
+                        const s = cpScore(d);
+                        return s ? `${s.c}/${s.t}` : "—";
+                      })()}
                     </td>
                   </tr>
                 );
