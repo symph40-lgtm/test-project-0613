@@ -5,8 +5,9 @@ import { runRaschke } from "./models/raschke";
 import { runFisher } from "./models/fisher";
 import { runDalton } from "./models/dalton";
 import { runGrimes } from "./models/grimes";
+import { runUser } from "./models/user";
 import type { DayInput, ModelOutput } from "./types";
 
 export function runAllModels(input: DayInput): ModelOutput[] {
-  return [runCrabel(input), runRaschke(input), runFisher(input), runDalton(input), runGrimes(input)];
+  return [runCrabel(input), runRaschke(input), runFisher(input), runDalton(input), runGrimes(input), runUser(input)];
 }

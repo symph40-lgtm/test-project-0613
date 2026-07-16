@@ -3,7 +3,7 @@
 
 export type Verdict = "leverage" | "inverse" | "none";
 
-export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes"] as const;
+export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes", "user"] as const;
 export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MODEL_LABELS: Record<ModelId, string> = {
@@ -12,6 +12,7 @@ export const MODEL_LABELS: Record<ModelId, string> = {
   fisher: "피셔 (ACD A·C지점)",
   dalton: "달튼 (가치영역+시가유형)",
   grimes: "그라임스 (레짐+풀백)",
+  user: "사용자 (RV1+T6)",
 };
 
 export type PredictDailyBar = {

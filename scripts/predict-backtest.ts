@@ -203,7 +203,7 @@ async function main() {
 
   // ── 최근 15일 상세
   console.log("\n── 최근 15일 상세 (판정 vs 실제) ──");
-  console.log("날짜        | 크레이블 | 라쉬케  | 피셔    | 달튼    | 그라임스 | 최종(강도)      | 실제");
+  console.log(`날짜        | ${MODEL_IDS.map((m) => MODEL_LABELS[m].split(" ")[0].padEnd(4)).join(" | ")} | 최종(강도)      | 실제`);
   const short = (v: Verdict) => (v === "leverage" ? "레버리지" : v === "inverse" ? "인버스 " : "없음  ");
   for (const r of results.slice(-15)) {
     const cells = MODEL_IDS.map((m) => {
