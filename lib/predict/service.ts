@@ -115,9 +115,18 @@ async function checkpointStream(
     const st = acc[judge];
     const hitPct = next.verdict !== "none" && st && st.dirTotal >= 10 ? Math.round((st.dirCorrect / st.dirTotal) * 100) : null;
     const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·실측적중 ${hitPct}%` : ""})`;
-    const text = prev === null
+    let text = prev === null
       ? `[예측] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
       : `[예측] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
+    // 규칙 환기 (사용자 지정 2026-07-17 "당분간") — 수익은 적중률이 아니라 규칙에서.
+    // 장문(LMS) 전환을 감수하고 동봉. config.sms.ruleReminder=false로 끄면 단문 복귀.
+    if (PREDICT_CONFIG.sms.ruleReminder) {
+      if (next.verdict !== "none") {
+        text += `\n▶규칙: 조기신호 1/3 선진입+ATR스탑 / 피셔(09:30~) 본진입+ETF-3%컷 / 당일청산. 적중률 ${hitPct ?? 63}% — 수익은 적중이 아니라 규칙에서 나옵니다.`;
+      } else if (prev !== null) {
+        text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
+      }
+    }
     try {
       await dispatchToChannels("signal", today, {
         key: `predict_${whenLabel.replace(":", "")}_${next.verdict}`,
