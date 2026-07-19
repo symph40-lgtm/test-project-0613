@@ -5,7 +5,9 @@
 //  - 단계 레벨: 2년물이 4.14(경고)/4.15(위험)/4.16(최고위험) 돌파 시 알림, 내려오면 해제 알림.
 //    (원래 4.125 단일 기준이었으나 금리가 그 주변에서 진동해 노이즈만 발생 — 사용자 요청으로
 //     2026-07-07 제거하고 단계형으로 교체)
-//  - 10년물: 기준(기본 4.45%) 상향 돌파 → 고PER 압박 경고
+//  - 10년물: 기준(기본 4.6%) 상향 돌파 → 고PER 압박 경고
+//  - 문자(SMS)는 2년물 4.16 이상 구간의 알림과 10년물 4.6 돌파만 (사용자 지정 2026-07-19) —
+//    그 외는 suppressSms로 이메일 기록만. 감지·단계 판정 자체는 전부 유지.
 // 임계값 근거: scripts/rate-alert-analyze.ts 실측 (6/5·6/18·6/30·7/1 이벤트 4일 전부 감지).
 //
 // 변동값은 분봉 API가 아니라 rate_samples에 축적된 샘플 간 차이로 계산 —
@@ -16,6 +18,7 @@ export type RateAlertConfig = {
   delta1h: number;    // 2년물 1시간 변동 임계값 (%p)
   levels2y: number[]; // 2년물 단계 레벨 (%, 오름차순 — 경고→위험→최고위험)
   level10y: number;   // 10년물 절대 레벨 (%)
+  sms2yFloor: number; // 2년물 문자 하한 (%) — 현재값이 이 미만이면 문자 억제·이메일만 (사용자 지정 2026-07-19)
 };
 
 // 단계 이름·행동 지침 — levels2y 인덱스 순 (마지막 초과분은 전부 최고위험)
@@ -46,12 +49,15 @@ function envLevels(name: string, fallback: number[]): number[] {
 }
 
 // 환경변수로 조정 가능 (기본값은 2026-06~07 실측 분석 기준 — docs/rate-alert.md 2장)
+// 문자 발송 조건 (사용자 지정 2026-07-19): 미2년 4.16 이상·미10년 4.6 돌파 시에만 문자.
+// 그 아래 급변·경고/위험 단계·해제는 이메일 기록만 (suppressSms).
 export function rateAlertConfig(): RateAlertConfig {
   return {
     delta30m: envNum("RATE_ALERT_2Y_DELTA_30M", 0.03),
     delta1h: envNum("RATE_ALERT_2Y_DELTA_1H", 0.03),
     levels2y: envLevels("RATE_ALERT_2Y_LEVELS", [4.135, 4.15, 4.16]),
-    level10y: envNum("RATE_ALERT_10Y_LEVEL", 4.45),
+    level10y: envNum("RATE_ALERT_10Y_LEVEL", 4.6),
+    sms2yFloor: envNum("RATE_ALERT_2Y_SMS_FLOOR", 4.16),
   };
 }
 
@@ -68,6 +74,7 @@ export type RateAlertHit = {
   smsSubject?: string;
   emailSubject: string;
   snapshot: Record<string, unknown>;
+  suppressSms?: boolean; // 문자 하한 미달 — 이메일만 발송 (dispatch의 조용 시간과 동일 경로)
 };
 
 // ts 기준으로 targetMs 이전 [minAgo, maxAgo] 창에서 가장 가까운 샘플
@@ -169,6 +176,14 @@ export function evaluateRateAlerts(samples: RateSample[], cfg: RateAlertConfig):
         emailSubject: `미국 2년물 ${fmt(cur.y2, 3)}% — ${level}% 하향 이탈 (${grade}단계 해제)`,
         snapshot: { y2: cur.y2, prevY2: prevFresh?.y2 ?? null, level, grade, levels },
       });
+    }
+
+    // 문자 하한 (사용자 지정 2026-07-19): 현재 2년물이 sms2yFloor(4.16) 미만이면 위 2년물
+    // 알림(급변·단계·해제) 전부 이메일만 — 4.16 이상 구간의 알림만 문자로 나간다.
+    // 주의: 억제돼도 alertKey 1일 1회는 소진되므로, 같은 키의 문자가 그날 다시 열리지는 않음
+    // (4.16 돌파 자체는 별도 키 rate2y_lvl_u4.16이라 영향 없음).
+    if (cur.y2 < cfg.sms2yFloor) {
+      for (const h of hits) if (h.key.startsWith("rate2y_")) h.suppressSms = true;
     }
   }
 

@@ -4,7 +4,9 @@ import { evaluateRateAlerts, type RateSample } from "../lib/market/rateAlert";
 
 // 단계 레벨: 4.135 경고(1/3 감축) / 4.15 위험(2/3 매도) / 4.16 최고위험(전량 매도)
 // (2026-07-07 사용자 확정 — 4.125 단일 기준은 진동 노이즈로 제거)
-const cfg = { delta30m: 0.03, delta1h: 0.03, levels2y: [4.135, 4.15, 4.16], level10y: 4.45 };
+// 문자 하한 sms2yFloor (2026-07-19 사용자 지정): 2년물 4.16 미만 구간의 알림은 이메일만.
+// level10y는 시나리오 픽스처 유지를 위해 4.45로 고정 (운영 기본값은 4.6 — 로직은 동일).
+const cfg = { delta30m: 0.03, delta1h: 0.03, levels2y: [4.135, 4.15, 4.16], level10y: 4.45, sms2yFloor: 4.16 };
 const T0 = Date.parse("2026-07-06T00:00:00Z");
 const m = (min: number) => T0 + min * 60000;
 const S = (min: number, y2: number | null, y10: number | null = 4.40): RateSample => ({ ts: m(min), y2, y10 });
@@ -80,6 +82,35 @@ run("샘플 공백(1시간 창)", [S(0, 4.05), S(50, 4.10)], ["rate2y_spike_up"]
 
 // 19) 90분 전 샘플만 존재 — 모든 창 밖 → 급변 판정 불가, 무알람
 run("샘플 공백(창 밖)", [S(0, 4.05), S(90, 4.10)], []);
+
+// ── 문자 하한 (2026-07-19 사용자 지정: 2년물 문자는 4.16 이상 구간만, 그 외는 이메일만)
+function runSms(name: string, samples: RateSample[], key: string, expectSuppressed: boolean) {
+  const hits = evaluateRateAlerts(samples, cfg);
+  const hit = hits.find((h) => h.key === key);
+  const ok = hit !== undefined && (hit.suppressSms === true) === expectSuppressed;
+  if (!ok) failed++;
+  console.log(
+    `${ok ? "PASS" : "FAIL"} ${name} → ${key} suppressSms=${hit?.suppressSms ?? false} (기대: ${expectSuppressed})`,
+  );
+}
+
+// 20) 경고단계 돌파(4.137, 4.16 미만) — 문자 억제
+runSms("경고단계 돌파는 이메일만", [S(0, 4.13), S(10, 4.137)], "rate2y_lvl_u4.135", true);
+
+// 21) 최고위험 돌파(4.165) — 문자 발송
+runSms("최고위험 돌파는 문자", [S(0, 4.13), S(10, 4.165)], "rate2y_lvl_u4.16", false);
+
+// 22) 4.16 미만에서의 급등 — 문자 억제
+runSms("하한 미만 급등은 이메일만", [S(0, 4.05), S(10, 4.05), S(30, 4.06), S(60, 4.10)], "rate2y_spike_up", true);
+
+// 23) 4.16 이상 구간의 급등(4.13 → 4.17) — 문자 발송
+runSms("하한 이상 급등은 문자", [S(0, 4.13), S(10, 4.13), S(30, 4.14), S(60, 4.17)], "rate2y_spike_up", false);
+
+// 24) 최고위험 해제(4.165 → 4.13, 현재값이 하한 미만) — 문자 억제
+runSms("단계 해제는 이메일만", [S(0, 4.165), S(10, 4.13)], "rate2y_lvl_d4.135", true);
+
+// 25) 10년물 돌파 — 2년물 하한과 무관하게 문자 발송
+runSms("10년물 돌파는 문자", [S(0, 4.10, 4.44), S(10, 4.10, 4.46)], "rate10y_level_up", false);
 
 console.log(`\n총 실패 ${failed}건`);
 process.exit(failed > 0 ? 1 : 0);

@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       sent += await dispatchToChannels(
         "rate",
         date,
-        { key: hit.key, severity: hit.severity, text: hit.text, smsSubject: hit.smsSubject },
+        { key: hit.key, severity: hit.severity, text: hit.text, smsSubject: hit.smsSubject, suppressSms: hit.suppressSms },
         hit.emailSubject,
         hit.snapshot,
       );
