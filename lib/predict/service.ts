@@ -131,7 +131,7 @@ async function checkpointStream(
       // 키에 분(minute)을 넣지 않는다 — 2026-07-20 실측 사고: 상태 저장 실패 시 매 크론마다
       // 같은 판정이 분 단위 새 키로 재발송돼 2분 간격 문자 폭주. 체크포인트는 slot 키,
       // 모니터링 변경은 '이전→다음' 전환 키로 하루 1회 고정.
-      const isCheckpoint = PREDICT_CONFIG.schedule.checkpoints.includes(whenLabel);
+      const isCheckpoint = (PREDICT_CONFIG.schedule.checkpoints as readonly string[]).includes(whenLabel);
       const key = isCheckpoint
         ? `predict_cp${whenLabel.replace(":", "")}_${next.verdict}`
         : `predict_chg_${prev ?? "none"}_${next.verdict}`;
