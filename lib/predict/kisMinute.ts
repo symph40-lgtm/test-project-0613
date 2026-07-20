@@ -100,7 +100,15 @@ export async function fetchDayMinutes(code: string, dateYmd: string, upToHour = 
     return null;
   }
   if (byTime.size === 0) return null;
-  return [...byTime.values()].sort((a, b) => (a.time < b.time ? -1 : 1));
+  let bars = [...byTime.values()].sort((a, b) => (a.time < b.time ? -1 : 1));
+  // ⚠ 당일 조회 시 미래 시각 가드 (2026-07-20 실측): 아직 오지 않은 시각을 요청하면 KIS가
+  // 직전 거래일 봉을 '요청한 날짜'로 라벨해 반환한다 — 현재 분 이전의 완성봉만 신뢰.
+  const kstNow = new Date(Date.now() + 9 * 3600e3);
+  if (dateYmd === kstNow.toISOString().slice(0, 10).replace(/-/g, "")) {
+    const nowHHMM = `${String(kstNow.getUTCHours()).padStart(2, "0")}:${String(kstNow.getUTCMinutes()).padStart(2, "0")}`;
+    bars = bars.filter((b) => b.time < nowHHMM);
+  }
+  return bars.length ? bars : null;
 }
 
 // NXT(넥스트레이드) 프리마켓 1분봉 08:00~08:49 — 한 호출로 전부 (시장구분 NX).
