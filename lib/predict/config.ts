@@ -15,6 +15,9 @@ export const PREDICT_CONFIG = {
   // 판정 변경 문자 — dispatch 공용 경로 (일시정지·조용일 정책 자동 적용).
   // ruleReminder: 실투자 초기 규칙 환기 문구 동봉 (사용자 지정 2026-07-17 "당분간" — 몸에 배면 false로)
   sms: { enabled: true, ruleReminder: true },
+  // 결정 통지가 "완료 처리"된 키 목록 — 사용자가 결정을 내려 반영한 뒤 여기 키를 추가하면
+  // 리마인드(총 3회) 발송이 중단된다. 예: "predict_promote_m7"
+  resolvedDecisions: [] as string[],
   // 애프터장 판정 (사용자 지정 2026-07-20) — NXT 애프터마켓 15:30~20:00, 하닉 "본주 전용"
   // (레버리지·인버스 ETF 미운영). 판정자 피셔 단독. 상수는 세션 스케일 초기값 — 미검증,
   // 라이브 채점으로 보정 예정. 오프셋 = offsetDayRangeRatio × 당일 정규장 레인지.

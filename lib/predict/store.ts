@@ -241,11 +241,12 @@ export async function loadRescueStats(): Promise<Record<string, { c: number; t: 
   return stats;
 }
 
-// 특정 alertKey가 과거 언제라도 발송된 적 있는지 — "한 번만 알리는" 결정 통지용 (일 단위 dedup과 별개)
-export async function hasAlertKeyEver(key: string): Promise<boolean> {
+// 특정 alertKey의 역대 발송 횟수 (최대 5까지만 셈) — 결정 통지의 "초회+리마인드 2회" 제한용.
+// 일 단위 dedup(dispatch)과 별개: 같은 키는 하루 1회만 나가므로 리마인드는 자연히 다음 거래일.
+export async function countAlertKey(key: string): Promise<number> {
   const admin = createAdminClient();
-  const { data } = await admin.from("alerts").select("id").eq("message->>alertKey", key).limit(1);
-  return Boolean(data && data.length > 0);
+  const { data } = await admin.from("alerts").select("id").eq("message->>alertKey", key).limit(5);
+  return data?.length ?? 0;
 }
 
 export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]> {

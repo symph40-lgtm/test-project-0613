@@ -13,7 +13,7 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
 import { runAfterService } from "./after";
 import {
-  hasAlertKeyEver, hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
+  countAlertKey, hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
   loadRecentDays, loadRescueStats, saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
 import { MODEL_LABELS } from "./types";
@@ -311,21 +311,25 @@ export async function runPredictService(): Promise<PredictRunResult> {
     }
   }
 
-  // ⑤ 결정 통지 (사용자 확정 2026-07-20: "결정할 것이 있으면 문자로, 하실 일 상세히"):
-  // 보완 후보가 승격 기준(공백일 방향 20회↑ & 55%↑)에 처음 도달하면 1회 문자
+  // ⑤ 결정 통지 (사용자 확정 2026-07-20): 결정 필요 사항은 문자로 + 하실 일 상세.
+  // 무응답 대비 리마인드 — 같은 키로 **총 3회까지**(초회 + 리마인드 2회, 하루 1회 dedup이라
+  // 자연히 거래일 간격). 결정이 반영되면 config.resolvedDecisions에 키를 넣어 중단.
   if (result.scored.length > 0) {
     try {
       const rescue = await loadRescueStats();
       for (const [m, s] of Object.entries(rescue)) {
         if (s.t < 20 || s.c / s.t < 0.55) continue;
         const key = `predict_promote_${m}`;
-        if (await hasAlertKeyEver(key)) continue;
+        if ((PREDICT_CONFIG.resolvedDecisions as readonly string[]).includes(key)) continue; // 결정 완료
+        const sent = await countAlertKey(key);
+        if (sent >= 3) continue; // 초회 + 리마인드 2회 소진
         const name = (MODEL_LABELS as Record<string, string>)[m]?.split(" ")[0] ?? m;
+        const remind = sent === 0 ? "" : sent === 1 ? " (재알림 1/2)" : " (재알림 2/2 — 마지막)";
         await dispatchToChannels("signal", today, {
           key,
           severity: "high",
           text:
-            `[예측 결정필요] 보완 후보 승격기준 도달: ${name} — 피셔 공백일 방향적중 ${s.c}/${s.t} (${Math.round((s.c / s.t) * 100)}%)\n` +
+            `[예측 결정필요]${remind} 보완 후보 승격기준 도달: ${name} — 피셔 공백일 방향적중 ${s.c}/${s.t} (${Math.round((s.c / s.t) * 100)}%)\n` +
             `▶하실 일:\n①Claude 앱 실행 → 스탁가드 프로젝트에서 새 세션\n②"${name} 공백 보완 검토해줘"라고 입력 → 검증 리포트 확인 후 "적용해줘"로 결정\n③무응답이면 현행(피셔 단독) 유지 — 판정 로직은 승인 없이 안 바뀝니다`,
           smsSubject: "예측 결정필요",
         });
