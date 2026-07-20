@@ -10,6 +10,7 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { collectUsTick, appendUsTick, loadUsTicks, fetchSmhDaily, etNow, toVirtualMin } from "@/lib/signal/us/data";
 import { decideUs, buildUsSignalAlert, buildUsMoveAlerts } from "@/lib/signal/us/engine";
 import { maybeSendUsReversalAlert, maybeSendUsTrendCancel } from "@/lib/signal/us/alerts";
+import { runUsPremarketService } from "@/lib/signal/us/premarket";
 import { US_SIGNAL_CONFIG } from "@/lib/signal/us/config";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,11 @@ export async function GET(req: NextRequest) {
     const etDow = new Date(`${date}T12:00:00Z`).getUTCDay(); // ET 거래일의 요일
     const isWeekday = etDow >= 1 && etDow <= 5;
     const inSession = minuteOfDay >= S.openEt && minuteOfDay <= S.closeEt + 5;
+
+    // 프리장 판정 스트림 + 채점 백필 (사용자 지정 2026-07-21) — 실패해도 정규장 흐름 무관.
+    // 라이브 판정은 07:45~09:28 ET (KST 20:45~22:28) — 크론 시작을 20:55 KST로 당겨야 커버.
+    // 크론이 22:25에 시작해도 지난 체크포인트를 소급 판정해 개장(22:30) 전 확정 문자는 나간다.
+    const premarket = isWeekday ? await runUsPremarketService().catch(() => null) : null;
 
     const tick = await collectUsTick();
     let stored = false;
@@ -71,7 +77,7 @@ export async function GET(req: NextRequest) {
       sent += await maybeSendUsReversalAlert(judgment, quiet).catch(() => 0);
     }
 
-    return NextResponse.json({ judgment, tickCount: rows.length, stored, sent });
+    return NextResponse.json({ judgment, premarket, tickCount: rows.length, stored, sent });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "internal error" }, { status: 500 });
   }
