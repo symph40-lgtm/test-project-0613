@@ -8,6 +8,7 @@ import { fetchDailyPredict, kstNowPredict } from "./data";
 import { fetchDayMinutes, fetchTodayMinutes, fetchNxtPremarket, clipToJudgeWindow } from "./kisMinute";
 import { labelDay } from "./label";
 import { runAllModels } from "./runner";
+import { runFisher } from "./models/fisher";
 import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
@@ -109,13 +110,20 @@ async function checkpointStream(
     const bars = [...(usePre ? pre ?? [] : []), ...krx].filter((b) => b.time < cutHHMM);
     if (bars.length < 10) return null;
     const openPx = usePre ? pre?.[0]?.open ?? bars[0].open : krx[0]?.open ?? bars[0].open;
-    const outputs = runAllModels({
+    const input = {
       date: today,
       dailyHistory: complete.slice(-120),
       openPx,
       morning: bars,
       prevDayMinutes: null, // 스트림 단계는 달튼 VA 생략 (확정 모델 스냅샷에서 반영)
-    });
+    };
+    const outputs = runAllModels(input);
+    // 조기 구간(09:30~10:29) 피셔는 인하 오프셋(0.10) 적용 — 사용자 승인 2026-07-20
+    if (cutHHMM >= cfg.earlyModelBefore && cutHHMM < cfg.preWindowBefore) {
+      const early = runFisher(input, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio });
+      const i = outputs.findIndex((o) => o.model === "fisher");
+      if (i >= 0) outputs[i] = early;
+    }
     const primary = cutHHMM < cfg.earlyModelBefore ? ("user" as const) : undefined;
     const fin = finalizeJudgment(outputs, runEnsemble(outputs, acc), primary);
     return { verdict: fin.finalVerdict, strength: fin.strengthPct };
