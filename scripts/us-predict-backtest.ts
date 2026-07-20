@@ -318,7 +318,7 @@ async function main() {
   // ── ③ 스탑 스윕 (채택 오프셋은 ② 결과 확인 후 아래 SCHEME에 반영)
   const SCHEME = { offset: 0.15 };
   console.log(`\n── ③ 스탑 스윕 (오프셋 ${SCHEME.offset} 균일 · 전 컷 합산) — SOXX % (3x ETF는 ×3) ──`);
-  for (const stop of [0.75, 1.0, 1.5, 2.0]) {
+  for (const stop of [0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 99]) {
     const s = S0();
     for (const day of days) for (const cut of CUTS) {
       const w = day.reg.filter((b) => b.etMin + 5 <= hhmmToMin(cut));
@@ -326,8 +326,43 @@ async function main() {
       const out = runUsFisher(w, day.hist, SCHEME.offset);
       addScore(s, day, out.verdict, hhmmToMin(cut), stop);
     }
-    console.log(row(`스탑 SOXX -${stop}% (ETF 3x -${(stop * 3).toFixed(1)}%)`, s));
+    console.log(row(stop >= 99 ? "무스탑 (종가 청산만)" : `스탑 SOXX -${stop}% (ETF 3x -${(stop * 3).toFixed(1)}%)`, s));
   }
+
+  // ── ③b 스탑별 일자 분해 — 확정 진입(첫 방향 컷) 기준 최악 역행(MAE) 분포로 스탑 위치 판단
+  console.log(`\n── ③b 방향 신호일의 최대 역행(MAE) 분포 (오프셋 ${SCHEME.offset} · 첫 방향 컷 진입) ──`);
+  const maes: number[] = [];
+  let hitDays = 0, missDays = 0;
+  const maeHit: number[] = [], maeMiss: number[] = [];
+  for (const day of days) {
+    let entry: number | null = null, dirUp = false;
+    for (const cut of CUTS) {
+      const w = day.reg.filter((b) => b.etMin + 5 <= hhmmToMin(cut));
+      if (w.length < 6) continue;
+      const out = runUsFisher(w, day.hist, SCHEME.offset);
+      if (out.verdict === "none") continue;
+      const before = day.reg.filter((b) => b.etMin + 5 <= hhmmToMin(cut));
+      entry = before[before.length - 1].close;
+      dirUp = out.verdict === "leverage";
+      const after = day.reg.filter((b) => b.etMin + 5 > hhmmToMin(cut));
+      let mae = 0;
+      for (const b of after) {
+        const adverse = dirUp ? ((b.low - entry) / entry) * 100 : ((entry - b.high) / entry) * 100;
+        if (adverse < mae) mae = adverse;
+      }
+      const rOC = ((day.reg[day.reg.length - 1].close - day.reg[0].open) / day.reg[0].open) * 100;
+      const hit = (dirUp && rOC > 0) || (!dirUp && rOC < 0);
+      maes.push(mae);
+      (hit ? maeHit : maeMiss).push(mae);
+      if (hit) hitDays++; else missDays++;
+      break;
+    }
+  }
+  const q = (v: number[], p: number) => { const s2 = [...v].sort((a, b) => a - b); return s2[Math.min(s2.length - 1, Math.floor(p * s2.length))]; };
+  console.log(`  방향 신호일 ${maes.length}일 (적중 ${hitDays}·미적중 ${missDays})`);
+  console.log(`  전체 MAE: 중앙 ${q(maes, 0.5).toFixed(2)}% · 25% ${q(maes, 0.25).toFixed(2)}% · 10% ${q(maes, 0.1).toFixed(2)}%`);
+  if (maeHit.length) console.log(`  적중일 MAE: 중앙 ${q(maeHit, 0.5).toFixed(2)}% · 25% ${q(maeHit, 0.25).toFixed(2)}% · 10% ${q(maeHit, 0.1).toFixed(2)}% — 스탑이 이보다 얕으면 맞은 날을 컷`);
+  if (maeMiss.length) console.log(`  미적중일 MAE: 중앙 ${q(maeMiss, 0.5).toFixed(2)}% · 25% ${q(maeMiss, 0.25).toFixed(2)}%`);
 
   // ── ④ 확정 컷 + 시각별 사전값 (채택 스킴 · 전/후반 분할)
   console.log(`\n── ④ 시각별 슬롯 성적 (오프셋 ${SCHEME.offset} · 스탑 1.0%) — checkpointPriors 도출 ──`);
