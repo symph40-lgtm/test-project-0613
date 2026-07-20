@@ -13,9 +13,10 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
 import { runAfterService } from "./after";
 import {
-  hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow, loadRecentDays,
-  saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
+  hasAlertKeyEver, hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
+  loadRecentDays, loadRescueStats, saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
+import { MODEL_LABELS } from "./types";
 import type { PredictDailyBar, Verdict } from "./types";
 
 const STREAM_MIN = 8 * 60 + 31; // 08:31부터 체크포인트 스트림 (첫 판정 08:30 완성봉 기준)
@@ -310,7 +311,29 @@ export async function runPredictService(): Promise<PredictRunResult> {
     }
   }
 
-  // ⑤ 애프터장 판정·채점 (15:50~19:35 스트림 + 미채점 백필) — 실패해도 정규장 흐름 무관
+  // ⑤ 결정 통지 (사용자 확정 2026-07-20: "결정할 것이 있으면 문자로, 하실 일 상세히"):
+  // 보완 후보가 승격 기준(공백일 방향 20회↑ & 55%↑)에 처음 도달하면 1회 문자
+  if (result.scored.length > 0) {
+    try {
+      const rescue = await loadRescueStats();
+      for (const [m, s] of Object.entries(rescue)) {
+        if (s.t < 20 || s.c / s.t < 0.55) continue;
+        const key = `predict_promote_${m}`;
+        if (await hasAlertKeyEver(key)) continue;
+        const name = (MODEL_LABELS as Record<string, string>)[m]?.split(" ")[0] ?? m;
+        await dispatchToChannels("signal", today, {
+          key,
+          severity: "high",
+          text:
+            `[예측 결정필요] 보완 후보 승격기준 도달: ${name} — 피셔 공백일 방향적중 ${s.c}/${s.t} (${Math.round((s.c / s.t) * 100)}%)\n` +
+            `▶하실 일:\n①Claude 앱 실행 → 스탁가드 프로젝트에서 새 세션\n②"${name} 공백 보완 검토해줘"라고 입력 → 검증 리포트 확인 후 "적용해줘"로 결정\n③무응답이면 현행(피셔 단독) 유지 — 판정 로직은 승인 없이 안 바뀝니다`,
+          smsSubject: "예측 결정필요",
+        });
+      }
+    } catch { /* 통지 실패는 본 흐름 무관 */ }
+  }
+
+  // ⑥ 애프터장 판정·채점 (15:50~19:35 스트림 + 미채점 백필) — 실패해도 정규장 흐름 무관
   try {
     const after = await runAfterService();
     if (after.judged) result.earlyToday = true;

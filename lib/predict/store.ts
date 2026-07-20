@@ -241,6 +241,13 @@ export async function loadRescueStats(): Promise<Record<string, { c: number; t: 
   return stats;
 }
 
+// 특정 alertKey가 과거 언제라도 발송된 적 있는지 — "한 번만 알리는" 결정 통지용 (일 단위 dedup과 별개)
+export async function hasAlertKeyEver(key: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("alerts").select("id").eq("message->>alertKey", key).limit(1);
+  return Boolean(data && data.length > 0);
+}
+
 export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]> {
   if (dates.length === 0) return [];
   const admin = createAdminClient();
