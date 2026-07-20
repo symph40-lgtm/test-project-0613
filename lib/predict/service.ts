@@ -3,6 +3,7 @@
 // KIS 과거 분봉으로 언제든 소급 가능 — 크론이 며칠 죽어도 다음 호출에서 복구된다.
 
 import { PREDICT_CONFIG } from "./config";
+import { atrPct } from "./indicators";
 import { fetchDailyPredict, kstNowPredict } from "./data";
 import { fetchDayMinutes, fetchTodayMinutes, fetchNxtPremarket, clipToJudgeWindow } from "./kisMinute";
 import { labelDay } from "./label";
@@ -108,6 +109,11 @@ async function checkpointStream(
     return { verdict: fin.finalVerdict, strength: fin.strengthPct };
   };
 
+  // 오늘의 ATR 스탑 (조기 신호용, ETF 기준 %) — 문자에 계산값으로 동봉 (사용자 요청 2026-07-20)
+  const sw = PREDICT_CONFIG.stops.earlySwing;
+  const atrToday = atrPct(complete, 14);
+  const atrStopEtf = atrToday !== null ? 2 * Math.min(sw.maxPct, Math.max(sw.minPct, sw.k * atrToday)) : null;
+
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
     // 실측 적중률 병기 — 그 시각 판정자(조기=user, 이후=피셔)의 방향 판정 누적 적중률 (표본 10회 이상일 때만)
@@ -122,7 +128,11 @@ async function checkpointStream(
     // 장문(LMS) 전환을 감수하고 동봉. config.sms.ruleReminder=false로 끄면 단문 복귀.
     if (PREDICT_CONFIG.sms.ruleReminder) {
       if (next.verdict !== "none") {
-        text += `\n▶규칙: 조기신호 1/3 선진입+ATR스탑 / 피셔(09:30~) 본진입+ETF-3%컷 / 당일청산. 적중률 ${hitPct ?? 63}% — 수익은 적중이 아니라 규칙에서 나옵니다.`;
+        // 신호 유형별 스탑을 계산값으로 — 조기(09:30 전)=ATR 0.7배(ETF 환산), 피셔=ETF -3% 고정
+        text += whenLabel < cfg.earlyModelBefore
+          ? `\n▶조기신호: 1/3만 선진입 · 스탑 ETF ${atrStopEtf !== null ? `-${atrStopEtf.toFixed(1)}%` : "ATR 0.7배"}(오늘 ATR 기준) · 09:30 피셔 확인 후 본진입. 당일청산.`
+          : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
+        text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {
         text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
       }
