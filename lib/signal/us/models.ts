@@ -25,26 +25,32 @@ export const ET_PRE_START = 7 * 60;   // 프리장 관찰 시작 07:00 ET (04~07
 // 한국 구현과 동일한 우선순위: ①RV1 최초 트리거 방향 ②무트리거면 T6 '추세' 방향 ③아니면 없음.
 // 차이(의도된 것):
 //  - 봉이 5분 단위라 RV1은 5분봉 조건만 사용 (1분봉 조건은 임계 ∞로 무효화 — 5분 점프를
-//    1분 조건에 대면 과발화). 임계값은 SMH 실측 99% 분위 (US_SIGNAL_CONFIG.reversal).
+//    1분 조건에 대면 과발화). 임계값은 판정 지수(SOXX) 실측 분위 (config.usPredict.reversal5m).
 //  - RV1을 프리장 구간에도 적용한다 (rv1Premarket). 한국은 detectReversal의 세션 개장(09:00)
 //    필터로 프리마켓 RV1이 사실상 비활성 — 스펙 의도("프리마켓 가격행동 RV1 트리거")와 코드가
 //    어긋난 상태라, 미국은 백테스트로 우위인 쪽을 채택한다.
+export type UsUserOpts = {
+  rv1Premarket?: boolean;
+  m5?: { single: number; sum3: number; sum5: number; sum7: number }; // RV1 5분봉 임계 오버라이드 (스윕용)
+  swing?: { minAmpPct: number; tolPct: number };                     // T6 피벗 오버라이드 (스윕용)
+};
 export function runUsUserModel(
   bars: UsBar[], // 07:00 ET부터 컷 직전까지의 완성 5분봉
   prevClose: number,
-  opts?: { rv1Premarket?: boolean },
+  opts?: UsUserOpts,
 ): UsModelOutput {
   if (bars.length < 4 || prevClose <= 0) return { verdict: "none", confidence: 0.3, reason: "데이터 부족" };
-  const rv1Pre = opts?.rv1Premarket ?? true;
+  const UP = US_SIGNAL_CONFIG.usPredict;
+  const rv1Pre = opts?.rv1Premarket ?? UP.rv1Premarket;
 
   // 가상 KST 분 매핑: rv1Pre면 프리장 시작(07:00 ET)=540 — 전 구간 RV1 감지.
   // 아니면 정규장 개장(09:30 ET)=540 — 프리장 봉은 detectReversal이 거른다 (한국 코드 동작 재현).
   const base = rv1Pre ? ET_PRE_START : ET_OPEN;
-  const R = US_SIGNAL_CONFIG.reversal;
+  const R = opts?.m5 ?? UP.reversal5m;
   const cfg: ReversalThresholds = {
     m1Single: 99, m1Sum3: 99, m1Sum5: 99, // 1분봉 조건 무효화 (5분봉 입력)
-    m5Single: R.m5Single, m5Sum3: R.m5Sum3, m5Sum5: R.m5Sum5, m5Sum7: R.m5Sum7,
-    trendLookbackMin: R.trendLookbackMin,
+    m5Single: R.single, m5Sum3: R.sum3, m5Sum5: R.sum5, m5Sum7: R.sum7,
+    trendLookbackMin: 30,
   };
   const ticks = bars.map(
     (b) => ({ minuteOfDay: 540 + (b.etMin - base), hynixChg: ((b.close - prevClose) / prevClose) * 100 }) as unknown as IntradayTick,
@@ -57,9 +63,9 @@ export function runUsUserModel(
     if (hit) { rv = { dir: hit.dir, cond: hit.cond, at: bars[i].time }; break; }
   }
 
-  // ② T6 — 산·골 스윙 구조 (SMH 피벗 보정 0.4/0.3 — 부록 C 4차)
+  // ② T6 — 산·골 스윙 구조 (피벗은 판정 지수 실측 보정 — config.usPredict.swing)
   const pts = bars.map((b) => ({ min: b.etMin, px: b.close }));
-  const swing = pts.length >= 4 ? computeSwingStructure(pts, { ...US_SIGNAL_CONFIG.swing }) : null;
+  const swing = pts.length >= 4 ? computeSwingStructure(pts, { ...(opts?.swing ?? UP.swing) }) : null;
   const swingNote = swing === null ? "스윙 데이터 부족" : `T6 ${swing.status}${swing.dir ? `(${swing.dir === "UP" ? "상승" : "하락"})` : ""}`;
 
   if (rv) {

@@ -1,25 +1,31 @@
-// 미장 예측 스트림 서비스 (사용자 지정 2026-07-21 2차: "국장과 동일한 방식") — 한국
-// predict 체크포인트 스트림(lib/predict/service.ts checkpointStream)의 미국판.
+// 미장 예측 스트림 서비스 (사용자 지정 2026-07-21 2차 "국장과 동일한 방식" · 4차 "SOXX 프락시") —
+// 한국 predict 체크포인트 스트림(lib/predict/service.ts checkpointStream)의 미국판.
 // 판정자: 프리장(08:30~09:25 ET) = user 모델(RV1+T6) / 정규장(10:00~14:30) = 피셔.
-// 상방 = USD(2x) 레버리지 · 하방 = SSG(-2x) 인버스. 상수 근거는 config.usPredict 주석.
-// 채점: 정규장 라벨(±0.9% SMH 스케일) + 확정 판정 부호 적중 + 첫 방향 체크포인트 진입 손익.
+// 판정 지수 SOXX — 상방 = SOXL(3x) · 하방 = SOXS(-3x). 상수 근거는 config.usPredict 주석.
+// (기존 SMH 프락시 → USD/SSG 체결 모델은 폐기 — "편차가 크고 거래량도 작다".)
+// 채점: 정규장 라벨(±0.9% SOXX 스케일) + 확정 판정 부호 적중 + 첫 방향 체크포인트 진입 손익.
 // 저장: us_predict_days (마이그레이션 029). 트리거: /api/signal/us/state (cron-job.org).
 
 import YahooFinance from "yahoo-finance2";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { atrPct, avgRange } from "@/lib/predict/indicators";
-import type { Verdict } from "@/lib/predict/types";
+import type { PredictDailyBar, Verdict } from "@/lib/predict/types";
 import { US_SIGNAL_CONFIG } from "./config";
-import { etNow, fetchSmhDaily } from "./data";
+import { etNow } from "./data";
 import {
   ET_CLOSE, ET_OPEN, ET_PRE_START, labelUsDay, pnlFromCut, runUsFisher, runUsUserModel, type UsBar,
 } from "./models";
 
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const UP = US_SIGNAL_CONFIG.usPredict;
+const SY = UP.symbols;
 
-const V_KO: Record<Verdict, string> = { leverage: "레버리지(USD 2x)", inverse: "인버스(SSG -2x)", none: "추세없음" };
+const V_KO: Record<Verdict, string> = {
+  leverage: `레버리지(${SY.leverage} ${SY.leverageX}x)`,
+  inverse: `인버스(${SY.inverse} -${SY.leverageX}x)`,
+  none: "추세없음",
+};
 const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 const minToHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const ALL_CPS: string[] = [...UP.preCheckpoints, ...UP.regCheckpoints];
@@ -35,10 +41,10 @@ const etFmt = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/New_York",
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
 });
-async function fetchSmh5m(daysBack: number): Promise<Map<string, UsBar[]>> {
+async function fetchJudge5m(daysBack: number): Promise<Map<string, UsBar[]>> {
   const byDay = new Map<string, UsBar[]>();
   try {
-    const r = await yf.chart(US_SIGNAL_CONFIG.symbols.judge, {
+    const r = await yf.chart(SY.judge, {
       period1: new Date(Date.now() - daysBack * 86400e3), interval: "5m", includePrePost: true,
     });
     for (const q of r.quotes ?? []) {
@@ -59,6 +65,23 @@ async function fetchSmh5m(daysBack: number): Promise<Map<string, UsBar[]>> {
     for (const arr of byDay.values()) arr.sort((a, b) => a.etMin - b.etMin);
   } catch { /* 야후 실패 — 빈 맵 (호출부에서 생략) */ }
   return byDay;
+}
+
+// 판정 지수(SOXX) 일봉 — avgRange10·ATR·전일 종가용 (SMH용 data.ts fetchSmhDaily와 분리)
+async function fetchJudgeDaily(count: number): Promise<PredictDailyBar[]> {
+  try {
+    const r = await yf.chart(SY.judge, { period1: new Date(Date.now() - (count + 10) * 86400e3), interval: "1d" });
+    return (r.quotes ?? [])
+      .filter((x): x is typeof x & { close: number; open: number; high: number; low: number } =>
+        x.close != null && x.open != null && x.high != null && x.low != null)
+      .map((x) => {
+        const p = Object.fromEntries(etFmt.formatToParts(x.date instanceof Date ? x.date : new Date(x.date)).map((y) => [y.type, y.value]));
+        return { date: `${p.year}-${p.month}-${p.day}`, open: x.open, high: x.high, low: x.low, close: x.close, volume: typeof x.volume === "number" ? x.volume : 0 };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch {
+    return [];
+  }
 }
 
 async function loadRow(date: string): Promise<Row | null> {
@@ -103,7 +126,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   if (scoreable.length > 0) {
     const oldest = String(scoreable[0].date);
     const daysBack = Math.min(55, Math.ceil((Date.now() - new Date(`${oldest}T00:00:00Z`).getTime()) / 86400e3) + 3);
-    const byDay = await fetchSmh5m(daysBack);
+    const byDay = await fetchJudge5m(daysBack);
     for (const r of scoreable) {
       const d = String(r.date);
       const reg = (byDay.get(d) ?? []).filter((b) => b.etMin >= ET_OPEN && b.etMin < ET_CLOSE);
@@ -128,7 +151,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const prior = await loadRow(today);
   if (prior && prior.stage === "final") return result;
 
-  const [byDay, daily] = await Promise.all([fetchSmh5m(3), fetchSmhDaily(80)]);
+  const [byDay, daily] = await Promise.all([fetchJudge5m(3), fetchJudgeDaily(80)]);
   const bars = byDay.get(today) ?? [];
   const pre = bars.filter((b) => b.etMin >= ET_PRE_START && b.etMin < ET_OPEN);
   const reg = bars.filter((b) => b.etMin >= ET_OPEN && b.etMin < ET_CLOSE);
@@ -186,10 +209,10 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const Q = US_SIGNAL_CONFIG.quietSms;
   const quiet = kstMin >= Q.fromKstMin && kstMin < Q.toKstMin;
 
-  // 조기(프리장) 신호 스탑 — 한국과 동일 공식: ATR14 × 0.7배(1.5~4% 클램프) → ETF 2배 환산
+  // 조기(프리장) 신호 스탑 — 한국과 동일 공식: ATR14 × 0.7배(1.5~4% 클램프) → ETF 3배 환산
   const ES = UP.earlyStop;
   const atrToday = atrPct(hist, 14);
-  const atrStopEtf = atrToday !== null ? 2 * Math.min(ES.maxPct, Math.max(ES.minPct, ES.k * atrToday)) : null;
+  const atrStopEtf = atrToday !== null ? SY.leverageX * Math.min(ES.maxPct, Math.max(ES.minPct, ES.k * atrToday)) : null;
 
   // 시초 레인지 폭 (09:30~09:45 ET) — 유사장 적중·광폭 경고 (한국 orBuckets 규칙의 SMH판)
   const OB = UP.orBuckets;
@@ -221,7 +244,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
         if (v.verdict !== "none") {
           text += v.judge === "user"
             ? `\n▶조기신호: 1/3만 선진입 · 스탑 ETF ${atrStopEtf !== null ? `-${atrStopEtf.toFixed(1)}%` : "ATR 0.7배"}(오늘 ATR 기준) · 10:00 ET 피셔 확인 후 본진입. 16:00 ET 당일청산.`
-            : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 16:00 ET 당일청산.`;
+            : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -${(UP.stopPct * SY.leverageX).toFixed(1)}% 고정(${SY.judge} -${UP.stopPct}% — 역행=확인실패, 즉시 컷) · 16:00 ET 당일청산.`;
           text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서. 미국 소표본 — 소액만.`;
         } else if (prev !== null) {
           text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:30 ET) 반대 보유 금지.`;

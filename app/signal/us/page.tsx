@@ -55,13 +55,15 @@ export default async function UsSignalPage() {
         )}
       </div>
 
-      {/* 미장 예측 스트림 (사용자 지정 2026-07-21) — 국장 동일 구조: 프리장 user 모델 · 정규장 피셔 */}
+      {/* 미장 예측 스트림 (사용자 지정 2026-07-21) — 국장 동일 구조: 프리장 user 모델 · 정규장 피셔.
+          판정 지수 SOXX — SOXL(3x)/SOXS(-3x) 체결 (4차 지시: SMH→SOXX 교체, USD/SSG는 저유동 폐기) */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
-        <p className="mb-1 text-[14px] font-semibold">예측 스트림 (프리장 사용자모델 → 정규장 피셔)</p>
+        <p className="mb-1 text-[14px] font-semibold">예측 스트림 (프리장 사용자모델 → 정규장 피셔 · 기준 SOXX)</p>
         <p className="mb-2 text-[12px] leading-relaxed text-ink-48">
           한국 예측 체크포인트 스트림의 미국판 — 프리장(08:30~09:25 ET)은 사용자모델(RV1+T6), 정규장(10:00~14:30 ET)은
-          피셔(오프셋 0.15×avgRange10 — 한국과 동일값이 SMH 실측 최적). 확정 14:30 ET. 상방=USD(2x)·하방=SSG(-2x),
-          스탑 ETF -3%·16:00 ET 당일청산. <b>38일 소표본 검증 — 소액만.</b>
+          피셔(오프셋 0.15×avgRange10 — 한국·SMH와 동일값이 SOXX 실측에서도 유지). 확정 14:30 ET.
+          기준 지수 <b>SOXX</b>(SOXL과 상관 0.999·β 2.95) — 상방=<b>SOXL(3x)</b>·하방=<b>SOXS(-3x)</b>,
+          스탑 ETF -4.5%(SOXX -1.5%)·16:00 ET 당일청산. <b>분봉 상수는 38일 소표본 검증(야후 분봉 한계) — 소액만.</b>
         </p>
         {predDays === null ? (
           <p className="text-[13px] text-ink-48">마이그레이션 029(us_predict_days) 적용 대기 — 적용 후 판정·채점이 여기 쌓입니다.</p>
@@ -75,7 +77,7 @@ export default async function UsSignalPage() {
               {todayRow ? (
                 <p className="text-[13px] text-ink">
                   오늘({date}): <b className={todayRow.final_verdict === "leverage" ? "text-red-600" : todayRow.final_verdict === "inverse" ? "text-blue-600" : "text-ink-48"}>
-                    {todayRow.final_verdict === "leverage" ? "레버리지 — USD(2x) 검토" : todayRow.final_verdict === "inverse" ? "인버스 — SSG(-2x) 검토" : "추세없음"}
+                    {todayRow.final_verdict === "leverage" ? "레버리지 — SOXL(3x) 검토" : todayRow.final_verdict === "inverse" ? "인버스 — SOXS(-3x) 검토" : "추세없음"}
                   </b>{" "}
                   (강도 {todayRow.strength}% · {todayRow.stage === "final" ? "확정" : "진행 중"})
                   {todayRow.revisions && todayRow.revisions.length > 0 && (
@@ -90,7 +92,7 @@ export default async function UsSignalPage() {
               {scored.length > 0 && (
                 <p className="mt-1 text-[13px] text-ink-80">
                   라이브 채점 누적: 확정 방향 {scored.length}회 · 적중 {hits}회({Math.round((hits / scored.length) * 100)}%) ·
-                  첫 신호 진입 스탑 손익 {cum >= 0 ? "+" : ""}{cum.toFixed(1)}%p (SMH 기준)
+                  첫 신호 진입 스탑 손익 {cum >= 0 ? "+" : ""}{cum.toFixed(1)}%p (기준 지수 % — 7/20까지는 SMH·이후 SOXX)
                 </p>
               )}
               {predDays.length > 0 && (
