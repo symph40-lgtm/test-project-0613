@@ -118,12 +118,13 @@ async function checkpointStream(
     if (!PREDICT_CONFIG.sms.enabled) return;
     // 실측 적중률 병기 — 그 시각 판정자(조기=user, 이후=피셔)의 방향 판정 누적 적중률 (표본 10회 이상일 때만)
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
+    const judgeKo = judge === "user" ? "사용자모델" : "피셔"; // 어떤 모델의 판정인지 명시 (사용자 요청 2026-07-20)
     const st = acc[judge];
     const hitPct = next.verdict !== "none" && st && st.dirTotal >= 10 ? Math.round((st.dirCorrect / st.dirTotal) * 100) : null;
     const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·실측적중 ${hitPct}%` : ""})`;
     let text = prev === null
-      ? `[예측] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
-      : `[예측] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
+      ? `[예측·${judgeKo}] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
+      : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
     // 규칙 환기 (사용자 지정 2026-07-17 "당분간") — 수익은 적중률이 아니라 규칙에서.
     // 장문(LMS) 전환을 감수하고 동봉. config.sms.ruleReminder=false로 끄면 단문 복귀.
     if (PREDICT_CONFIG.sms.ruleReminder) {
