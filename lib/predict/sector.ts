@@ -31,7 +31,7 @@ export async function runSectorService(): Promise<{ judged: string[]; scored: st
       if (!exist || exist.length === 0) {
         const dayMin = await fetchDayMinutes(sec.symbol, today.replace(/-/g, ""), PREDICT_CONFIG.sectorJudgeHour);
         const morning = dayMin ? clipToJudgeWindow(dayMin, PREDICT_CONFIG.sectorJudgeHour) : [];
-        if (morning.length >= 60) {
+        if (morning.length >= 50) {
           const out = runFisher({
             date: today, dailyHistory: complete.slice(-120), openPx: todayBar.open, morning, prevDayMinutes: null,
           });

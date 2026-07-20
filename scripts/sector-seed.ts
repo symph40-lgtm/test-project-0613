@@ -28,10 +28,13 @@ for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
     for (const bar of testDays) {
       const idx = daily.findIndex((b) => b.date === bar.date);
       if (idx < 30) continue;
-      const f = resolve(cacheDir, `${sec.symbol}-${bar.date}.json`);
-      if (!existsSync(f)) continue;
-      const krx = (JSON.parse(readFileSync(f, "utf8")) as MinuteBar[]).filter((b) => b.time < "10:30");
-      if (krx.length < 60) continue;
+      const cut = `${PREDICT_CONFIG.sectorJudgeHour.slice(0, 2)}:${PREDICT_CONFIG.sectorJudgeHour.slice(2, 4)}`;
+      const full = resolve(cacheDir, `${sec.symbol}-${bar.date}.json`);
+      const part = resolve(cacheDir, `${sec.symbol}-M-${bar.date}.json`); // 오전 전용 캐시 (측정 스크립트 산출)
+      const src = existsSync(full) ? full : existsSync(part) ? part : null;
+      if (!src) continue;
+      const krx = (JSON.parse(readFileSync(src, "utf8")) as MinuteBar[]).filter((b) => b.time < cut);
+      if (krx.length < 50) continue;
       const out = runFisher({
         date: bar.date, dailyHistory: daily.slice(Math.max(0, idx - 120), idx),
         openPx: bar.open, morning: krx, prevDayMinutes: null,

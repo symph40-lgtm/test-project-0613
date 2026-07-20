@@ -101,9 +101,10 @@ function SectorCard({ sectors }: { sectors: Awaited<ReturnType<typeof loadSector
   }
   return (
     <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
-      <p className="mb-1 text-[14px] font-semibold">섹터 후보 페이퍼 트래킹 (10:30 피셔 · 문자 없음)</p>
+      <p className="mb-1 text-[14px] font-semibold">섹터 후보 페이퍼 트래킹 (10:00 피셔 · 문자 없음)</p>
       <p className="mb-2 text-[12px] text-ink-48">
-        백테스트 기준치: 방산 방향적중 65.4%·누적 +29.0%p / 조선 57.9%·+2.4%p — 라이브가 이를 재현하면 실투자 편입 검토.
+        220일 기준치(방향적중·거래당): 에코프로비엠 69.8%·+0.91% / 셀트리온 65.9%·+0.35% / 방산ETF 60.7%·+0.39% /
+        한화솔루션 52.6%·+0.48% / 조선ETF 54.2%·−0.14%(참고) — 13종 스크리닝 승자라 선택 편향 내재, 라이브 재현 시에만 실투자 검토.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         {sectors.map((s) => (
