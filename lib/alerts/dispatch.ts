@@ -50,6 +50,12 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
   return pauseCache.allowStrong ? !QUIET_ALLOW_KEYS.test(alertKey) : true;
 }
 
+// ── M7 판정·방향 계열 음소거 (사용자 지정 2026-07-20): 실투자 판정 기준이 /predict(피셔)로
+// 이관되어 충돌 방지 — 한국 M7의 방향 제시(판정확정·횡보선언·V반등·RV1 모멘텀)와 장중브리핑만
+// 차단한다. 수급반전(flow)·급변(move·swing)·거래량(vol)·미국(us_*)·아침브리핑·예측(predict_*)은
+// 유지. M7 판정 '기록'(signal_judgments)은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
+const M7_MUTED_KEYS = /^((trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|ebrief_.*)$/;
+
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
   date: string, // KST 거래일 (YYYY-MM-DD) — 이 날짜 기준 1일 1회 중복 방지
@@ -57,6 +63,7 @@ export async function dispatchToChannels(
   emailSubject?: string,
   snapshot?: Record<string, unknown>,
 ): Promise<number> {
+  if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
   if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지
