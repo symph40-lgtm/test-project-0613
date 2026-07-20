@@ -14,6 +14,7 @@ import { liftWeight, chanceBaseline } from "@/lib/predict/ensemble";
 import { MODEL_IDS, MODEL_LABELS } from "@/lib/predict/types";
 import type { Verdict } from "@/lib/predict/types";
 import { loadAfterDays } from "@/lib/predict/after";
+import { loadSectorSummary } from "@/lib/predict/sector";
 import RunButton from "./RunButton";
 
 export const dynamic = "force-dynamic";
@@ -82,6 +83,47 @@ function AfterCard({
           라이브 누적: 3분류 {hit}/{scored.length} · 방향 판정 {dirRows.length ? `${dirHit}/${dirRows.length} 적중` : "0회"}
         </p>
       )}
+    </div>
+  );
+}
+
+// 섹터 ETF 페이퍼 트래킹 카드 — 방산·조선, 10:30 피셔 (문자 없음, 실투자 편입 전 라이브 검증)
+function SectorCard({ sectors }: { sectors: Awaited<ReturnType<typeof loadSectorSummary>> }) {
+  if (sectors === null) {
+    return (
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5 text-[13px]">
+        <p className="font-semibold">섹터 후보 트래킹 (방산·조선)</p>
+        <p className="mt-1 text-ink-48">
+          마이그레이션 <code>028_predict_sector.sql</code> 실행 후 활성화됩니다.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+      <p className="mb-1 text-[14px] font-semibold">섹터 후보 페이퍼 트래킹 (10:30 피셔 · 문자 없음)</p>
+      <p className="mb-2 text-[12px] text-ink-48">
+        백테스트 기준치: 방산 방향적중 65.4%·누적 +29.0%p / 조선 57.9%·+2.4%p — 라이브가 이를 재현하면 실투자 편입 검토.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {sectors.map((s) => (
+          <div key={s.symbol} className="rounded-[12px] border border-hairline p-3 text-[12px]">
+            <p className="font-semibold">{s.name}</p>
+            <p className="mt-0.5">
+              오늘: {s.today ? verdictCell(s.today.verdict) : <span className="text-ink-48">판정 전 (10:31)</span>}
+              {s.today?.strength != null && <span className="text-ink-48"> 강도 {s.today.strength}%</span>}
+              {s.today?.label && <> → 실제 {verdictCell(s.today.label)}</>}
+            </p>
+            <p className="mt-1 text-ink-48">
+              누적 {s.scoredN}일 · 3분류 {s.acc3 !== null ? `${s.acc3.toFixed(0)}%` : "—"} · 방향{" "}
+              {s.dirN ? `${s.dirHit}/${s.dirN}` : "0회"} · 손익{" "}
+              <b className={s.cumRet >= 0 ? "text-red-600" : "text-blue-600"}>
+                {s.cumRet >= 0 ? "+" : ""}{s.cumRet.toFixed(1)}%p
+              </b>
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -294,6 +336,9 @@ export default async function PredictPage() {
 
       {/* 애프터장 판정 (2026-07-20, 본주 전용) */}
       <AfterCard afterDays={await loadAfterDays(15)} kstToday={kstToday} />
+
+      {/* 섹터 ETF 페이퍼 트래킹 (2026-07-20) */}
+      <SectorCard sectors={await loadSectorSummary()} />
 
       {/* 피셔 공백일 보완 모니터 — 승격 기준 사전 등록 (2026-07-20) */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">

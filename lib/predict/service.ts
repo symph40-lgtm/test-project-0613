@@ -12,6 +12,7 @@ import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
 import { runAfterService } from "./after";
+import { runSectorService } from "./sector";
 import {
   countAlertKey, hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
   loadRecentDays, loadRescueStats, saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
@@ -344,6 +345,14 @@ export async function runPredictService(): Promise<PredictRunResult> {
     result.scored.push(...after.scored.map((d) => `${d}(애프터)`));
   } catch (e) {
     console.error("[predict] 애프터장 처리 실패 (마이그레이션 027 미적용?):", e);
+  }
+
+  // ⑦ 섹터 ETF 페이퍼 트래킹 (방산·조선, 10:30 피셔 — 문자 없음, 기록·채점만)
+  try {
+    const sec = await runSectorService();
+    result.scored.push(...sec.scored.map((s) => `${s}(섹터)`));
+  } catch (e) {
+    console.error("[predict] 섹터 트래킹 실패 (마이그레이션 028 미적용?):", e);
   }
 
   return result;

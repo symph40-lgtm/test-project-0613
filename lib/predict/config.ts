@@ -15,6 +15,13 @@ export const PREDICT_CONFIG = {
   // 판정 변경 문자 — dispatch 공용 경로 (일시정지·조용일 정책 자동 적용).
   // ruleReminder: 실투자 초기 규칙 환기 문구 동봉 (사용자 지정 2026-07-17 "당분간" — 몸에 배면 false로)
   sms: { enabled: true, ruleReminder: true },
+  // 섹터 ETF 후보 페이퍼 트래킹 (사용자 지정 2026-07-20) — 10:30 피셔 판정, 문자 없음.
+  // 백테스트: 방산 10:30 적중 65.4%·+29.0%p / 조선 57.9%·+2.4%p(참고용 포함) — 라이브 재현 검증 목적
+  sectors: [
+    { symbol: "449450", name: "방산 PLUS K방산" },
+    { symbol: "466920", name: "조선 SOL TOP3+" },
+  ],
+  sectorJudgeHour: "103000", // 판정 컷 10:30 (검증 최적 시각)
   // 결정 통지가 "완료 처리"된 키 목록 — 사용자가 결정을 내려 반영한 뒤 여기 키를 추가하면
   // 리마인드(총 3회) 발송이 중단된다. 예: "predict_promote_m7"
   resolvedDecisions: [] as string[],
