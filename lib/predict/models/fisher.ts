@@ -5,8 +5,17 @@ import { PREDICT_CONFIG } from "../config";
 import { avgRange } from "../indicators";
 import type { DayInput, ModelOutput } from "../types";
 
-export function runFisher(input: DayInput): ModelOutput {
-  const cfg = PREDICT_CONFIG.fisher;
+// 파라미터 오버라이드 (변동성 레짐 튜닝 검증용 — 운영은 기본값 고정, 스펙 2.3절)
+export type FisherCfg = {
+  orMinutes?: number;
+  offsetRangeRatio?: number;
+  confirmMinutes?: number;
+  reversalMinutes?: number;
+  earlyConfirmBy?: string;
+};
+
+export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
+  const cfg: Required<FisherCfg> = { ...PREDICT_CONFIG.fisher, ...cfgOverride };
   const model = "fisher" as const;
   const range10 = avgRange(input.dailyHistory, 10);
   if (range10 === null || input.morning.length < cfg.orMinutes + cfg.confirmMinutes) {
