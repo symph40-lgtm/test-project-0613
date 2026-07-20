@@ -13,6 +13,7 @@ import { PREDICT_CONFIG } from "@/lib/predict/config";
 import { liftWeight, chanceBaseline } from "@/lib/predict/ensemble";
 import { MODEL_IDS, MODEL_LABELS } from "@/lib/predict/types";
 import type { Verdict } from "@/lib/predict/types";
+import { loadAfterDays } from "@/lib/predict/after";
 import RunButton from "./RunButton";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,62 @@ const V_STYLE: Record<Verdict, string> = {
 function verdictCell(v: string | null | undefined) {
   const key = (v ?? "none") as Verdict;
   return <span className={V_STYLE[key] ?? "text-ink-48"}>{V_LABEL[key] ?? "—"}</span>;
+}
+
+// 애프터장 카드 — NXT 15:30~20:00, 하닉 본주 전용 (마이그레이션 027 필요)
+function AfterCard({
+  afterDays,
+  kstToday,
+}: {
+  afterDays: Awaited<ReturnType<typeof loadAfterDays>>;
+  kstToday: string;
+}) {
+  if (afterDays === null) {
+    return (
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5 text-[13px]">
+        <p className="font-semibold">애프터장 판정 (본주 전용)</p>
+        <p className="mt-1 text-ink-48">
+          마이그레이션 <code>027_predict_after.sql</code>을 Supabase SQL Editor에서 실행하면 활성화됩니다.
+        </p>
+      </div>
+    );
+  }
+  const todayRow = afterDays.find((d) => d.date === kstToday) ?? null;
+  const scored = afterDays.filter((d) => d.label);
+  const hit = scored.filter((d) => d.final_verdict === d.label).length;
+  const dirRows = scored.filter((d) => d.final_verdict !== "none");
+  const dirHit = dirRows.filter((d) => d.final_verdict === d.label).length;
+  return (
+    <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+      <p className="mb-1 text-[14px] font-semibold">애프터장 판정 (NXT 15:30~20:00 · 하닉 본주 전용)</p>
+      <p className="mb-2 text-[12px] text-ink-48">
+        16:00부터 30분 체크포인트 · 19:30 확정 · 스탑 본주 −1.5% · 20:00 전 청산. 미검증 신호 — 소액 운용 권장.
+      </p>
+      {todayRow ? (
+        <p className="text-[13px]">
+          오늘: {verdictCell(todayRow.final_verdict)}{" "}
+          <span className="text-[12px] text-ink-48">
+            강도 {todayRow.strength?.toFixed(0)}% · {todayRow.stage === "final" ? "확정" : "잠정"}
+            {todayRow.revisions && todayRow.revisions.length > 0 && (
+              <>
+                {" · "}
+                {todayRow.revisions
+                  .map((r) => `${r.checkpoint ?? "*"} ${V_LABEL[(r.verdict ?? "none") as Verdict]}${todayRow.label ? (r.verdict === todayRow.label ? "○" : "✕") : ""}`)
+                  .join(" → ")}
+              </>
+            )}
+          </span>
+        </p>
+      ) : (
+        <p className="text-[13px] text-ink-48">오늘 판정 없음 (거래일 16:01부터)</p>
+      )}
+      {scored.length > 0 && (
+        <p className="mt-1 text-[12px] text-ink-48">
+          라이브 누적: 3분류 {hit}/{scored.length} · 방향 판정 {dirRows.length ? `${dirHit}/${dirRows.length} 적중` : "0회"}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export default async function PredictPage() {
@@ -234,6 +291,9 @@ export default async function PredictPage() {
           })}
         </div>
       </div>
+
+      {/* 애프터장 판정 (2026-07-20, 본주 전용) */}
+      <AfterCard afterDays={await loadAfterDays(15)} kstToday={kstToday} />
 
       {/* 피셔 공백일 보완 모니터 — 승격 기준 사전 등록 (2026-07-20) */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">

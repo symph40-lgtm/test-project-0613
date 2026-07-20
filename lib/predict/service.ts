@@ -11,6 +11,7 @@ import { runAllModels } from "./runner";
 import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
+import { runAfterService } from "./after";
 import {
   hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow, loadRecentDays,
   saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
@@ -307,6 +308,15 @@ export async function runPredictService(): Promise<PredictRunResult> {
       await scoreDay(today, label, rOC);
       result.scored.push(today);
     }
+  }
+
+  // ⑤ 애프터장 판정·채점 (15:50~19:35 스트림 + 미채점 백필) — 실패해도 정규장 흐름 무관
+  try {
+    const after = await runAfterService();
+    if (after.judged) result.earlyToday = true;
+    result.scored.push(...after.scored.map((d) => `${d}(애프터)`));
+  } catch (e) {
+    console.error("[predict] 애프터장 처리 실패 (마이그레이션 027 미적용?):", e);
   }
 
   return result;

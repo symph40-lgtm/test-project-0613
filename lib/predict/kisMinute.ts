@@ -146,6 +146,52 @@ export async function fetchNxtPremarket(code: string, dateYmd: string): Promise<
   }
 }
 
+// NXT 애프터마켓 1분봉 15:30~20:00 (시장구분 NX) — 애프터장 판정용 (2026-07-20).
+// 당일 미래 시각 가드 동일 적용. 애프터 비거래일·데이터 없으면 null.
+export async function fetchNxtAfterMarket(code: string, dateYmd: string, upToHour = "200000"): Promise<MinuteBar[] | null> {
+  const appkey = process.env.KIS_APP_KEY;
+  const appsecret = process.env.KIS_APP_SECRET;
+  const token = await getToken();
+  if (!token || !appkey || !appsecret) return null;
+  const byTime = new Map<string, MinuteBar>();
+  const anchors = ["163000", "173000", "183000", "193000", "200000"].filter((h) => h <= upToHour);
+  if (anchors[anchors.length - 1] !== upToHour) anchors.push(upToHour);
+  try {
+    for (const hour of anchors) {
+      const url = new URL(`${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice`);
+      url.searchParams.set("FID_COND_MRKT_DIV_CODE", "NX");
+      url.searchParams.set("FID_INPUT_ISCD", code);
+      url.searchParams.set("FID_INPUT_DATE_1", dateYmd);
+      url.searchParams.set("FID_INPUT_HOUR_1", hour);
+      url.searchParams.set("FID_PW_DATA_INCU_YN", "N");
+      url.searchParams.set("FID_FAKE_TICK_INCU_YN", "");
+      const r = await fetch(url, {
+        headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
+        cache: "no-store",
+      });
+      if (!r.ok) continue;
+      const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
+      if (j.rt_cd !== "0" || !Array.isArray(j.output2)) continue;
+      for (const row of j.output2) {
+        if (String(row.stck_bsop_date ?? "") !== dateYmd) continue;
+        const bar = rowToBar(row);
+        if (bar && bar.time >= "15:30") byTime.set(bar.time, bar);
+      }
+      await sleep(120);
+    }
+  } catch {
+    return null;
+  }
+  if (byTime.size === 0) return null;
+  let bars = [...byTime.values()].sort((a, b) => (a.time < b.time ? -1 : 1));
+  const kstNow2 = new Date(Date.now() + 9 * 3600e3);
+  if (dateYmd === kstNow2.toISOString().slice(0, 10).replace(/-/g, "")) {
+    const nowHHMM = `${String(kstNow2.getUTCHours()).padStart(2, "0")}:${String(kstNow2.getUTCMinutes()).padStart(2, "0")}`;
+    bars = bars.filter((b) => b.time < nowHHMM);
+  }
+  return bars.length ? bars : null;
+}
+
 // 당일 장중 폴백 (FHKST03010200 — 요청 시각에서 과거 30봉씩)
 export async function fetchTodayMinutes(code: string, upToHour: string): Promise<MinuteBar[] | null> {
   const appkey = process.env.KIS_APP_KEY;
