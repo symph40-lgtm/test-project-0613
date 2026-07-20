@@ -3,8 +3,10 @@
 import { PREDICT_CONFIG } from "./config";
 import type { DayLabelResult, PredictDailyBar } from "./types";
 
-export function labelDay(bar: PredictDailyBar): DayLabelResult {
-  const { trendMinPct, posUp, posDown } = PREDICT_CONFIG.label;
+// trendMinPctOverride: 저변동 종목(1배 섹터 ETF 등) 검증용 임계 조정 — 운영(하닉)은 기본값 고정
+export function labelDay(bar: PredictDailyBar, trendMinPctOverride?: number): DayLabelResult {
+  const { trendMinPct: defaultPct, posUp, posDown } = PREDICT_CONFIG.label;
+  const trendMinPct = trendMinPctOverride ?? defaultPct;
   const rOC = bar.open > 0 ? ((bar.close - bar.open) / bar.open) * 100 : 0;
   const range = bar.high - bar.low;
   const pos = range > 0 ? (bar.close - bar.low) / range : 0.5;

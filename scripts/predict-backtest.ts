@@ -39,6 +39,11 @@ const SYMBOL = (() => {
   const i = args.indexOf("--symbol");
   return i >= 0 ? args[i + 1] : PREDICT_CONFIG.symbol;
 })();
+// 라벨 임계 오버라이드 (--labelpct 0.7) — 저변동 ETF 검증용. 시딩과 병용 금지
+const LABEL_PCT = (() => {
+  const i = args.indexOf("--labelpct");
+  return i >= 0 ? parseFloat(args[i + 1]) : undefined;
+})();
 const CACHE_DIR = resolve(process.cwd(), ".predict-cache");
 
 // ── 분봉 캐시
@@ -74,7 +79,8 @@ type DayResult = {
 async function main() {
   const code = SYMBOL;
   if (SEED && code !== PREDICT_CONFIG.symbol) throw new Error("--seed는 기본 종목에서만 허용 (운영 테이블 오염 방지)");
-  console.log(`=== 대가 방법론 예측 모델 백테스트 — ${code} 최근 ${DAYS}거래일 ===\n`);
+  if (SEED && LABEL_PCT !== undefined) throw new Error("--seed와 --labelpct 병용 금지 (채점 기준 오염 방지)");
+  console.log(`=== 대가 방법론 예측 모델 백테스트 — ${code} 최근 ${DAYS}거래일${LABEL_PCT !== undefined ? ` · 라벨 임계 ±${LABEL_PCT}%` : ""} ===\n`);
 
   const daily = await fetchDailyPredict(code, DAYS + 140);
   if (daily.length < DAYS + 40) throw new Error(`일봉 부족: ${daily.length}개`);
@@ -125,7 +131,7 @@ async function main() {
     const outputs = runAllModels(input);
     const ens = runEnsemble(outputs, acc); // 이 시점까지의 누적 정확도만 사용 (워크포워드)
     const fin = finalizeJudgment(outputs, ens); // 판정 모드 적용 (기본: 피셔 단독)
-    const { label, rOC } = labelDay(bar);
+    const { label, rOC } = labelDay(bar, LABEL_PCT);
 
     const px1030 = morning.length ? morning[morning.length - 1].close : null;
     const r: DayResult = {
