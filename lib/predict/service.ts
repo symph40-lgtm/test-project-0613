@@ -38,6 +38,8 @@ async function judgeOneDay(
     dayMin = await fetchTodayMinutes(code, PREDICT_CONFIG.judgeHour);
   }
   if (!dayMin || dayMin.length < 60) return false;
+  // 당일 확정(모델 스냅샷)도 커버리지 가드 — 부족하면 다음 크론에서 재시도 (2026-07-20)
+  if (isToday && dayMin.length < 300 * 0.8) return false;
   const morning = clipToJudgeWindow(dayMin, PREDICT_CONFIG.judgeHour);
   const prevDate = complete[complete.length - 1]?.date;
   const prevDayMinutes = prevDate ? await fetchDayMinutes(code, prevDate.replace(/-/g, ""), "153000") : null;
@@ -90,6 +92,13 @@ async function checkpointStream(
     ),
   ]);
   const krx = krxRaw ?? [];
+  // 데이터 커버리지 가드 (2026-07-20 실측: 장중 분봉 응답이 호출마다 들쭉날쭉 → 피셔 상태기계가
+  // 불가능한 전이(레버리지→없음)로 진동). 정규장 예상 분봉의 80% 미만이면 이번 호출은 판정 생략.
+  const expectKrx = Math.min(minuteOfDay, hhmmToMin("14:00") + 1) - 9 * 60 - 1;
+  if (expectKrx > 10 && krx.length < expectKrx * 0.8) {
+    console.error(`[predict] 분봉 커버리지 부족 (${krx.length}/${expectKrx}) — 이번 호출 판정 생략`);
+    return false;
+  }
   const acc = await loadAccuracyStats();
 
   const judgeAt = (cutHHMM: string): { verdict: Verdict; strength: number } | null => {
