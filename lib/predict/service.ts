@@ -118,8 +118,8 @@ async function checkpointStream(
       prevDayMinutes: null, // 스트림 단계는 달튼 VA 생략 (확정 모델 스냅샷에서 반영)
     };
     const outputs = runAllModels(input);
-    // 조기 구간(09:30~10:29) 피셔는 인하 오프셋(0.10) 적용 — 사용자 승인 2026-07-20
-    if (cutHHMM >= cfg.earlyModelBefore && cutHHMM < cfg.preWindowBefore) {
+    // 조기 구간(09:30~10:30 포함) 피셔는 인하 오프셋(0.10) 적용 — 사용자 승인 2026-07-20
+    if (cutHHMM >= cfg.earlyModelBefore && cutHHMM <= PREDICT_CONFIG.earlyOffsetUntil) {
       const early = runFisher(input, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;
