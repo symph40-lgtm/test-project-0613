@@ -210,6 +210,37 @@ export async function loadRecentDays(n: number): Promise<PredictDayRow[]> {
   return (basic ?? []).map((r) => ({ ...r, stage: "final", early_verdict: null, early_strength: null, revisions: null })) as PredictDayRow[];
 }
 
+// 피셔 공백일(추세없음 판정) 보완 모니터 — 라이브 채점분에서 "피셔=없음인 날, 각 모델의 방향 판정 성적".
+// 승격 기준(사전 등록 2026-07-20): 방향 판정 20회↑ & 적중 55%↑ → 보완 후보 (백테스트 실측은 전 모델
+// 17~32%로 탈락 — 라이브만 집계). source='backtest' 제외.
+export async function loadRescueStats(): Promise<Record<string, { c: number; t: number }>> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("predict_model_days")
+    .select("date, model, verdict, label, source")
+    .not("label", "is", null)
+    .neq("source", "backtest")
+    .limit(20000);
+  const byDate = new Map<string, { fisherNone: boolean; label: string; rows: { model: string; verdict: string }[] }>();
+  for (const r of data ?? []) {
+    const d = byDate.get(String(r.date)) ?? { fisherNone: false, label: String(r.label), rows: [] };
+    if (r.model === "fisher") d.fisherNone = r.verdict === "none";
+    else d.rows.push({ model: String(r.model), verdict: String(r.verdict) });
+    byDate.set(String(r.date), d);
+  }
+  const stats: Record<string, { c: number; t: number }> = {};
+  for (const d of byDate.values()) {
+    if (!d.fisherNone) continue;
+    for (const r of d.rows) {
+      if (r.verdict === "none") continue;
+      const s = (stats[r.model] ??= { c: 0, t: 0 });
+      s.t++;
+      if (r.verdict === d.label) s.c++;
+    }
+  }
+  return stats;
+}
+
 export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]> {
   if (dates.length === 0) return [];
   const admin = createAdminClient();

@@ -5,7 +5,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageShell, Disclaimer } from "../_components/Shell";
-import { loadAccuracyStats, loadModelRows, loadRecentDays, predictTablesReady } from "@/lib/predict/store";
+import { loadAccuracyStats, loadModelRows, loadRecentDays, loadRescueStats, predictTablesReady } from "@/lib/predict/store";
 import { fetchDailyPredict } from "@/lib/predict/data";
 import { fetchDayMinutes } from "@/lib/predict/kisMinute";
 import { atrPct } from "@/lib/predict/indicators";
@@ -49,10 +49,11 @@ export default async function PredictPage() {
     );
   }
 
-  const [days, acc, dailyBars] = await Promise.all([
+  const [days, acc, dailyBars, rescue] = await Promise.all([
     loadRecentDays(21),
     loadAccuracyStats(),
     fetchDailyPredict(PREDICT_CONFIG.symbol, 40).catch(() => []),
+    loadRescueStats().catch(() => ({}) as Record<string, { c: number; t: number }>),
   ]);
   // 오늘의 권장 스탑 (스펙 3.3 — 신호 유형별): 산·골 조기 = ATR 0.7배(클램프), 피셔 = ETF -3%
   const kstTodayStr = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -232,6 +233,28 @@ export default async function PredictPage() {
             );
           })}
         </div>
+      </div>
+
+      {/* 피셔 공백일 보완 모니터 — 승격 기준 사전 등록 (2026-07-20) */}
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+        <p className="mb-1 text-[14px] font-semibold">피셔 공백일 보완 모니터 (라이브)</p>
+        <p className="mb-2 text-[12px] leading-relaxed text-ink-48">
+          피셔가 "추세없음"이라 한 날, 다른 모델의 방향 판정이 실제와 맞았는지 라이브로만 집계.
+          <b> 승격 기준(사전 등록): 방향 판정 20회 이상 + 적중 55% 이상</b> → 보완 후보로 검토.
+          220일 백테스트에선 전 모델 17~32%로 전부 탈락 — 라이브에서 이 기준을 넘는 모델이 나오는지 감시.
+        </p>
+        <p className="text-[12px] text-ink-48">
+          {MODEL_IDS.filter((m) => m !== "fisher").map((m) => {
+            const s = rescue[m];
+            const pct = s && s.t > 0 ? ` ${((s.c / s.t) * 100).toFixed(0)}%` : " —";
+            const pass = s && s.t >= 20 && s.c / s.t >= 0.55;
+            return (
+              <span key={m} className={pass ? "font-semibold text-green-600" : undefined}>
+                {MODEL_LABELS[m].split(" ")[0]} {s ? `${s.c}/${s.t}` : "0/0"}{pct}{pass ? " ★승격기준 도달" : ""}{"  ·  "}
+              </span>
+            );
+          })}
+        </p>
       </div>
 
       {/* 최근 기록 */}
