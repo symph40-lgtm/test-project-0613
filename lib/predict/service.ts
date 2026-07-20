@@ -123,6 +123,15 @@ async function checkpointStream(
   const atrToday = atrPct(complete, 14);
   const atrStopEtf = atrToday !== null ? 2 * Math.min(sw.maxPct, Math.max(sw.minPct, sw.k * atrToday)) : null;
 
+  // 시초 레인지 폭 (09:00~09:15) — 유사 사례 기준 피셔 적중률·광폭 경고 (사용자 지정 2026-07-20)
+  const OB = PREDICT_CONFIG.orBuckets;
+  const orBars = krx.slice(0, 15);
+  const orWidthPct = orBars.length >= 15 && krx[0]?.open
+    ? ((Math.max(...orBars.map((b) => b.high)) - Math.min(...orBars.map((b) => b.low))) / krx[0].open) * 100
+    : null;
+  const similarHit = orWidthPct === null ? null : orWidthPct >= OB.wideMinPct ? OB.hit.wide : orWidthPct >= 2 ? OB.hit.mid : OB.hit.calm;
+  const wideOr = orWidthPct !== null && orWidthPct >= OB.wideMinPct;
+
   // 시각별 실측 적중률 (사용자 지정 2026-07-20: "그 시각의 판정은 그 시각의 적중률로 채점").
   // 라이브: 최근 채점일들의 타임라인에서 해당 슬롯 방향 판정 적중률 (표본 20회↑일 때 채택).
   // 미달 시: 220일 백테스트 사전값(config.checkpointPriors).
@@ -153,7 +162,9 @@ async function checkpointStream(
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
     const judgeKo = judge === "user" ? "사용자모델" : "피셔"; // 어떤 모델의 판정인지 명시 (사용자 요청 2026-07-20)
     const hitPct = next.verdict !== "none" ? slotHitPct(whenLabel) : null;
-    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""})`;
+    const similar = next.verdict !== "none" && similarHit !== null && whenLabel >= cfg.earlyModelBefore
+      ? `·유사장 적중 ${similarHit}%` : "";
+    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
     let text = prev === null
       ? `[예측·${judgeKo}] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
       : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
@@ -168,6 +179,10 @@ async function checkpointStream(
         text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {
         text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
+      }
+      // 광폭 레인지 저신뢰 경고 (OR ≥4%, 220일 중 11일 유형 — 피셔 적중 43%로 하락)
+      if (wideOr && next.verdict !== "none") {
+        text += `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭 — 유사일 피셔 적중 ${OB.hit.wide}%(평소 ${OB.hit.calm}~${OB.hit.mid}%). 비중 축소 권장.`;
       }
     }
     try {

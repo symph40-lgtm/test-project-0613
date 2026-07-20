@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { loadAccuracyStats, loadModelRows, loadRecentDays, predictTablesReady } from "@/lib/predict/store";
 import { fetchDailyPredict } from "@/lib/predict/data";
+import { fetchDayMinutes } from "@/lib/predict/kisMinute";
 import { atrPct } from "@/lib/predict/indicators";
 import { PREDICT_CONFIG } from "@/lib/predict/config";
 import { liftWeight, chanceBaseline } from "@/lib/predict/ensemble";
@@ -58,6 +59,22 @@ export default async function PredictPage() {
   const atr = atrPct(dailyBars.filter((b) => b.date < kstTodayStr), 14); // 오늘의 미완성 봉 제외
   const sw = PREDICT_CONFIG.stops.earlySwing;
   const atrStop = atr !== null ? Math.min(sw.maxPct, Math.max(sw.minPct, sw.k * atr)) : null;
+
+  // 오늘 시초 레인지 폭 → 유사 사례 기준 피셔 적중률 (광폭 ≥4%는 저신뢰 경고 — 스펙/220일 실측)
+  let orInfo: { widthPct: number; similarHit: number; wide: boolean } | null = null;
+  try {
+    const bars = await fetchDayMinutes(PREDICT_CONFIG.symbol, kstTodayStr.replace(/-/g, ""), "092000");
+    const or = (bars ?? []).filter((b) => b.time < "09:15");
+    if (or.length >= 15 && or[0].open > 0) {
+      const w = ((Math.max(...or.map((b) => b.high)) - Math.min(...or.map((b) => b.low))) / or[0].open) * 100;
+      const OB = PREDICT_CONFIG.orBuckets;
+      orInfo = {
+        widthPct: w,
+        similarHit: w >= OB.wideMinPct ? OB.hit.wide : w >= 2 ? OB.hit.mid : OB.hit.calm,
+        wide: w >= OB.wideMinPct,
+      };
+    }
+  } catch { /* 장전·휴장 — 미표시 */ }
   const modelRows = await loadModelRows(days.map((d) => d.date));
   const byDate = new Map<string, typeof modelRows>();
   for (const r of modelRows) {
@@ -119,6 +136,12 @@ export default async function PredictPage() {
       {/* 오늘 판정 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
         <p className="mb-2 text-[14px] font-semibold">오늘 ({kstToday})</p>
+        {orInfo && (
+          <p className={`mb-2 text-[12px] ${orInfo.wide ? "font-semibold text-red-600" : "text-ink-48"}`}>
+            {orInfo.wide ? "⚠ " : ""}오늘 시초 레인지 {orInfo.widthPct.toFixed(1)}% — 유사일 피셔 방향적중 {orInfo.similarHit}%
+            {orInfo.wide ? " · 광폭 저신뢰 구간: 신호가 와도 비중 축소 권장 (220일 중 11일 유형)" : ""}
+          </p>
+        )}
         {today ? (
           <>
             <p className="text-[15px]">
