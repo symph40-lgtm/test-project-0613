@@ -47,27 +47,46 @@ export type UsTickRow = {
 // DB에 저장하지 않는 표시용 필드 — INSERT 전에 분리
 const DISPLAY_ONLY_FIELDS = ["dxy_px", "wti_px", "nq_px"] as const;
 
-async function quote(symbol: string): Promise<{ px: number | null; chg: number | null; prev: number | null; vol: number | null }> {
+type Quote = { px: number | null; chg: number | null; prev: number | null; vol: number | null; t: Date | null };
+
+async function quote(symbol: string): Promise<Quote> {
   try {
     const q = await yf.quote(symbol);
     const px = typeof q.regularMarketPrice === "number" ? q.regularMarketPrice : null;
     const chg = typeof q.regularMarketChangePercent === "number" ? q.regularMarketChangePercent : null;
     const prev = typeof q.regularMarketPreviousClose === "number" ? q.regularMarketPreviousClose : null;
     const vol = typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null;
-    return { px, chg, prev, vol };
+    const t = q.regularMarketTime instanceof Date ? q.regularMarketTime
+      : typeof q.regularMarketTime === "number" ? new Date(q.regularMarketTime * 1000) : null;
+    return { px, chg, prev, vol, t };
   } catch {
-    return { px: null, chg: null, prev: null, vol: null };
+    return { px: null, chg: null, prev: null, vol: null, t: null };
   }
+}
+
+// 낡은 스냅샷 가드 (2026-07-20 실측 사고: 개장 6분 뒤 야후 quote가 '전일 종가 556.53 · 전일
+// 등락 -2.18%' 스냅샷을 1틱 반환 → 유령 급락·반락·반등 문자 4건. 실제 시세는 세션 고점 부근).
+// 정규장 중에는 regularMarketTime이 maxAgeMin분보다 오래된 quote를 통째로 무효화한다 —
+// null 틱은 기존 경로가 '데이터 없음'으로 자연 처리. 세션 밖(프리장 수집 등)은 마감 스냅샷이
+// 정상이므로 가드하지 않는다.
+function freshOrNull(q: Quote, inRegularSession: boolean, maxAgeMin: number): Quote {
+  if (!inRegularSession) return q;
+  if (q.t !== null && Date.now() - q.t.getTime() <= maxAgeMin * 60_000) return q;
+  return { px: null, chg: null, prev: null, vol: null, t: q.t };
 }
 
 // 현재 시점 스냅샷 1틱
 export async function collectUsTick(): Promise<UsTickRow> {
   const { date, minuteOfDay, iso } = etNow();
   const S = US_SIGNAL_CONFIG.symbols;
-  const [smh, usd, ssg, sox, nq, tnx, dxy, wti, vix] = await Promise.all([
+  const raw = await Promise.all([
     quote(S.judge), quote(S.leverage), quote(S.inverse), quote(S.refIndex),
     quote("NQ=F"), quote("^TNX"), quote("DX-Y.NYB"), quote("CL=F"), quote("^VIX"),
   ]);
+  // 신선도 가드 — 주식류(정규장 중 연속 체결)는 5분, 매크로(지수·선물, 갱신 간격 김)는 20분
+  const inReg = minuteOfDay >= US_SIGNAL_CONFIG.session.openEt && minuteOfDay <= US_SIGNAL_CONFIG.session.closeEt;
+  const [smh, usd, ssg, sox] = raw.slice(0, 4).map((q) => freshOrNull(q, inReg, 5));
+  const [nq, tnx, dxy, wti, vix] = raw.slice(4).map((q) => freshOrNull(q, inReg, 20));
   // ^TNX: 금리 % 레벨 — 전일 대비 %p = px - prev
   const us10yPp = tnx.px !== null && tnx.prev !== null ? Number((tnx.px - tnx.prev).toFixed(4)) : null;
   return {
