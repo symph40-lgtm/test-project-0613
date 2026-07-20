@@ -6,7 +6,7 @@ import { SIGNAL_CONFIG, isExpiryBlackout } from "../config";
 import type { DivergenceResult, ExtRecord, IntradayTick, Judgment, PremarketContext } from "../types";
 import { computeBias } from "./bias";
 import { computeTrend } from "./trend";
-import { computeSetups } from "./setups";
+import { computeSetups, x1GapThreshold } from "./setups";
 import { computeRisk } from "./risk";
 import { detectReversal } from "./reversal";
 import { gapPct as calcGap, nr7Flags, worstCumDeclinePct } from "./daily";
@@ -120,7 +120,7 @@ export function decide(ctx: PremarketContext, ticks: IntradayTick[], nowMinuteOf
       bias.dir === "상방" && bias.strength >= 2 &&
       lmOk &&
       reboundPp !== null && reboundPp >= 1.5 &&
-      !(gap !== null && gap > SIGNAL_CONFIG.gapBigPct) &&
+      !(gap !== null && gap > x1GapThreshold(ctx.hynixDaily)) &&
       setups.long.verdict !== "진입후보" && setups.long.verdict !== "강한신호";
     crashContext.earlyRebound = earlyRebound;
 

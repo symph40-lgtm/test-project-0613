@@ -13,6 +13,7 @@
 //   X1(갭 +2% 초과 추격 금지), XS1(직전 1~3일 누적 -12% 폭락 후 인버스 금지)
 
 import { computeSwingStructure } from "../../signal/engine/trend";
+import { atrPct } from "../indicators";
 import type { DayInput, ModelOutput } from "../types";
 
 export function runM7Proxy(input: DayInput): ModelOutput {
@@ -41,7 +42,9 @@ export function runM7Proxy(input: DayInput): ModelOutput {
   // ── 게이트
   const lmBlock = (m?.us10yLevel ?? 0) >= 4.6 || (m?.usdkrwLevel ?? 0) >= 1540;
   const gapPct = ((input.openPx - prev.close) / prev.close) * 100;
-  const x1Block = gapPct > 2; // 갭상승 시초 추격 금지
+  // X1 변동성 연동 (2026-07-20): max(3%, 0.5×ATR14) — 고정 2%는 고변동장에서 과다 차단
+  const atrForGap = atrPct(input.dailyHistory, 14) ?? 0;
+  const x1Block = gapPct > Math.max(3, 0.5 * atrForGap);
   // XS1: 직전 1~3일 누적 -12% 이상 폭락
   let crash = false;
   const h = input.dailyHistory;

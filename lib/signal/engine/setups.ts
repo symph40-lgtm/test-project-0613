@@ -29,6 +29,21 @@ type Inputs = {
   crashCumPct: number | null;
 };
 
+// X1 실효 임계 = max(바닥값, ratio×ATR14%) — 변동성 연동 (사용자 개정 2026-07-20:
+// ATR 11.8% 장에서 고정 2%는 220일 중 29%가 걸림. 실측상 갭 0.5×ATR부터가 실질 '큰 갭')
+export function x1GapThreshold(daily: { high: number; low: number; close: number }[]): number {
+  let atr = 0;
+  if (daily.length >= 15) {
+    const trs: number[] = [];
+    for (let i = daily.length - 14; i < daily.length; i++) {
+      const b = daily[i], pc = daily[i - 1].close;
+      trs.push((Math.max(b.high - b.low, Math.abs(b.high - pc), Math.abs(b.low - pc)) / b.close) * 100);
+    }
+    atr = trs.reduce((a, b) => a + b, 0) / trs.length;
+  }
+  return Math.max(SIGNAL_CONFIG.gapBigPct, SIGNAL_CONFIG.gapBigAtrRatio * atr);
+}
+
 export function computeSetups(inp: Inputs): SetupResult {
   const { ctx, bias, trend, ticks, gapPct, minuteOfDay, crashActive } = inp;
 
@@ -115,7 +130,8 @@ export function computeSetups(inp: Inputs): SetupResult {
 
   // 금지 X1~X3
   const longBlocked: string[] = [];
-  if (gapPct !== null && gapPct > SIGNAL_CONFIG.gapBigPct) {
+  const x1Th = x1GapThreshold(ctx.hynixDaily); // 변동성 연동 임계 (2026-07-20)
+  if (gapPct !== null && gapPct > x1Th) {
     // "큰 갭일수록 확인 구간을 길게" (2.2.1 X1) — 갭 1%당 5분, 최소 10분·최대 60분 확인 후에만 해제
     const confirmUntil = S.observeEndMin + Math.min(60, Math.max(10, Math.round(gapPct * 5)));
     const confirmed =
