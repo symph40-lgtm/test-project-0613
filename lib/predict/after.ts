@@ -92,8 +92,9 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
   const bars = await fetchNxtAfterMarket(code, today.replace(/-/g, ""), "193000");
   if (!bars || bars.length < 20) return result;
 
-  // 오프셋 세션 스케일: 0.15 × 당일 정규장 레인지 → runFisher의 ratio(×avgRange10)로 환산
-  const offsetRatio = (AH.offsetDayRangeRatio * (todayBar.high - todayBar.low)) / range10;
+  // 오프셋 = 세션 시가 × 0.4% (2026-07-21 개정 — 정규장 광폭 날 기회손실 해결, 189일 실측)
+  // runFisher의 ratio(×avgRange10) 형태로 환산해 주입
+  const offsetRatio = ((AH.offsetPct / 100) * bars[0].open) / range10;
   const judgeAt = (cutHHMM: string): { verdict: Verdict; strength: number } | null => {
     const w = bars.filter((b) => b.time < cutHHMM);
     if (w.length < 20) return null;
