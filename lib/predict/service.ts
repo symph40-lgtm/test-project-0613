@@ -187,6 +187,22 @@ async function checkpointStream(
   const done = new Set(revs.map((r) => r.checkpoint).filter(Boolean));
   const lastCp = cfg.checkpoints[cfg.checkpoints.length - 1];
 
+  // 유지 확인 문자 (사용자 지정 2026-07-20): 같은 방향 판정이 체크포인트 2개 연속 유지되면
+  // 1회만 확인 발송 — "바뀔 때 + 유지 확인 한 번" 체계.
+  const smsHold = async (cp: string, verdict: Verdict, strength: number, sinceCp: string) => {
+    if (!PREDICT_CONFIG.sms.enabled) return;
+    const judgeKo = cp < cfg.earlyModelBefore ? "사용자모델" : "피셔";
+    const hitPct = slotHitPct(cp);
+    try {
+      await dispatchToChannels("signal", today, {
+        key: `predict_hold_${sinceCp.replace(":", "")}_${verdict}`,
+        severity: "low",
+        text: `[예측·${judgeKo}] ${cp} 판정 유지 확인: ${V_KO[verdict]} (${sinceCp}부터 유지 · 강도 ${Math.round(strength)}%·이시각 실측적중 ${hitPct ?? "?"}%)`,
+        smsSubject: "예측 판정",
+      });
+    } catch { /* 발송 실패 무시 */ }
+  };
+
   // ① 지나간 체크포인트 소급 기록 (완성봉 보장: 체크포인트 +1분 경과분만)
   for (const cp of cfg.checkpoints) {
     if (hhmmToMin(cp) + 1 > minuteOfDay || done.has(cp)) continue;
@@ -196,7 +212,17 @@ async function checkpointStream(
     revs = [...revs, { at: new Date().toISOString(), checkpoint: cp, verdict: fin.verdict, strength: fin.strength }];
     changed = true;
     // 문자: 방향 등장·소멸·전환만 (첫 기록이 '추세없음'이면 조용)
-    if (fin.verdict !== prev && !(prev === null && fin.verdict === "none")) await smsChange(cp, prev, fin);
+    if (fin.verdict !== prev && !(prev === null && fin.verdict === "none")) {
+      await smsChange(cp, prev, fin);
+    } else if (fin.verdict === prev && fin.verdict !== "none") {
+      // 방향 유지 — 끊김 없이 이어진 동일 판정 중 체크포인트가 정확히 2개째일 때 1회 확인
+      let cpCount = 0;
+      let sinceCp: string | null = null;
+      for (let i = revs.length - 1; i >= 0 && revs[i].verdict === fin.verdict; i--) {
+        if (revs[i].checkpoint) { cpCount++; sinceCp = revs[i].checkpoint!; }
+      }
+      if (cpCount === 2 && sinceCp) await smsHold(cp, fin.verdict, fin.strength, sinceCp);
+    }
   }
 
   // ② 체크포인트 사이 모니터링 — 현재 완성봉 기준 판정이 직전 기록과 다르면 변경 기록
