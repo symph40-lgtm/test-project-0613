@@ -148,6 +148,31 @@ async function main() {
     console.log(row(`조기 ${early} / 후기 ${late} (전 컷 합산)`, s));
   }
 
+  // ── 시초 레인지(OR 09:30~09:45) 폭별 피셔 적중 — 한국 orBuckets(유사장 적중·광폭 경고)의 SMH판
+  console.log("\n── OR(09:30~09:45) 폭별 피셔 적중 (오프셋 0.15 · 확정 14:30 컷 기준) ──");
+  const orDays = days
+    .map((d) => {
+      const or = d.reg.slice(0, 3);
+      if (or.length < 3) return null;
+      const w = ((Math.max(...or.map((b) => b.high)) - Math.min(...or.map((b) => b.low))) / d.reg[0].open) * 100;
+      return { d, w };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+  const widths = orDays.map((x) => x.w).sort((a, b) => a - b);
+  const q = (p: number) => widths[Math.min(widths.length - 1, Math.floor(p * widths.length))];
+  console.log(`  OR 폭 분포: 중앙 ${q(0.5).toFixed(2)}% · 75% ${q(0.75).toFixed(2)}% · 90% ${q(0.9).toFixed(2)}%`);
+  for (const [name, lo, hi] of [["<1%", 0, 1], ["1~2%", 1, 2], ["≥2%", 2, 99]] as const) {
+    const s = S0();
+    for (const { d, w } of orDays) {
+      if (w < lo || w >= hi) continue;
+      const bars = d.reg.filter((b) => b.etMin + 5 <= hhmmToMin("14:30"));
+      if (bars.length < 6) continue;
+      const out = runUsFisher(bars, d.hist, 0.15);
+      addScore(s, d, out.verdict, hhmmToMin("14:30"));
+    }
+    console.log(row(`  OR ${name} (${orDays.filter((x) => x.w >= lo && x.w < hi).length}일)`, s));
+  }
+
   // ── 확정 컷 후보 — 컷 하나만 거래한다고 가정 (한국 judgeHour 14:00 대응 검증)
   console.log("\n── 확정 컷 후보 (조기 0.1/후기 0.15 고정, 그 컷 단독 거래) — 전·후반 분할 ──");
   const half = Math.floor(days.length / 2);

@@ -8,7 +8,7 @@
 import YahooFinance from "yahoo-finance2";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
-import { avgRange } from "@/lib/predict/indicators";
+import { atrPct, avgRange } from "@/lib/predict/indicators";
 import type { Verdict } from "@/lib/predict/types";
 import { US_SIGNAL_CONFIG } from "./config";
 import { etNow, fetchSmhDaily } from "./data";
@@ -186,24 +186,51 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const Q = US_SIGNAL_CONFIG.quietSms;
   const quiet = kstMin >= Q.fromKstMin && kstMin < Q.toKstMin;
 
+  // 조기(프리장) 신호 스탑 — 한국과 동일 공식: ATR14 × 0.7배(1.5~4% 클램프) → ETF 2배 환산
+  const ES = UP.earlyStop;
+  const atrToday = atrPct(hist, 14);
+  const atrStopEtf = atrToday !== null ? 2 * Math.min(ES.maxPct, Math.max(ES.minPct, ES.k * atrToday)) : null;
+
+  // 시초 레인지 폭 (09:30~09:45 ET) — 유사장 적중·광폭 경고 (한국 orBuckets 규칙의 SMH판)
+  const OB = UP.orBuckets;
+  const orBars = reg.slice(0, 3);
+  const orWidthPct = orBars.length >= 3 && reg[0]?.open
+    ? ((Math.max(...orBars.map((b) => b.high)) - Math.min(...orBars.map((b) => b.low))) / reg[0].open) * 100
+    : null;
+  const similarHit = orWidthPct === null ? null
+    : orWidthPct >= OB.wideMinPct ? OB.hit.wide : orWidthPct >= OB.calmBelowPct ? OB.hit.mid : OB.hit.calm;
+  const wideOr = orWidthPct !== null && orWidthPct >= OB.wideMinPct;
+
   const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number; judge: "user" | "fisher" }, kind: "change" | "hold", sinceCp?: string) => {
+    if (!UP.sms.enabled) return;
     const judgeKo = v.judge === "user" ? "사용자모델" : "피셔";
     const hitPct = v.verdict !== "none" ? slotHitPct(whenLabel) : null;
-    const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이시각 적중 ${hitPct}%` : ""})`;
+    // 유사장 적중은 정규장(피셔) 컷에만 — 표본 있는 버킷(mid)만 표기 (한국과 동일 위치)
+    const similar = v.verdict !== "none" && v.judge === "fisher" && similarHit !== null ? `·유사장 적중 ${similarHit}%` : "";
+    const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
     let text: string;
     if (kind === "hold") {
-      text = `[미국예측·${judgeKo}] ${whenLabel} ET 판정 유지 확인: ${V_KO[v.verdict]} (${sinceCp}부터 유지 · 강도 ${v.strength}%${hitPct !== null ? `·이시각 적중 ${hitPct}%` : ""})`;
+      text = `[미국예측·${judgeKo}] ${whenLabel} ET 판정 유지 확인: ${V_KO[v.verdict]} (${sinceCp}부터 유지 · 강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""})`;
     } else {
       text = prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
         : `[미국예측·${judgeKo}] ${whenLabel} ET 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} ${tail}`;
-      if (v.verdict !== "none") {
-        text += v.judge === "user"
-          ? `\n▶프리장 신호: 1/3만 선진입 · 개장(09:30 ET) 후 피셔 확인 대기 · 스탑 ETF -3%.`
-          : `\n▶피셔 확인: 진입 검토 · 스탑 ETF -3% 고정(역행=확인실패) · 16:00 ET 당일청산.`;
-        text += ` 미국 스트림 소표본(38일) 검증 — 소액만.`;
-      } else if (prev !== null) {
-        text += `\n▶방향 소멸 — 보유 중이면 청산 검토. 확정(14:30 ET) 반대 보유 금지.`;
+      // 규칙 환기 — 한국 predict와 동일 체계 (사용자 지정 2026-07-21 3차. LMS 전환 감수,
+      // config.usPredict.sms.ruleReminder=false로 끄면 단문 복귀)
+      if (UP.sms.ruleReminder) {
+        if (v.verdict !== "none") {
+          text += v.judge === "user"
+            ? `\n▶조기신호: 1/3만 선진입 · 스탑 ETF ${atrStopEtf !== null ? `-${atrStopEtf.toFixed(1)}%` : "ATR 0.7배"}(오늘 ATR 기준) · 10:00 ET 피셔 확인 후 본진입. 16:00 ET 당일청산.`
+            : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 16:00 ET 당일청산.`;
+          text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서. 미국 소표본 — 소액만.`;
+        } else if (prev !== null) {
+          text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:30 ET) 반대 보유 금지.`;
+        }
+        // 광폭 시초레인지 경고 — SMH 90분위(2.2%) 초과. 유사일 표본 부족(4일)이라 수치 단정 없이
+        // 비중 축소만 권장 (한국은 광폭일 적중 급락 43% 실측 — SMH는 라이브 누적으로 확인)
+        if (wideOr && v.verdict !== "none" && v.judge === "fisher") {
+          text += `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭(90분위 초과) — 유사일 표본 부족, 비중 축소 권장.`;
+        }
       }
     }
     try {

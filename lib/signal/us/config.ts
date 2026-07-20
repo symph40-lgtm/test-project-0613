@@ -116,6 +116,20 @@ export const US_SIGNAL_CONFIG = {
     rv1Premarket: true,        // 프리장 구간 RV1 감지 (한국은 코드상 비활성 — 스펙 의도 따라 켬, 라이브 검증)
     label: { trendMinPct: 0.9, posUp: 0.65, posDown: 0.35 }, // SMH |rOC| 중앙 1.71% 스케일 (추세일 58%)
     stopPct: 1.5,              // 채점 스탑 — SMH % (2x ETF ≈ -3%, 한국 피셔 확인형과 동일 원칙)
+    // 문자 발송 규칙 — 한국 predict와 동일 (사용자 지정 2026-07-21 3차: "문자 발송 규칙도 동일하게").
+    // ruleReminder: 규칙 환기 문구 동봉 (한국 2026-07-17 "당분간"과 동일 — 몸에 배면 false)
+    sms: { enabled: true, ruleReminder: true },
+    // 조기(프리장 user) 신호 스탑 — 한국 earlySwing과 동일 공식: ATR14 × 0.7배, 1.5~4% 클램프
+    // (SMH 본주 % 기준 — ETF는 2배 환산해 문자에 동봉. SMH ATR14 ~2.5% → ETF 약 -3.5%)
+    earlyStop: { k: 0.7, minPct: 1.5, maxPct: 4 },
+    // 시초 레인지(OR 09:30~09:45) 폭별 유사장 적중 — 한국 orBuckets의 SMH판 (38일 실측):
+    // 폭 분포 중앙 1.39%·90분위 2.20%. 버킷 <1% / 1~2.2% / ≥2.2%(광폭).
+    // 적중(확정 14:30 컷): calm 100%(신호 2)·mid 90%(21)·wide 100%(4) — calm·wide는 표본 부족으로
+    // 문자 표기 생략(null), 광폭 경고는 "표본 부족·비중 축소" 문구만 (한국은 광폭일 적중 급락 43%).
+    orBuckets: {
+      calmBelowPct: 1, wideMinPct: 2.2,
+      hit: { calm: null, mid: 90, wide: null } as { calm: number | null; mid: number | null; wide: number | null },
+    },
     // 체크포인트 시각별 방향적중 사전값 (%) — 38일 백테스트, 정규장 시가→종가 부호 기준.
     // 소표본이거나 판정 희소한 슬롯은 미상(null). 라이브 슬롯 표본 20회↑면 라이브 값이 대체.
     checkpointPriors: {
