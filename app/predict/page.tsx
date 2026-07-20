@@ -131,7 +131,7 @@ export default async function PredictPage() {
               )}
               {today.final_verdict !== "none" && fisherDirPct !== null && (
                 <span className="ml-2 text-[12px] text-ink-48">
-                  · 실측 확률 {fisherDirPct.toFixed(0)}% (방향 판정 {fisherStat.dirTotal}회 누적)
+                  · 피셔 누적 적중 {fisherDirPct.toFixed(0)}% ({fisherStat.dirTotal}회) — 시각별 적중률은 아래 체크포인트 통계
                 </span>
               )}
               {today.label && (

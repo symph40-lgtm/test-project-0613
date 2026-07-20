@@ -12,7 +12,7 @@ import { finalizeJudgment, runEnsemble } from "./ensemble";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
 import {
-  hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
+  hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow, loadRecentDays,
   saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
 import type { PredictDailyBar, Verdict } from "./types";
@@ -123,14 +123,37 @@ async function checkpointStream(
   const atrToday = atrPct(complete, 14);
   const atrStopEtf = atrToday !== null ? 2 * Math.min(sw.maxPct, Math.max(sw.minPct, sw.k * atrToday)) : null;
 
+  // 시각별 실측 적중률 (사용자 지정 2026-07-20: "그 시각의 판정은 그 시각의 적중률로 채점").
+  // 라이브: 최근 채점일들의 타임라인에서 해당 슬롯 방향 판정 적중률 (표본 20회↑일 때 채택).
+  // 미달 시: 220일 백테스트 사전값(config.checkpointPriors).
+  const slotLive = new Map<string, { c: number; t: number }>();
+  try {
+    for (const d of await loadRecentDays(90)) {
+      if (!d.label || !d.revisions) continue;
+      for (const r of d.revisions) {
+        if (!r.checkpoint || r.verdict === "none") continue;
+        const s = slotLive.get(r.checkpoint) ?? { c: 0, t: 0 };
+        s.t++;
+        if (r.verdict === d.label) s.c++;
+        slotLive.set(r.checkpoint, s);
+      }
+    }
+  } catch { /* 통계 실패는 발송을 막지 않는다 */ }
+  const slotHitPct = (hhmm: string): number | null => {
+    // 체크포인트가 아니면 직전 슬롯 기준
+    const slots = cfg.checkpoints as readonly string[];
+    const slot = [...slots].reverse().find((s) => s <= hhmm) ?? slots[0];
+    const live = slotLive.get(slot);
+    if (live && live.t >= 20) return Math.round((live.c / live.t) * 100);
+    return PREDICT_CONFIG.checkpointPriors[slot] ?? null;
+  };
+
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
-    // 실측 적중률 병기 — 그 시각 판정자(조기=user, 이후=피셔)의 방향 판정 누적 적중률 (표본 10회 이상일 때만)
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
     const judgeKo = judge === "user" ? "사용자모델" : "피셔"; // 어떤 모델의 판정인지 명시 (사용자 요청 2026-07-20)
-    const st = acc[judge];
-    const hitPct = next.verdict !== "none" && st && st.dirTotal >= 10 ? Math.round((st.dirCorrect / st.dirTotal) * 100) : null;
-    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·실측적중 ${hitPct}%` : ""})`;
+    const hitPct = next.verdict !== "none" ? slotHitPct(whenLabel) : null;
+    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""})`;
     let text = prev === null
       ? `[예측·${judgeKo}] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
       : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
