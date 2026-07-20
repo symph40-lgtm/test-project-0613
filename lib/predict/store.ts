@@ -73,12 +73,20 @@ export async function hasJudgment(date: string): Promise<boolean> {
 
 export async function loadDayRow(date: string): Promise<PredictDayRow | null> {
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("predict_days")
     .select("date, label, r_oc, final_verdict, strength, stage, early_verdict, early_strength, revisions, weights, model_verdicts, source")
     .eq("date", date)
     .maybeSingle();
-  return (data as PredictDayRow | null) ?? null;
+  if (!error) return (data as PredictDayRow | null) ?? null;
+  // 구스키마 폴백 (2026-07-20 사고: v1.3 컬럼 없는 DB에서 42703 → null 반환 → 상태 없음으로 오인)
+  const { data: basic } = await admin
+    .from("predict_days")
+    .select("date, label, r_oc, final_verdict, strength, weights, model_verdicts, source")
+    .eq("date", date)
+    .maybeSingle();
+  if (!basic) return null;
+  return { ...basic, stage: "final", early_verdict: null, early_strength: null, revisions: null } as PredictDayRow;
 }
 
 // 체크포인트 판정 스트림 저장 — 최신 판정을 final_verdict에, 전체 타임라인을 revisions에.
@@ -104,7 +112,15 @@ export async function upsertCheckpointDay(
     payload.early_strength = revisions[0].strength;
     payload.early_at = revisions[0].at;
   }
-  await admin.from("predict_days").upsert(payload, { onConflict: "date" });
+  const { error } = await admin.from("predict_days").upsert(payload, { onConflict: "date" });
+  if (error) {
+    // 구스키마(42703) 폴백 — 최소 컬럼만이라도 저장해 상태 유실·재발송을 막는다 (2026-07-20 사고)
+    console.error("[predict] upsertCheckpointDay 실패, 최소 컬럼 재시도:", error.message);
+    await admin.from("predict_days").upsert(
+      { date, final_verdict: latest.verdict, strength: latest.strength, source: "live" },
+      { onConflict: "date" },
+    );
+  }
 }
 
 // 모델별 판정 행 존재 여부 — 확정(14:01+) 모델 스냅샷의 중복 실행 방지
@@ -179,12 +195,19 @@ export async function listUnscoredDates(beforeDate: string): Promise<string[]> {
 
 export async function loadRecentDays(n: number): Promise<PredictDayRow[]> {
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("predict_days")
     .select("date, label, r_oc, final_verdict, strength, stage, early_verdict, early_strength, revisions, weights, model_verdicts, source")
     .order("date", { ascending: false })
     .limit(n);
-  return (data ?? []) as PredictDayRow[];
+  if (!error) return (data ?? []) as PredictDayRow[];
+  // 구스키마 폴백 (42703) — 페이지가 빈 화면이 되지 않게 기본 컬럼만으로 응답
+  const { data: basic } = await admin
+    .from("predict_days")
+    .select("date, label, r_oc, final_verdict, strength, weights, model_verdicts, source")
+    .order("date", { ascending: false })
+    .limit(n);
+  return (basic ?? []).map((r) => ({ ...r, stage: "final", early_verdict: null, early_strength: null, revisions: null })) as PredictDayRow[];
 }
 
 export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]> {
