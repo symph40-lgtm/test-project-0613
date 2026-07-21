@@ -1,0 +1,37 @@
+// 일봉 스윙 예측 — 설정. 기획: docs/predict-daily-spec.md 5-3(확정 운영안 v0.2)·6장.
+// 모든 상수는 10.5년 백테스트(scripts/daily-swing-*.ts) 근거 — 변경 시 반드시 재검증.
+
+export const PREDICT_DAILY_CONFIG = {
+  symbols: [
+    { code: "005930", name: "삼전" },
+    { code: "000660", name: "하닉" },
+  ],
+
+  daysFetch: 420, // 웜업 272 + 백필·채점 여유
+  warmup: 272, // 미너비니 252봉 + 200MA 기울기 20봉
+  backfillDays: 60, // 첫 가동 시 소급 기록 일수
+
+  // 판정 창 (KST 분). 15:05~16:00 — 창 안 재호출은 정정(revision)으로 누적, 마지막 판정이 확정.
+  judgeWindow: { from: 15 * 60 + 5, to: 16 * 60 },
+
+  // 주식화 비율: 이진(미너비니 long=1)이 기본 — 티어(P2)는 MDD↓·수익↓ 트레이드오프로 보류 (스펙 5-3)
+  stopPct: 0.08, // 손절 -8% (재해 보험 — -5%는 실측 유해)
+
+  // 매크로 게이트 — 11종 스윕 중 유일하게 2종목×2구간 전부 개선 (2026-07-21 실측, 스펙 6장)
+  macroGate: {
+    y10SpikePp: 0.08, // 전일 미 10Y +0.08%p 이상 급등 → 다음날 비중 감산
+    factor: 0.5,
+  },
+
+  // 이벤트 감산 — NFP(매월 첫 금요일, 자동) 실측: 비용 소액(10.5년 -1~-5%p)·MDD 소폭 개선.
+  // FOMC·CPI 등은 아래 캘린더 수동 갱신 (월 1회 — M7과 동일 운영).
+  eventFactor: 0.5,
+  events: [
+    { date: "2026-07-28", label: "FOMC(7/28~29)" },
+    { date: "2026-07-29", label: "FOMC 결과" },
+    { date: "2026-07-30", label: "삼전 실적(확정)" },
+    { date: "2026-08-11", label: "미 CPI(예정)" },
+  ] as { date: string; label: string }[],
+
+  sms: { enabled: true },
+} as const;
