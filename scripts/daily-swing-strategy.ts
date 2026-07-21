@@ -160,11 +160,20 @@ async function main() {
       }
       return f;
     };
+    // P4 5단계 사다리 (사용자 제안 2026-07-22): 추가매수(100)/기본(75)/현금화중(25 — 미너비니 이탈이나
+    // 와인스타인 장기추세 생존)/현금화강(0). 현금화약(50)은 라이브에서 매크로 게이트 ×0.5가 담당.
+    const expoP4 = (i: number) => {
+      const min = S("minervini", i);
+      if (min === "long") return votes(i) >= 3 ? 1 : 0.75;
+      if (min === "flat") return S("weinstein", i) === "long" ? 0.25 : 0;
+      return 0;
+    };
     const policies: { name: string; expo: (i: number) => number }[] = [
       { name: "P0 계속 보유 (B&H)", expo: () => 1 },
       { name: "P1 미너비니 이진(100/0)", expo: expoP1 },
       { name: "P2 강도 티어(투표 가감)", expo: expoP2 },
       { name: "P3 티어+위험감산", expo: expoP3 },
+      { name: "P4 5단계 사다리(사용자안)", expo: expoP4 },
     ];
     const windows = [
       { name: "전체", from: first },
@@ -185,6 +194,8 @@ async function main() {
       { name: "손절 -5%" , slPct: 0.05 },
       { name: "손절 -8%", slPct: 0.08 },
       { name: "손절 2×ATR", slAtr: 2 },
+      { name: "손절 2.5×ATR", slAtr: 2.5 },
+      { name: "손절 3×ATR", slAtr: 3 },
       { name: "트레일링 -8%", trPct: 0.08 },
       { name: "트레일링 -12%", trPct: 0.12 },
       { name: "트레일링 3×ATR", trAtr: 3 },
@@ -193,7 +204,7 @@ async function main() {
       { name: "손절-8% + 트레일링-12%", slPct: 0.08, trPct: 0.12 },
       { name: "손절-8% + 이익실현+20%", slPct: 0.08, tpPct: 0.2 },
     ];
-    for (const base of [{ name: "P1 이진", expo: expoP1 }, { name: "P3 티어+위험감산", expo: expoP3 }]) {
+    for (const base of [{ name: "P1 이진", expo: expoP1 }, { name: "P4 5단계 사다리", expo: expoP4 }]) {
       console.log(`\n── C. 오버레이 검증 — ${base.name} 기반`);
       for (const w of windows) {
         console.log(`   [${w.name}]`);

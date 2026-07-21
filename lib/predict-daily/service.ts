@@ -13,11 +13,21 @@ import { assessNewsRisk, type NewsRisk } from "./newsRisk";
 import { loadRecentDays, predictDailyTablesReady, upsertDay, updateLabels } from "./store";
 import type { DailyJudgment, MacroSnap, PredictDailyRow, Stance } from "./types";
 
-const STANCE_KO: Record<Stance, string> = { long: "매수", short: "회피(매도)", flat: "중립(현금)" };
-
 function fmtPx(v: number): string {
   return Math.round(v).toLocaleString();
 }
+
+// 5단계 행동 라벨 (사용자 확정 2026-07-22) — 최종 비중이 라벨을 결정 (게이트 감산 반영 후)
+function actionLabel(stance: Stance, exposure: number): string {
+  if (exposure >= 0.9) return "추가매수(주식100%)";
+  if (exposure >= 0.6) return "기본 보유(주식75%)";
+  if (exposure >= 0.35) return "현금화 약(주식50%)";
+  if (exposure >= 0.1) return "현금화 중(주식25%)";
+  return stance === "short" ? "현금화 강(전량·하락추세)" : "현금화 강(전량 현금)";
+}
+
+// 유지 스트릭 비교용 단계 (게이트 전 기본 사다리 기준 — 게이트로 인한 일시 감산은 스트릭을 끊지 않음)
+const tierOf = (e: number) => (e >= 0.9 ? 4 : e >= 0.6 ? 3 : e >= 0.35 ? 2 : e >= 0.1 ? 1 : 0);
 
 function macroLine(m: MacroSnap | null): string {
   if (!m) return "";
@@ -33,24 +43,21 @@ function macroLine(m: MacroSnap | null): string {
 
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
 function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number): string {
-  const pct = Math.round(j.exposure * 100);
-  const what = j.stance === "long" ? `매수 비중${pct}%` : j.stance === "short" ? "회피(현금)" : "중립(현금)";
-  const stop = j.stance === "long" && j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}` : "";
-  return `[일봉] ${name} ${what} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)}`;
+  const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)}`;
 }
 
-function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prev: Stance | null, flow: FlowDay[]): string {
-  const pct = Math.round(j.exposure * 100);
-  let action: string;
-  if (j.stance === "long") {
-    action = `매수 비중${pct}%` + (j.gates.length ? `(${j.gates.join("·")} 감산)` : "");
-  } else if (j.stance === "short") {
-    action = prev === "long" ? "전량 매도 — 하락 추세 진입" : "매수 금지(하락 추세)";
-  } else {
-    action = prev === "long" ? "전량 매도 — 추세 이탈" : "중립(현금 유지)";
-  }
-  const stop = j.stance === "long" && j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-8%)` : "";
-  return `[일봉] ${name} ${action} 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[]): string {
+  const label = actionLabel(j.stance, j.exposure);
+  const head = prevLabel && prevLabel !== label ? `${prevLabel} → ${label}` : label;
+  const why: string[] = [];
+  if (j.stance === "long") why.push(j.votes >= 3 ? "추세+타모델 합의" : "미너비니 추세");
+  else if (j.stance === "flat" && j.baseExposure > 0) why.push("추세 이탈·장기추세 생존");
+  else if (j.stance === "flat") why.push("추세 이탈");
+  else why.push("하락 추세");
+  if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
+  const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
 }
 
 export async function runPredictDailyService(): Promise<Record<string, unknown>> {
@@ -159,19 +166,20 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     // 문자: 매일 발송 (사용자 지시 2026-07-22 — 잊지 않도록). 변경이면 행동 지침, 유지면 "언제부터" 표기.
     //   키에 분 없음 — 스탠스·비중 조합으로 하루 내 중복 방지 (창 내 판정 뒤집힘 시에만 재발송).
     if (CFG.sms.enabled && (!existing || changedVsToday)) {
-      // 유지 스트릭: 오늘과 같은 스탠스가 연속된 직전 거래일들 (오늘 포함 N거래일째)
+      // 유지 스트릭: 같은 스탠스+같은 사다리 단계가 연속된 직전 거래일들 (오늘 포함 N거래일째)
       let since = now.date, streak = 1;
       const pastRows = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1));
       for (let k = pastRows.length - 1; k >= 0; k--) {
-        if (pastRows[k].stance !== jg.stance) break;
+        if (pastRows[k].stance !== jg.stance || tierOf(pastRows[k].base_exposure) !== tierOf(jg.baseExposure)) break;
         since = pastRows[k].date; streak++;
       }
       const changed = changedVsPrev || changedVsToday;
+      const prevLabel = prevRow ? actionLabel(prevRow.stance, prevRow.exposure) : null;
       const key = `pdaily_${sym.code}_${now.date}_${jg.stance}_${Math.round(jg.exposure * 100)}`;
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro2, prevStance, flow) : holdText(sym.name, jg, macro2, flow, since, streak),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow) : holdText(sym.name, jg, macro2, flow, since, streak),
         smsSubject: "일봉 판정",
       });
     }

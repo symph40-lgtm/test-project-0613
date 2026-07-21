@@ -29,10 +29,12 @@ export type MacroSnap = {
 
 export type DailyJudgment = {
   stance: Stance;
-  baseExposure: number; // 게이트 전 주식화 비율 0~1
+  baseExposure: number; // 사다리 기본 비율 0~1 (게이트 전)
   exposure: number; // 게이트 반영 후
+  votes: number; // 타 모델 투표합 (돈치안·와일더·와인스타인·엘더, long=+1/short=-1)
   gates: string[]; // 적용된 감산 사유 (예: "10Y급등", "이벤트:FOMC")
-  stopPx: number | null; // 손절가 (매수 시)
+  stopPx: number | null; // 손절가 (보유 비중 있을 때)
+  stopPct: number; // 변동성 연동 손절폭 (2.5×ATR, 6~12% 클램프)
   closePx: number;
   modelStances: Record<string, Stance>; // 7모델 스냅샷
 };

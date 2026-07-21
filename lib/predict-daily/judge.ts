@@ -2,7 +2,7 @@
 // 근거: docs/predict-daily-spec.md 5-3(확정 운영안 v0.2)·6장 실측.
 
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
-import { MODELS } from "./models";
+import { atr14, MODELS } from "./models";
 import type { DailyBar, DailyJudgment, MacroSnap, Stance } from "./types";
 
 // 매월 첫 금요일 = NFP 발표일 근사 (그날 밤 21:30 KST 발표 — 마감 판정에 감산)
@@ -25,10 +25,16 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudg
   for (const m of MODELS) modelStances[m.id] = m.run(bars)[i];
 
   const stance = modelStances["minervini"];
-  const baseExposure = stance === "long" ? 1 : 0; // 이진 (스펙 5-3 확정)
+  const votes = (["donchian", "wilder", "weinstein", "elder"] as const).reduce(
+    (a, id) => a + (modelStances[id] === "long" ? 1 : modelStances[id] === "short" ? -1 : 0), 0);
+
+  // 5단계 사다리 (스펙 5-3 P4): 추가매수(1.0) / 기본(0.75) / 장기추세 생존 시 잔량(0.25) / 전량 현금(0)
+  let baseExposure = 0;
+  if (stance === "long") baseExposure = votes >= CFG.ladder.strongVotes ? 1 : CFG.ladder.base;
+  else if (stance === "flat" && modelStances["weinstein"] === "long") baseExposure = CFG.ladder.weakHold;
+
   let exposure = baseExposure;
   const gates: string[] = [];
-
   if (exposure > 0 && macro?.y10Chg != null && macro.y10Chg >= CFG.macroGate.y10SpikePp) {
     exposure *= CFG.macroGate.factor;
     gates.push(`10Y급등(+${macro.y10Chg.toFixed(2)}%p)`);
@@ -44,12 +50,19 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudg
   }
 
   const closePx = bars[i].close;
+  // 손절폭: 변동성 연동 2.5×ATR14, 6~12% 클램프 (고정 -8%와 성능 동등 실측 — 종목·장세 자동 적응)
+  const atr = atr14(bars)[i];
+  const stopPct = atr && closePx > 0
+    ? Math.min(CFG.stop.maxPct, Math.max(CFG.stop.minPct, (CFG.stop.atrMult * atr) / closePx))
+    : 0.08;
   return {
     stance,
     baseExposure,
     exposure,
+    votes,
     gates,
-    stopPx: stance === "long" ? Math.floor((closePx * (1 - CFG.stopPct)) / 10) * 10 : null,
+    stopPx: exposure > 0 ? Math.floor((closePx * (1 - stopPct)) / 10) * 10 : null,
+    stopPct,
     closePx,
     modelStances,
   };
