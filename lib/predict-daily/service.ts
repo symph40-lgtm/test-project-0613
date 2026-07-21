@@ -17,10 +17,9 @@ function fmtPx(v: number): string {
   return Math.round(v).toLocaleString();
 }
 
-// 5단계 행동 라벨 (사용자 확정 2026-07-22) — 최종 비중이 라벨을 결정 (게이트 감산 반영 후)
+// 사다리 행동 라벨 (v2, 2026-07-22 분해 실측) — 최종 비중이 라벨을 결정 (게이트 감산 반영 후)
 function actionLabel(stance: Stance, exposure: number): string {
-  if (exposure >= 0.9) return "추가매수(주식100%)";
-  if (exposure >= 0.6) return "기본 보유(주식75%)";
+  if (exposure >= 0.9) return "풀보유(주식100%)";
   if (exposure >= 0.35) return "현금화 약(주식50%)";
   if (exposure >= 0.1) return "현금화 중(주식25%)";
   return stance === "short" ? "현금화 강(전량·하락추세)" : "현금화 강(전량 현금)";
