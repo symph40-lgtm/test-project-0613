@@ -103,7 +103,7 @@ const stateAt = (tl: Transition[], cut: string): Transition | null => {
 
 // ── 하루 시뮬레이션 — 라이브 이중창 구조. 반환: 첫 방향 확인(컷·방향·가격) + 이후 뒤집힘 수
 type DaySim = { confirmCut: string; dir: "up" | "down"; entryPx: number; flips: number; via?: "run" | "strong" } | null;
-type SimCfg = { earlyRatio: number; confirm: number; lateRatio?: number; lateConfirm?: number; reversal?: number; noPreWindow?: boolean; strongRatio?: number };
+type SimCfg = { earlyRatio: number; confirm: number; lateRatio?: number; lateConfirm?: number; reversal?: number; noPreWindow?: boolean; strongRatio?: number; startMin?: number };
 function simulateDay(pre: MinuteBar[] | null, krx: MinuteBar[], range10: number, cfg: SimCfg): DaySim {
   const rev = cfg.reversal ?? 5;
   const lateRatio = cfg.lateRatio ?? 0.15, lateConfirm = cfg.lateConfirm ?? 8;
@@ -115,7 +115,7 @@ function simulateDay(pre: MinuteBar[] | null, krx: MinuteBar[], range10: number,
   let first: Transition | null = null;
   let flips = 0;
   let lastDir: FState = "none";
-  for (let m = 9 * 60 + 30; m <= 14 * 60; m++) {
+  for (let m = cfg.startMin ?? 9 * 60 + 30; m <= 14 * 60; m++) {
     const cut = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
     const s = effAt(cut);
     const st = s?.state ?? "none";
@@ -402,6 +402,29 @@ async function main() {
       const b = buckets.get(k);
       if (!b) continue;
       console.log(`${k.padEnd(22)} | ${String(b.n).padStart(3)}회 | ${((b.hit / b.n) * 100).toFixed(1).padStart(5)}% | ${b.cum >= 0 ? "+" : ""}${b.cum.toFixed(1).padStart(6)}%p | ${fmtPct(b.cum / b.n).padStart(7)} | ${b.stops}`);
+    }
+  }
+
+  // ══ ⑦ 피셔 판정 개시를 09:01로 앞당기면? (2026-07-22 사용자 질문 — 현행은 09:30부터)
+  console.log("\n══ ⑦ 피셔 개시 09:01 vs 09:30 (라이브 세트 0.05·4봉+강돌파) ══");
+  for (const p of periods) {
+    const set = days.filter((d) => d.date >= p.from && d.date <= TODAY);
+    for (const start of [9 * 60 + 1, 9 * 60 + 30]) {
+      let n = 0, hit = 0, cumStop = 0, stops = 0, pre930 = 0;
+      const cuts: string[] = [];
+      for (const d of set) {
+        const s = simulateDay(d.pre, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1, startMin: start });
+        if (!s) continue;
+        n++;
+        if ((s.dir === "up" ? "leverage" : "inverse") === d.label) hit++;
+        cuts.push(s.confirmCut);
+        if (s.confirmCut < "09:30") pre930++;
+        const sign = s.dir === "up" ? 1 : -1;
+        const raw = ((d.close - s.entryPx) / s.entryPx) * 100 * sign;
+        const st = stopHit(d.krx, s.confirmCut, s.dir, s.entryPx, 1.5);
+        if (st) { cumStop += -1.5; stops++; } else cumStop += raw;
+      }
+      console.log(`${p.name.padEnd(14)} 개시 ${start === 9 * 60 + 1 ? "09:01" : "09:30"}: 신호 ${n}회 · 09:30 전 확인 ${pre930}회 · 방향적중 ${((hit / n) * 100).toFixed(1)}% · 중앙확인 ${medianCut(cuts)} · 누적(-1.5%) ${cumStop >= 0 ? "+" : ""}${cumStop.toFixed(1)}%p · 컷 ${stops}`);
     }
   }
 
