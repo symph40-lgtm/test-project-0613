@@ -282,7 +282,11 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
   // 주간 성능 문자 (금요일) — 교체는 자동이 아니라 권고: ⚠교체검토가 뜨면 사용자 승인 후 수동 전환.
   // 행동 지침 동봉(decision-notify 원칙): /ops 지시 또는 작업 세션 요청, 무응답=현행 유지.
   if (CFG.sms.enabled && perfTexts.length > 0) {
-    const hasSwapAlert = perfTexts.some((t) => t.includes("⚠"));
+    // 캘린더 자가 감시: 등록된 마지막 이벤트가 30일 이내로 다가오면 보충 경고 (사용자 수동 갱신 대체)
+    const lastEvent = [...CFG.events].map((e) => e.date).sort().pop() ?? "";
+    const horizon = new Date(new Date(`${now.date}T00:00:00Z`).getTime() + 30 * 86400e3).toISOString().slice(0, 10);
+    if (lastEvent < horizon) perfTexts.push(`이벤트 캘린더 보충 필요(마지막 ${lastEvent.slice(5)}) → /ops에 '캘린더 갱신' 지시`);
+    const hasSwapAlert = perfTexts.some((t) => t.includes("⚠교체검토"));
     const action = hasSwapAlert
       ? " ▶교체 검토 원하시면 /ops에 '일봉 교체 검토' 지시 또는 작업 세션에서 요청. 무응답=현행 유지"
       : "";

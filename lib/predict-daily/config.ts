@@ -50,13 +50,26 @@ export const PREDICT_DAILY_CONFIG = {
   },
 
   // 이벤트 감산 — NFP(매월 첫 금요일, 자동) 실측: 비용 소액(10.5년 -1~-5%p)·MDD 소폭 개선.
-  // FOMC·CPI 등은 아래 캘린더 수동 갱신 (월 1회 — M7과 동일 운영).
+  // FOMC·CPI는 공식 발표 일정 (2026-07-22 연준·BLS 일정 확인, 2026년 말까지 등록 — CPI는 발표일 21:30 KST라
+  // 해당 날짜 마감 판정에 감산). 캘린더 잔여 30일 미만이면 금요일 성능 문자에 보충 경고 자동 동봉.
   eventFactor: 0.5,
   events: [
     { date: "2026-07-28", label: "FOMC(7/28~29)" },
-    { date: "2026-07-29", label: "FOMC 결과" },
+    { date: "2026-07-29", label: "FOMC 결과·하닉 실적" },
     { date: "2026-07-30", label: "삼전 실적(확정)" },
-    { date: "2026-08-11", label: "미 CPI(예정)" },
+    { date: "2026-08-12", label: "미 CPI" },
+    { date: "2026-09-11", label: "미 CPI" },
+    { date: "2026-09-15", label: "FOMC(9/15~16)" },
+    { date: "2026-09-16", label: "FOMC 결과" },
+    { date: "2026-10-07", label: "삼전 잠정실적(추정)" },
+    { date: "2026-10-14", label: "미 CPI" },
+    { date: "2026-10-27", label: "FOMC(10/27~28)" },
+    { date: "2026-10-28", label: "FOMC 결과" },
+    { date: "2026-10-29", label: "하닉 실적(추정)" },
+    { date: "2026-11-10", label: "미 CPI" },
+    { date: "2026-12-08", label: "FOMC(12/8~9)" },
+    { date: "2026-12-09", label: "FOMC 결과" },
+    { date: "2026-12-10", label: "미 CPI" },
   ] as { date: string; label: string }[],
 
   sms: { enabled: true },
