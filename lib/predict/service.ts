@@ -310,6 +310,28 @@ export async function runPredictService(): Promise<PredictRunResult> {
     result.judgedToday = await judgeOneDay(today, complete, todayBar.open, "live", true);
   }
 
+  // ③c 15:10 당일청산 매도 문자 (ops 지시 2026-07-21: "월~금 15:10 레버리지 매도 문자").
+  // 창 15:05~15:28에 들어온 호출에서 1회 발송 (14:30 Vercel 크론이 Hobby 지연 +34~54분으로
+  // 15:04~15:24에 도착 — 이 창이 주 운반체. 정시성 보강은 cron-job.org 15:08 KST 잡 권장).
+  // 당일 판정 스트림에 방향이 한 번이라도 있었던 날만 발송 — 무추세일은 보유가 없어 소음.
+  if (todayBar && minuteOfDay >= 15 * 60 + 5 && minuteOfDay <= 15 * 60 + 28) {
+    try {
+      const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+      const row = dow >= 1 && dow <= 5 ? await loadDayRow(today) : null;
+      const hadDir = row?.revisions?.some((r) => r.verdict !== "none") ?? false;
+      if (hadDir) {
+        const last = row!.revisions![row!.revisions!.length - 1].verdict;
+        const pos = last !== "none" ? V_KO[last] : "레버리지·인버스";
+        await dispatchToChannels("signal", today, {
+          key: "predict_sell_1510",
+          severity: "medium",
+          text: `[예측] 15:10 당일청산 — 보유 ${pos} 매도 시간입니다. 장 마감(15:30) 전 정리. (월~금 고정, 7/21 지시)`,
+          smsSubject: "예측 당일청산",
+        });
+      }
+    } catch { /* 발송 실패는 본 흐름 무관 */ }
+  }
+
   // ④ 당일 채점 (15:35 이후 — 일봉 확정)
   if (todayBar && minuteOfDay >= SCORE_MIN && (await hasJudgment(today))) {
     const unscoredToday = (await listUnscoredDates("9999-12-31")).includes(today);
