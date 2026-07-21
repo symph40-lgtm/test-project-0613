@@ -63,17 +63,18 @@ async function minutesCached(code: string, date: string, kind: "KRX" | "NX"): Pr
 
 // ── 피셔 상태기계 스트리밍 — 상태 전이 타임라인 (전이 시각 = 봉 완성 컷 = 봉시각+1분)
 type FState = "none" | "up" | "down";
-type Transition = { cut: string; state: FState; px: number };
+type Transition = { cut: string; state: FState; px: number; via?: "run" | "strong" };
 function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, confirm: number, reversal: number, strongWon?: number): Transition[] {
   if (bars.length < orMinutes + 1) return [];
   const or = bars.slice(0, orMinutes);
   const aUp = Math.max(...or.map((b) => b.high)) + offsetWon;
   const aDown = Math.min(...or.map((b) => b.low)) - offsetWon;
   const out: Transition[] = [];
-  let state: FState = "none", upRun = 0, downRun = 0;
+  let state: FState = "none", natUp = 0, natDown = 0;
   for (const b of bars.slice(orMinutes)) {
-    upRun = b.close > aUp ? upRun + 1 : 0;
-    downRun = b.close < aDown ? downRun + 1 : 0;
+    natUp = b.close > aUp ? natUp + 1 : 0;
+    natDown = b.close < aDown ? natDown + 1 : 0;
+    let upRun = natUp, downRun = natDown;
     // 강돌파 오버라이드: A선을 strongWon 이상 크게 돌파한 종가는 확인봉을 즉시 충족 처리
     if (strongWon !== undefined) {
       if (b.close > aUp + strongWon) upRun = Math.max(upRun, confirm, reversal);
@@ -85,7 +86,12 @@ function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, c
       else if (downRun >= confirm) next = "down";
     } else if (state === "up" && downRun >= reversal) next = "down";
     else if (state === "down" && upRun >= reversal) next = "up";
-    if (next !== state) { state = next; out.push({ cut: addMin(b.time, 1), state, px: b.close }); }
+    if (next !== state) {
+      // 자연 확인봉만으로 충족됐으면 run, 강돌파 덕에 앞당겨졌으면 strong
+      const via = (next === "up" ? natUp : natDown) >= (state === "none" ? confirm : reversal) ? "run" : "strong";
+      state = next;
+      out.push({ cut: addMin(b.time, 1), state, px: b.close, via });
+    }
   }
   return out;
 }
@@ -96,7 +102,7 @@ const stateAt = (tl: Transition[], cut: string): Transition | null => {
 };
 
 // ── 하루 시뮬레이션 — 라이브 이중창 구조. 반환: 첫 방향 확인(컷·방향·가격) + 이후 뒤집힘 수
-type DaySim = { confirmCut: string; dir: "up" | "down"; entryPx: number; flips: number } | null;
+type DaySim = { confirmCut: string; dir: "up" | "down"; entryPx: number; flips: number; via?: "run" | "strong" } | null;
 type SimCfg = { earlyRatio: number; confirm: number; lateRatio?: number; lateConfirm?: number; reversal?: number; noPreWindow?: boolean; strongRatio?: number };
 function simulateDay(pre: MinuteBar[] | null, krx: MinuteBar[], range10: number, cfg: SimCfg): DaySim {
   const rev = cfg.reversal ?? 5;
@@ -117,7 +123,7 @@ function simulateDay(pre: MinuteBar[] | null, krx: MinuteBar[], range10: number,
     else if (first && st !== lastDir) { flips++; lastDir = st; }
   }
   if (!first) return null;
-  return { confirmCut: first.cut, dir: first.state as "up" | "down", entryPx: first.px, flips };
+  return { confirmCut: first.cut, dir: first.state as "up" | "down", entryPx: first.px, flips, via: first.via };
 }
 
 // 스탑 체크 — 진입 후 분봉으로 본주 기준 s% 역행 시 컷. 반환: 손절 시각(없으면 null)
@@ -359,6 +365,46 @@ async function main() {
       console.log(`${lbl} | ${String(n).padStart(3)}회 | ${n ? ((hit / n) * 100).toFixed(1).padStart(5) : "  —"}% | ${medianCut(cuts)}   | ${String(early).padStart(3)}회 | ${cumStop >= 0 ? "+" : ""}${cumStop.toFixed(1).padStart(6)}%p | ${stops}(${noise})`);
     }
   }
+  // ══ ⑥ 확인 경로·시각대별 분해 (2026-07-22 사용자 질문: "09:46류가 오히려 더 정확하지 않나")
+  // 라이브 세트(0.05·4봉+강돌파0.10)와 구세트(0.10·8봉)의 첫확인을 경로·시각대로 나눠 채점.
+  console.log("\n══ ⑥ 확인 경로·시각대별 분해 (첫확인 진입→종가, 스탑 -1.5%) ══");
+  const cfgs: { name: string; cfg: SimCfg }[] = [
+    { name: "라이브 0.05·4봉+강돌파", cfg: { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1 } },
+    { name: "구세트 0.10·8봉", cfg: { earlyRatio: 0.1, confirm: 8 } },
+  ];
+  type Bucket = { n: number; hit: number; cum: number; stops: number };
+  const bkey = (s: NonNullable<DaySim>): string => {
+    if (s.via === "strong") return "강돌파(즉시)";
+    if (s.confirmCut === "09:30") return "09:30 즉시(개장전 충족)";
+    if (s.confirmCut <= "10:00") return "09:31~10:00 (09:46류)";
+    if (s.confirmCut <= "10:30") return "10:01~10:30";
+    return "10:31~ (본피셔 구간)";
+  };
+  for (const { name, cfg } of cfgs) {
+    console.log(`\n── ${name} — 전체 223일 ──`);
+    const buckets = new Map<string, Bucket>();
+    for (const d of days) {
+      const s = simulateDay(d.pre, d.krx, d.range10, cfg);
+      if (!s) continue;
+      const k = bkey(s);
+      const b = buckets.get(k) ?? { n: 0, hit: 0, cum: 0, stops: 0 };
+      b.n++;
+      const verdict: Verdict = s.dir === "up" ? "leverage" : "inverse";
+      if (verdict === d.label) b.hit++;
+      const sign = s.dir === "up" ? 1 : -1;
+      const raw = ((d.close - s.entryPx) / s.entryPx) * 100 * sign;
+      const st = stopHit(d.krx, s.confirmCut, s.dir, s.entryPx, 1.5);
+      if (st) { b.cum += -1.5; b.stops++; } else b.cum += raw;
+      buckets.set(k, b);
+    }
+    console.log("확인 구간               | 신호  | 방향적중 | 누적(-1.5%) | 거래당    | 컷수");
+    for (const k of ["강돌파(즉시)", "09:30 즉시(개장전 충족)", "09:31~10:00 (09:46류)", "10:01~10:30", "10:31~ (본피셔 구간)"]) {
+      const b = buckets.get(k);
+      if (!b) continue;
+      console.log(`${k.padEnd(22)} | ${String(b.n).padStart(3)}회 | ${((b.hit / b.n) * 100).toFixed(1).padStart(5)}% | ${b.cum >= 0 ? "+" : ""}${b.cum.toFixed(1).padStart(6)}%p | ${fmtPct(b.cum / b.n).padStart(7)} | ${b.stops}`);
+    }
+  }
+
   // 어제(7/21) 개별 확인 — 강돌파 임계별 확인 시각
   const t2 = days.find((d) => d.date === TODAY);
   if (t2) {
