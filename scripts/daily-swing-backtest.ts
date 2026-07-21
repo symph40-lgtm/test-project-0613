@@ -314,6 +314,88 @@ async function main() {
       }
     }
 
+    // ── 큰 변동일 조건부 채점 — "크게 움직인 날을 맞췄는가" (사용자 제안 2026-07)
+    // 임계: |r3| 고정 3%·5% + 변동성 상대(판정일 기준 20일 일수익 σ × √3 × 1.5 — 종목·레짐별 변동성 자동 반영)
+    const rets: number[] = new Array(n).fill(0);
+    for (let i = 1; i < n; i++) rets[i] = bars[i].close / bars[i - 1].close - 1;
+    const vol20: (number | null)[] = new Array(n).fill(null);
+    for (let i = 21; i < n; i++) {
+      const w = rets.slice(i - 19, i + 1);
+      const mean = w.reduce((a, b) => a + b, 0) / w.length;
+      vol20[i] = Math.sqrt(w.reduce((s, v) => s + (v - mean) * (v - mean), 0) / w.length);
+    }
+    const mar26 = bars.findIndex((b) => b.date >= "2026-03-01");
+    const bigPeriods: { name: string; from: number }[] = [
+      { name: "전체", from: first },
+      { name: "최근 1년", from: Math.max(first, last - 250) },
+      ...(mar26 >= 0 && mar26 <= last - 20 ? [{ name: "2026-03 이후", from: Math.max(first, mar26) }] : []),
+    ];
+    type Cond = { name: string; test: (i: number, r3: number) => boolean };
+    const conds: Cond[] = [
+      { name: "|r3|≥3%", test: (_i, r3) => Math.abs(r3) >= 0.03 },
+      { name: "|r3|≥5%", test: (_i, r3) => Math.abs(r3) >= 0.05 },
+      { name: "상대 1.5σ√3", test: (i, r3) => vol20[i] !== null && Math.abs(r3) >= 1.5 * vol20[i]! * Math.sqrt(3) },
+    ];
+
+    for (const period of bigPeriods) {
+      const lines: string[] = [];
+      const heads: string[] = [];
+      for (const cond of conds) {
+        let qual = 0, qualUp = 0;
+        for (let i = period.from; i <= last; i++) {
+          const r3 = bars[i + 3].close / bars[i].close - 1;
+          if (r3 !== 0 && cond.test(i, r3)) { qual++; if (r3 > 0) qualUp++; }
+        }
+        heads.push(`${cond.name}: 해당 ${qual}일(${((100 * qual) / (last - period.from + 1)).toFixed(0)}%), 상승 ${qual > 0 ? ((100 * qualUp) / qual).toFixed(0) : "—"}%`);
+      }
+      console.log(`\n── 큰 변동일 r3 채점 [${period.name}] — ${heads.join(" · ")}`);
+      console.log(`   모델                          ${conds.map((c) => c.name.padEnd(22)).join("")}`);
+      for (let m = 0; m < MODELS.length; m++) {
+        const cells: string[] = [];
+        for (const cond of conds) {
+          let hit = 0, tot2 = 0, baseBlend = 0;
+          let condUp = 0, condN = 0;
+          for (let i = period.from; i <= last; i++) {
+            const r3 = bars[i + 3].close / bars[i].close - 1;
+            if (r3 === 0 || !cond.test(i, r3)) continue;
+            condN++; if (r3 > 0) condUp++;
+          }
+          for (let i = period.from; i <= last; i++) {
+            const stance = stances[m][i];
+            if (stance === "flat") continue;
+            const r3 = bars[i + 3].close / bars[i].close - 1;
+            if (r3 === 0 || !cond.test(i, r3)) continue;
+            tot2++;
+            const want = stance === "long" ? 1 : -1;
+            if (Math.sign(r3) === want) hit++;
+            baseBlend += stance === "long" ? condUp / condN : 1 - condUp / condN;
+          }
+          const acc = tot2 > 0 ? (100 * hit) / tot2 : NaN;
+          const lift = tot2 > 0 ? acc - (100 * baseBlend) / tot2 : NaN;
+          cells.push(tot2 > 0 ? `${acc.toFixed(0)}% (${lift >= 0 ? "+" : ""}${lift.toFixed(1)}p, ${tot2})`.padEnd(22) : "—".padEnd(22));
+        }
+        console.log(`   ${MODELS[m].label.padEnd(24)} ${cells.join("")}`);
+      }
+
+      // 급변일 전일 스탠스 — 익일 |r1| ≥ 2σ: 급락일에 long이면 피격, flat이면 회피, short면 수익
+      let dnN = 0, upN = 0;
+      const dist: { dn: Record<Stance, number>; up: Record<Stance, number> }[] = MODELS.map(() => ({ dn: { long: 0, short: 0, flat: 0 }, up: { long: 0, short: 0, flat: 0 } }));
+      for (let i = period.from; i <= last; i++) {
+        if (vol20[i] === null) continue;
+        const r1 = bars[i + 1].close / bars[i].close - 1;
+        const big = Math.abs(r1) >= 2 * vol20[i]!;
+        if (!big) continue;
+        if (r1 < 0) { dnN++; for (let m = 0; m < MODELS.length; m++) dist[m].dn[stances[m][i]]++; }
+        else { upN++; for (let m = 0; m < MODELS.length; m++) dist[m].up[stances[m][i]]++; }
+      }
+      console.log(`   ▸ 급변일(익일 |r1|≥2σ) 전일 스탠스 — 급락 ${dnN}일 · 급등 ${upN}일  [급락: 매도수익/중립회피/매수피격 | 급등: 매수포착/중립/매도역행]`);
+      for (let m = 0; m < MODELS.length; m++) {
+        const d = dist[m];
+        const f = (x: number, tot: number) => (tot > 0 ? `${((100 * x) / tot).toFixed(0)}%` : "—");
+        console.log(`     ${MODELS[m].label.padEnd(24)} 급락: ${f(d.dn.short, dnN)}/${f(d.dn.flat, dnN)}/${f(d.dn.long, dnN)}  |  급등: ${f(d.up.long, upN)}/${f(d.up.flat, upN)}/${f(d.up.short, upN)}`);
+      }
+    }
+
     // 오늘 스탠스
     console.log(`\n   ▸ 현재 스탠스 (${bars[n - 1].date} 종가 기준): ` + MODELS.map((m, j) => `${m.id}=${stances[j][n - 1]}`).join(", "));
   }
