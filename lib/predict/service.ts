@@ -168,6 +168,21 @@ async function checkpointStream(
     return PREDICT_CONFIG.checkpointPriors[slot] ?? null;
   };
 
+  // 자동매도 스탑 '금액' (사용자 지시 2026-07-21): 판정 시점 ETF 현재가에 스탑 %를 적용한
+  // 절대 가격을 문자에 동봉 — 매입가 -3%로 걸면 체결가가 밀린 만큼 스탑이 위로 올라와
+  // 저점 노이즈에 컷된다(7/21 실측). 소스는 네이버 일봉 마지막 봉(장중엔 현재가) — 오늘
+  // 날짜가 아니면(개장 전·휴장) 잘못된 앵커라 생략. ETF 호가단위 5원 내림.
+  const etfStopLine = async (verdict: Verdict, etfPct: number): Promise<string> => {
+    try {
+      const p = verdict === "leverage" ? PREDICT_CONFIG.etf.leverage : PREDICT_CONFIG.etf.inverse;
+      const bars = await fetchDailyPredict(p.code, 2);
+      const last = bars[bars.length - 1];
+      if (!last || last.date !== today || !(last.close > 0)) return "";
+      const stop = Math.floor((last.close * (1 - etfPct / 100)) / 5) * 5;
+      return `\n▶자동매도 스탑: ${p.name} ${stop.toLocaleString()}원 (판정시점 ${last.close.toLocaleString()}원 -${etfPct.toFixed(1)}% — 매입가 아닌 이 값에 고정)`;
+    } catch { return ""; }
+  };
+
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
@@ -179,6 +194,11 @@ async function checkpointStream(
     let text = prev === null
       ? `[예측·${judgeKo}] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
       : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
+    // 방향 판정이면 자동매도 스탑 금액 동봉 (ruleReminder와 무관 — 실매매 핵심 정보)
+    if (next.verdict !== "none") {
+      const pct = judge === "user" ? atrStopEtf : PREDICT_CONFIG.stops.fisher.etfPct;
+      if (pct !== null) text += await etfStopLine(next.verdict, pct);
+    }
     // 규칙 환기 (사용자 지정 2026-07-17 "당분간") — 수익은 적중률이 아니라 규칙에서.
     // 장문(LMS) 전환을 감수하고 동봉. config.sms.ruleReminder=false로 끄면 단문 복귀.
     if (PREDICT_CONFIG.sms.ruleReminder) {
