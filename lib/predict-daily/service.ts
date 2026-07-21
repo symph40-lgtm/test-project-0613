@@ -24,7 +24,17 @@ function macroLine(m: MacroSnap | null): string {
   if (m.y10 != null) parts.push(`10Y ${m.y10.toFixed(2)}${m.y10Chg != null ? `(${m.y10Chg >= 0 ? "+" : ""}${m.y10Chg.toFixed(2)}p)` : ""}`);
   if (m.sox != null) parts.push(`SOX ${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}%`);
   if (m.fxLevel != null) parts.push(`환율 ${Math.round(m.fxLevel)}`);
+  if (m.dxy != null) parts.push(`DXY ${m.dxy.toFixed(1)}${m.dxyChg != null ? `(${m.dxyChg >= 0 ? "+" : ""}${m.dxyChg.toFixed(1)}%)` : ""}`);
+  if (m.wti != null) parts.push(`WTI ${m.wti.toFixed(1)}${m.wtiChg != null ? `(${m.wtiChg >= 0 ? "+" : ""}${m.wtiChg.toFixed(1)}%)` : ""}`);
   return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
+// 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
+function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number): string {
+  const pct = Math.round(j.exposure * 100);
+  const what = j.stance === "long" ? `매수 비중${pct}%` : j.stance === "short" ? "회피(현금)" : "중립(현금)";
+  const stop = j.stance === "long" && j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}` : "";
+  return `[일봉] ${name} ${what} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)}`;
 }
 
 function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prev: Stance | null, flow: FlowDay[]): string {
@@ -57,7 +67,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const closedThroughToday = now.minuteOfDay >= 15 * 60 + 40;
     const isClosed = (date: string) => date < now.date || (date === now.date && closedThroughToday);
 
-    const rows = await loadRecentDays(sym.code, CFG.backfillDays + 40);
+    const rows = await loadRecentDays(sym.code, 320); // 유지 스트릭("언제부터 동일 판정") 계산 여유 포함
     const have = new Map(rows.map((r) => [r.date, r]));
 
     // 1. 백필 — 최근 완결 거래일 중 기록 없는 날 (판정 재현, 매크로 게이트는 소급 생략)
@@ -135,13 +145,22 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     await upsertDay(row);
     (summary.judged as unknown[]).push({ symbol: sym.code, stance: jg.stance, exposure: jg.exposure, gates: jg.gates });
 
-    // 문자: 전일 대비 변경된 첫 판정, 또는 당일 내 판정 뒤집힘 (키에 분 없음 — 스탠스·비중으로 중복 방지)
-    if (CFG.sms.enabled && ((!existing && changedVsPrev) || changedVsToday)) {
+    // 문자: 매일 발송 (사용자 지시 2026-07-22 — 잊지 않도록). 변경이면 행동 지침, 유지면 "언제부터" 표기.
+    //   키에 분 없음 — 스탠스·비중 조합으로 하루 내 중복 방지 (창 내 판정 뒤집힘 시에만 재발송).
+    if (CFG.sms.enabled && (!existing || changedVsToday)) {
+      // 유지 스트릭: 오늘과 같은 스탠스가 연속된 직전 거래일들 (오늘 포함 N거래일째)
+      let since = now.date, streak = 1;
+      const pastRows = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1));
+      for (let k = pastRows.length - 1; k >= 0; k--) {
+        if (pastRows[k].stance !== jg.stance) break;
+        since = pastRows[k].date; streak++;
+      }
+      const changed = changedVsPrev || changedVsToday;
       const key = `pdaily_${sym.code}_${now.date}_${jg.stance}_${Math.round(jg.exposure * 100)}`;
       await dispatchToChannels("signal", now.date, {
         key,
-        severity: jg.stance !== prevStance ? "high" : "medium",
-        text: judgmentText(sym.name, jg, macro, prevStance, flow),
+        severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
+        text: changed ? judgmentText(sym.name, jg, macro, prevStance, flow) : holdText(sym.name, jg, macro, flow, since, streak),
         smsSubject: "일봉 판정",
       });
     }

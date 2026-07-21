@@ -33,6 +33,10 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudg
     exposure *= CFG.macroGate.factor;
     gates.push(`10Y급등(+${macro.y10Chg.toFixed(2)}%p)`);
   }
+  if (exposure > 0 && macro?.dxyChg != null && macro.dxyChg >= CFG.macroGate.dxySpikePct) {
+    exposure *= CFG.macroGate.factor;
+    gates.push(`달러급등(+${macro.dxyChg.toFixed(1)}%)`);
+  }
   const event = todayEvent(bars[i].date);
   if (exposure > 0 && event) {
     exposure *= CFG.eventFactor;

@@ -50,11 +50,14 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
   return pauseCache.allowStrong ? !QUIET_ALLOW_KEYS.test(alertKey) : true;
 }
 
-// ── M7 판정·방향 계열 음소거 (사용자 지정 2026-07-20): 실투자 판정 기준이 /predict(피셔)로
-// 이관되어 충돌 방지 — 한국 M7의 방향 제시(판정확정·횡보선언·V반등·RV1 모멘텀)와 장중브리핑만
-// 차단한다. 수급반전(flow)·급변(move·swing)·거래량(vol)·미국(us_*)·아침브리핑·예측(predict_*)은
-// 유지. M7 판정 '기록'(signal_judgments)은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
-const M7_MUTED_KEYS = /^((trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|ebrief_.*)$/;
+// ── M7 판정·방향 계열 음소거 (사용자 지정 2026-07-20 한국 · 2026-07-21 미국 확장):
+// 실투자 판정 기준이 예측 스트림(한국 /predict 피셔 · 미국 SOXX user+피셔)으로 이관되어 충돌 방지.
+// 한국: 방향 제시(판정확정·횡보선언·V반등·RV1)와 장중브리핑 차단.
+// 미국: us_trend_*(USD/SSG 판정 확정·해제)·us_rev_*(RV1 모멘텀 "SSG 검토") 차단 — USD/SSG는
+//   저유동으로 체결 폐기됐는데 검토 문구가 계속 나가던 충돌 (2026-07-21 23:03 실측).
+// 유지: 수급반전(flow)·급변·스윙(move·swing·us_move·us_swing — 정보성)·거래량(vol)·아침브리핑·
+//   예측(predict_*·uspredict_*). 판정 '기록'은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
+const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|ebrief_.*)$/;
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",

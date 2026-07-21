@@ -12,13 +12,17 @@ export type DailyBar = {
   volume: number;
 };
 
-// 판정 시점에 아는 매크로 (간밤 미국장·전일 환율) — 표시용 + 10Y 게이트
+// 판정 시점에 아는 매크로 (간밤 미국장·전일 환율) — 표시용 + 게이트(10Y 급등·DXY 급등만 실측 통과)
 export type MacroSnap = {
   sox: number | null; // 간밤 SOX %
   fxLevel: number | null; // 환율 레벨
   fxChg: number | null; // 전일 환율 %
   y10: number | null; // 미 10Y 레벨
   y10Chg: number | null; // 전일 미 10Y 변화 %p
+  wti: number | null; // WTI 유가 레벨 (표시 전용 — 게이트 실측 기각: 종목 간 상반)
+  wtiChg: number | null; // 간밤 WTI %
+  dxy: number | null; // 달러인덱스 레벨
+  dxyChg: number | null; // 간밤 DXY % (게이트: ≥+0.8% 급등 시 감산)
 };
 
 export type DailyJudgment = {

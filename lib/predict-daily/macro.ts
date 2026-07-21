@@ -26,14 +26,21 @@ function lastTwoBefore(s: Series, kstDate: string): [number, number] | null {
 }
 
 export async function fetchMacroSnap(kstDate: string): Promise<MacroSnap> {
-  const [sox, fx, tnx] = await Promise.all([daySeries("^SOX"), daySeries("KRW=X"), daySeries("^TNX")]);
+  const [sox, fx, tnx, wti, dxy] = await Promise.all([
+    daySeries("^SOX"), daySeries("KRW=X"), daySeries("^TNX"), daySeries("CL=F"), daySeries("DX-Y.NYB"),
+  ]);
   const norm10y = (v: number) => (v > 20 ? v / 10 : v); // ^TNX 표기 편차 방어
   const s = lastTwoBefore(sox, kstDate), f = lastTwoBefore(fx, kstDate), t = lastTwoBefore(tnx, kstDate);
+  const w = lastTwoBefore(wti, kstDate), d = lastTwoBefore(dxy, kstDate);
   return {
     sox: s ? ((s[0] - s[1]) / s[1]) * 100 : null,
     fxLevel: f ? f[0] : null,
     fxChg: f ? ((f[0] - f[1]) / f[1]) * 100 : null,
     y10: t ? norm10y(t[0]) : null,
     y10Chg: t ? norm10y(t[0]) - norm10y(t[1]) : null,
+    wti: w ? w[0] : null,
+    wtiChg: w ? ((w[0] - w[1]) / w[1]) * 100 : null,
+    dxy: d ? d[0] : null,
+    dxyChg: d ? ((d[0] - d[1]) / d[1]) * 100 : null,
   };
 }

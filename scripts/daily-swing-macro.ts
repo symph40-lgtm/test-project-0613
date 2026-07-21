@@ -60,8 +60,11 @@ function simGate(
 }
 
 async function main() {
-  const [sox, fx, tnx] = await Promise.all([daySeries("^SOX", 4300), daySeries("KRW=X", 4300), daySeries("^TNX", 4300)]);
-  console.log(`매크로 이력: SOX ${sox.length}일(${sox[0]?.date}~), 환율 ${fx.length}일, 10Y ${tnx.length}일`);
+  const [sox, fx, tnx, wti, dxy] = await Promise.all([
+    daySeries("^SOX", 4300), daySeries("KRW=X", 4300), daySeries("^TNX", 4300),
+    daySeries("CL=F", 4300), daySeries("DX-Y.NYB", 4300),
+  ]);
+  console.log(`매크로 이력: SOX ${sox.length}일(${sox[0]?.date}~), 환율 ${fx.length}일, 10Y ${tnx.length}일, WTI ${wti.length}일, DXY ${dxy.length}일`);
   const norm10y = (v: number) => (v > 20 ? v / 10 : v);
   const macroAt = (kstDate: string): Macro => {
     const s = lastTwoBefore(sox, kstDate), f = lastTwoBefore(fx, kstDate), t = lastTwoBefore(tnx, kstDate);
@@ -99,6 +102,10 @@ async function main() {
       { name: "아침: 간밤SOX≤-3% → 시가이탈", me: (j) => j < n && m[j].sox !== null && m[j].sox! <= -3 },
       { name: "이벤트: NFP일(첫금) 마감 → 절반", cg: (i) => (isFirstFriday(bars[i].date) ? 0.5 : 1) },
       { name: "이벤트: NFP일(첫금) 마감 → 현금", cg: (i) => (isFirstFriday(bars[i].date) ? 0 : 1) },
+      { name: "마감: 유가급등≥+2% → 절반", cg: (i) => { const w = lastTwoBefore(wti, bars[i].date); return w && ((w[0] - w[1]) / w[1]) * 100 >= 2 ? 0.5 : 1; } },
+      { name: "마감: 유가급락≤-3% → 절반", cg: (i) => { const w = lastTwoBefore(wti, bars[i].date); return w && ((w[0] - w[1]) / w[1]) * 100 <= -3 ? 0.5 : 1; } },
+      { name: "마감: DXY급등≥+0.5% → 절반", cg: (i) => { const d = lastTwoBefore(dxy, bars[i].date); return d && ((d[0] - d[1]) / d[1]) * 100 >= 0.5 ? 0.5 : 1; } },
+      { name: "마감: DXY급등≥+0.8% → 절반", cg: (i) => { const d = lastTwoBefore(dxy, bars[i].date); return d && ((d[0] - d[1]) / d[1]) * 100 >= 0.8 ? 0.5 : 1; } },
     ];
 
     console.log(`\n■ ${sym}`);
