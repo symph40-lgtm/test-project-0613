@@ -2,8 +2,28 @@
 // 근거: docs/predict-daily-spec.md 5-3(확정 운영안 v0.2)·6장 실측.
 
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
-import { atr14, MODELS, supertrendUp } from "./models";
+import { atr14, ema, isoWeekKey, MODELS, sma, supertrendUp } from "./models";
 import type { DailyBar, DailyJudgment, MacroSnap, Stance } from "./types";
+
+// 중장기 투표 (와인스타인·골든크로스 50/200·엘더 조류 주봉EMA13) — 각 상승 +1/하락 −1, 합 −3~+3.
+// 미너비니 대비 바닥 재진입이 빠름(지연 19~22% vs 30~38%, 스펙 5-7) — 표기 + 재진입 가속에 사용.
+function midTermVote(bars: DailyBar[], i: number, weinstein: Stance): number {
+  const closes = bars.map((b) => b.close);
+  let v = weinstein === "long" ? 1 : weinstein === "short" ? -1 : 0;
+  const ma50 = sma(closes, 50)[i], ma200 = sma(closes, 200)[i];
+  if (ma50 !== null && ma200 !== null) v += ma50 > ma200 ? 1 : -1;
+  const weekKeys = bars.map((b) => isoWeekKey(b.date));
+  const wkClose: number[] = [];
+  const wkKey: string[] = [];
+  for (let j = 0; j < bars.length; j++) {
+    if (wkKey.length && wkKey[wkKey.length - 1] === weekKeys[j]) wkClose[wkClose.length - 1] = closes[j];
+    else { wkKey.push(weekKeys[j]); wkClose.push(closes[j]); }
+  }
+  const wkEma = ema(wkClose, 13);
+  const w = wkKey.lastIndexOf(weekKeys[i]);
+  if (w >= 2 && wkEma[w - 1] !== null && wkEma[w - 2] !== null) v += wkEma[w - 1]! > wkEma[w - 2]! ? 1 : -1;
+  return v;
+}
 
 // 매월 첫 금요일 = NFP 발표일 근사 (그날 밤 21:30 KST 발표 — 마감 판정에 감산)
 export function isFirstFriday(dateStr: string): boolean {
@@ -33,10 +53,14 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
   const votes = (["donchian", "wilder", "weinstein", "elder"] as const).reduce(
     (a, id) => a + (modelStances[id] === "long" ? 1 : modelStances[id] === "short" ? -1 : 0), 0);
 
-  // 5단계 사다리 (스펙 5-3 P4): 추가매수(1.0) / 기본(0.75) / 장기추세 생존 시 잔량(0.25) / 전량 현금(0)
+  // 사다리 v3 (스펙 5-4·5-7): 풀보유(1.0) / 재진입 가속(0.5 — 중장기 만장일치) / 완충(0.25) / 전량 현금(0)
+  const midVote = midTermVote(bars, i, modelStances["weinstein"]);
   let baseExposure = 0;
   if (stance === "long") baseExposure = votes >= CFG.ladder.strongVotes ? 1 : CFG.ladder.base;
-  else if (stance === "flat" && modelStances["weinstein"] === "long") baseExposure = CFG.ladder.weakHold;
+  else if (stance === "flat") {
+    if (midVote >= CFG.ladder.reentryVotes) baseExposure = CFG.ladder.reentry;
+    else if (modelStances["weinstein"] === "long") baseExposure = CFG.ladder.weakHold;
+  }
 
   let exposure = baseExposure;
   const gates: string[] = [];
@@ -76,6 +100,7 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
     modelStances,
     stUp,
     dd,
+    midVote,
   };
 }
 

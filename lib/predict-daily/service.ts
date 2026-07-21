@@ -59,9 +59,10 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
 }
 
-// 장세 표기 (사용자 지시 2026-07-22 "장세 판단 우선") — 수퍼트렌드 방향 + 52주 고점 대비 낙폭
+// 장세 표기 (사용자 지시 2026-07-22) — 단기(수퍼트렌드) + 중장기(3지표 투표) + 52주 고점 대비 낙폭
 function regimeLine(j: DailyJudgment): string {
-  return `장세 ${j.stUp ? "상승" : "하락"}(고점比${Math.round(j.dd * 100)}%).`;
+  const mid = j.midVote >= 1 ? "↑" : j.midVote <= -1 ? "↓" : "→";
+  return `장세 단기${j.stUp ? "↑" : "↓"}·중장기${mid}(${j.midVote >= 0 ? "+" : ""}${j.midVote})·고점比${Math.round(j.dd * 100)}%.`;
 }
 
 export async function runPredictDailyService(): Promise<Record<string, unknown>> {
