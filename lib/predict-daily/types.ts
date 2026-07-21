@@ -23,6 +23,8 @@ export type MacroSnap = {
   wtiChg: number | null; // 간밤 WTI %
   dxy: number | null; // 달러인덱스 레벨
   dxyChg: number | null; // 간밤 DXY % (게이트: ≥+0.8% 급등 시 감산)
+  newsRisk?: number | null; // 뉴스 위험도 0~10 (AI, 표시·라이브 채점 전용 — 게이트 아님)
+  newsNote?: string | null; // 핵심 위험 요인 한 줄
 };
 
 export type DailyJudgment = {

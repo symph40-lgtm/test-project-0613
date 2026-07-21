@@ -9,6 +9,7 @@ import { fetchDaily, kstNowDaily } from "./data";
 import { fetchRecentFlow, flowLine, type FlowDay } from "./flow";
 import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
+import { assessNewsRisk, type NewsRisk } from "./newsRisk";
 import { loadRecentDays, predictDailyTablesReady, upsertDay, updateLabels } from "./store";
 import type { DailyJudgment, MacroSnap, PredictDailyRow, Stance } from "./types";
 
@@ -26,6 +27,7 @@ function macroLine(m: MacroSnap | null): string {
   if (m.fxLevel != null) parts.push(`환율 ${Math.round(m.fxLevel)}`);
   if (m.dxy != null) parts.push(`DXY ${m.dxy.toFixed(1)}${m.dxyChg != null ? `(${m.dxyChg >= 0 ? "+" : ""}${m.dxyChg.toFixed(1)}%)` : ""}`);
   if (m.wti != null) parts.push(`WTI ${m.wti.toFixed(1)}${m.wtiChg != null ? `(${m.wtiChg >= 0 ? "+" : ""}${m.wtiChg.toFixed(1)}%)` : ""}`);
+  if (m.newsRisk != null) parts.push(`뉴스위험 ${m.newsRisk}/10${m.newsRisk >= 3 && m.newsNote ? `(${m.newsNote})` : ""}`);
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
@@ -58,6 +60,8 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
   const inJudgeWindow = now.weekday >= 1 && now.weekday <= 5 && now.minuteOfDay >= CFG.judgeWindow.from && now.minuteOfDay <= CFG.judgeWindow.to;
   const macro = await fetchMacroSnap(now.date).catch(() => null);
   const summary: Record<string, unknown> = { date: now.date, judged: [], after: [], scored: 0, backfilled: 0 };
+  let news: NewsRisk | null = null; // 뉴스 위험도 — 하루 1회 AI 호출 (당일 행에 캐시, 종목 간 공유)
+  let newsLoaded = false;
 
   for (const sym of CFG.symbols) {
     const bars = await fetchDaily(sym.code, CFG.daysFetch);
@@ -119,6 +123,13 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     if (inJudgeWindow && todayBar) {
     const jg = judgeDaily(bars, macro);
     const flow = await fetchRecentFlow(sym.code); // 확정치는 전일까지 — 표시·기록용 (게이트 아님)
+    if (!newsLoaded) {
+      const cached = have.get(now.date)?.macro;
+      if (cached?.newsRisk != null) news = { score: cached.newsRisk, note: cached.newsNote ?? "" };
+      else news = await assessNewsRisk();
+      newsLoaded = true;
+    }
+    const macro2 = macro ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null } : null;
     const existing = have.get(now.date) && have.get(now.date)!.source !== "backfill" ? have.get(now.date)! : null;
     // 직전 완결 거래일의 스탠스 (변경 감지 기준)
     const prevRow = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1)).pop() ?? null;
@@ -132,7 +143,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const row: PredictDailyRow & { judged_at: string } = {
       date: now.date, symbol: sym.code,
       stance: jg.stance, exposure: jg.exposure, base_exposure: jg.baseExposure,
-      model_stances: jg.modelStances, macro, flow: flow.length ? flow.slice(-5) : null, gates: jg.gates.length ? jg.gates : null,
+      model_stances: jg.modelStances, macro: macro2, flow: flow.length ? flow.slice(-5) : null, gates: jg.gates.length ? jg.gates : null,
       event: jg.gates.find((g) => g.startsWith("이벤트")) ?? null,
       stop_px: jg.stopPx, close_px: jg.closePx,
       revisions: existing
@@ -160,7 +171,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro, prevStance, flow) : holdText(sym.name, jg, macro, flow, since, streak),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevStance, flow) : holdText(sym.name, jg, macro2, flow, since, streak),
         smsSubject: "일봉 판정",
       });
     }
