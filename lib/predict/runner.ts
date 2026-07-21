@@ -8,6 +8,7 @@ import { runGrimes } from "./models/grimes";
 import { runUser } from "./models/user";
 import { runM7Proxy } from "./models/m7proxy";
 import { runFisherWide } from "./models/fisherWide";
+import { runFisherFast } from "./models/fisherFast";
 import type { DayInput, ModelOutput } from "./types";
 
 export function runAllModels(input: DayInput): ModelOutput[] {
@@ -15,5 +16,6 @@ export function runAllModels(input: DayInput): ModelOutput[] {
     runCrabel(input), runRaschke(input), runFisher(input),
     runDalton(input), runGrimes(input), runUser(input), runM7Proxy(input),
     runFisherWide(input), // 섀도 — 판정 무관, 채점만 (승격 기준: 라이브 1개월 본 피셔 우위)
+    runFisherFast(input), // 대조군 — 조기창 실적용 상수(0.05·4봉)의 전일창 성능 감시 (2026-07-21)
   ];
 }

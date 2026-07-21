@@ -15,8 +15,9 @@ import { loadMacroHistory } from "./macro";
 import { runAfterService } from "./after";
 import { runSectorService } from "./sector";
 import {
-  countAlertKey, hasJudgment, hasModelRows, listUnscoredDates, loadAccuracyStats, loadDayRow,
-  loadRecentDays, loadRescueStats, saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
+  countAlertKey, hasJudgment, hasModelRows, lastAlertDateLike, listUnscoredDates, loadAccuracyStats,
+  loadAfterPerf, loadDayRow, loadLiveModelPerf, loadRecentDays, loadRescueStats, loadSectorPerf,
+  saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
 import { MODEL_LABELS } from "./types";
 import type { PredictDailyBar, Verdict } from "./types";
@@ -118,9 +119,12 @@ async function checkpointStream(
       prevDayMinutes: null, // 스트림 단계는 달튼 VA 생략 (확정 모델 스냅샷에서 반영)
     };
     const outputs = runAllModels(input);
-    // 조기 구간(09:30~10:30 포함) 피셔는 인하 오프셋(0.10) 적용 — 사용자 승인 2026-07-20
+    // 조기 구간(09:30~10:30 포함) 피셔는 저문턱 상수(0.05·4봉) 적용 — 사용자 승인 2026-07-21
     if (cutHHMM >= cfg.earlyModelBefore && cutHHMM <= PREDICT_CONFIG.earlyOffsetUntil) {
-      const early = runFisher(input, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio });
+      const early = runFisher(input, {
+        offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
+        confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+      });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;
     }
@@ -387,6 +391,58 @@ export async function runPredictService(): Promise<PredictRunResult> {
         });
       }
     } catch { /* 통지 실패는 본 흐름 무관 */ }
+  }
+
+  // ⑤c 주기 성능 요약 문자 (사용자 지시 2026-07-21): 2~3일에 한 번, 모델·조건값 성능 피드백.
+  // 라이브 채점분(백테스트 시딩 제외) 방향적중 + 체크포인트 슬롯 실측(조기창 0.05·4봉 성과가
+  // 여기 쌓임) + 애프터·섹터 한 줄. 간격은 마지막 predict_perf_* 발송일로부터 2일(KST) 이상.
+  if (todayBar && minuteOfDay >= SCORE_MIN && PREDICT_CONFIG.sms.enabled) {
+    try {
+      const lastSent = await lastAlertDateLike("predict_perf_");
+      const daysSince = lastSent ? Math.round((Date.parse(today) - Date.parse(lastSent)) / 86400e3) : 99;
+      if (daysSince >= 2) {
+        const perf = await loadLiveModelPerf();
+        const fmt = (m: string) => {
+          const s = perf[m];
+          return s && s.dirT > 0 ? `${Math.round((s.dirC / s.dirT) * 100)}%(${s.dirC}/${s.dirT})` : "—";
+        };
+        const lines = [
+          `[예측 성능] 라이브 방향적중 ~${today.slice(5)}`,
+          `피셔 ${fmt("fisher")}·피셔F ${fmt("fisherf")}·피셔W ${fmt("fisherw")}`,
+          `M7 ${fmt("m7")}·크레 ${fmt("crabel")}·라쉬 ${fmt("raschke")}`,
+          `달튼 ${fmt("dalton")}·그라 ${fmt("grimes")}·사용자 ${fmt("user")}`,
+        ];
+        // 체크포인트 슬롯 실측 — 조기창 신규 상수의 실전 검증 지표
+        const slot = new Map<string, { c: number; t: number }>();
+        for (const d of await loadRecentDays(90)) {
+          if (!d.label || !d.revisions) continue;
+          for (const r of d.revisions) {
+            if (!r.checkpoint || r.verdict === "none") continue;
+            const s = slot.get(r.checkpoint) ?? { c: 0, t: 0 };
+            s.t++;
+            if (r.verdict === d.label) s.c++;
+            slot.set(r.checkpoint, s);
+          }
+        }
+        const sf = (cp: string) => {
+          const s = slot.get(cp);
+          return s && s.t > 0 ? `${cp} ${Math.round((s.c / s.t) * 100)}%(${s.t})` : `${cp} —`;
+        };
+        lines.push(`슬롯: ${["09:30", "10:30", "14:00"].map(sf).join("·")}`);
+        const [after, sector] = await Promise.all([loadAfterPerf(), loadSectorPerf()]);
+        const extra: string[] = [];
+        if (after && after.t > 0) extra.push(`애프터 ${Math.round((after.c / after.t) * 100)}%(${after.t})`);
+        if (sector && sector.t > 0) extra.push(`섹터 ${Math.round((sector.c / sector.t) * 100)}%(${sector.t})`);
+        if (extra.length) lines.push(extra.join("·"));
+        lines.push(`조기창 0.05·4봉 적용중(7/22~) — 09:30~10:30 슬롯이 실측`);
+        await dispatchToChannels("signal", today, {
+          key: `predict_perf_${today}`,
+          severity: "low",
+          text: lines.join("\n"),
+          smsSubject: "예측 성능",
+        });
+      }
+    } catch { /* 성능 문자 실패는 본 흐름 무관 */ }
   }
 
   // ⑥ 애프터장 판정·채점 (15:50~19:35 스트림 + 미채점 백필) — 실패해도 정규장 흐름 무관

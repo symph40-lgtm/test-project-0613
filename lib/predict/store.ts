@@ -249,6 +249,83 @@ export async function countAlertKey(key: string): Promise<number> {
   return data?.length ?? 0;
 }
 
+// ── 주기 성능 요약 문자용 (사용자 지시 2026-07-21: "2~3일에 한 번 모델·조건값 성능 피드백") ──
+
+// 라이브 채점분(source≠backtest) 모델별 성적 — 방향 판정 위주
+export async function loadLiveModelPerf(): Promise<Record<string, { t: number; c: number; dirT: number; dirC: number }>> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("predict_model_days")
+    .select("model, verdict, correct")
+    .not("correct", "is", null)
+    .neq("source", "backtest")
+    .limit(20000);
+  const out: Record<string, { t: number; c: number; dirT: number; dirC: number }> = {};
+  for (const r of data ?? []) {
+    const s = (out[String(r.model)] ??= { t: 0, c: 0, dirT: 0, dirC: 0 });
+    s.t++;
+    if (r.correct) s.c++;
+    if (r.verdict !== "none") {
+      s.dirT++;
+      if (r.correct) s.dirC++;
+    }
+  }
+  return out;
+}
+
+// 접두사로 시작하는 alertKey의 최근 발송 KST 날짜 — 주기 발송 간격 제어 (없으면 null)
+export async function lastAlertDateLike(prefix: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("alerts")
+    .select("created_at")
+    .like("message->>alertKey", `${prefix}%`)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (!data || data.length === 0) return null;
+  return new Date(new Date(String(data[0].created_at)).getTime() + 9 * 3600e3).toISOString().slice(0, 10);
+}
+
+// 애프터장 방향 판정 성적 (predict_after_days — 미적용/오류면 null)
+export async function loadAfterPerf(): Promise<{ t: number; c: number } | null> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("predict_after_days")
+      .select("final_verdict, label")
+      .not("label", "is", null)
+      .limit(2000);
+    if (error) return null;
+    let t = 0, c = 0;
+    for (const r of data ?? []) {
+      if (r.final_verdict === "none") continue;
+      t++;
+      if (r.final_verdict === r.label) c++;
+    }
+    return { t, c };
+  } catch { return null; }
+}
+
+// 섹터 트래킹 방향 판정 성적 합산 (predict_sector_days — 미적용/오류면 null)
+export async function loadSectorPerf(): Promise<{ t: number; c: number } | null> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("predict_sector_days")
+      .select("verdict, label")
+      .not("label", "is", null)
+      .limit(5000);
+    if (error) return null;
+    let t = 0, c = 0;
+    for (const r of data ?? []) {
+      if (r.verdict === "none") continue;
+      t++;
+      if (r.verdict === r.label) c++;
+    }
+    return { t, c };
+  } catch { return null; }
+}
+
 export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]> {
   if (dates.length === 0) return [];
   const admin = createAdminClient();

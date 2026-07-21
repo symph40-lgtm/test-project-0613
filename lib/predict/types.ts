@@ -3,7 +3,7 @@
 
 export type Verdict = "leverage" | "inverse" | "none";
 
-export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes", "user", "m7", "fisherw"] as const;
+export const MODEL_IDS = ["crabel", "raschke", "fisher", "dalton", "grimes", "user", "m7", "fisherw", "fisherf"] as const;
 export type ModelId = (typeof MODEL_IDS)[number];
 
 export const MODEL_LABELS: Record<ModelId, string> = {
@@ -15,6 +15,7 @@ export const MODEL_LABELS: Record<ModelId, string> = {
   user: "사용자 (RV1+T6)",
   m7: "M7근사 (축1×축2)",
   fisherw: "피셔W (광폭 0.25 섀도)",
+  fisherf: "피셔F (저문턱 0.05·4봉)",
 };
 
 // M7 근사 모델용 매크로 (전일·간밤 기준) — 없으면 해당 투표 생략
