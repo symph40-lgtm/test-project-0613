@@ -9,8 +9,12 @@ import { fetchDaily, kstNowDaily } from "./data";
 import { fetchRecentFlow, flowLine, type FlowDay } from "./flow";
 import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
+import { MODELS } from "./models";
 import { assessNewsRisk, type NewsRisk } from "./newsRisk";
 import { loadRecentDays, predictDailyTablesReady, upsertDay, updateLabels } from "./store";
+
+// 삼전 앵커 강등 매핑 (스펙 5-10): 앵커 100%→100 / 50%→25 / 25% 이하→0 — "좋으면 하닉 풀, 나쁘면 하닉부터"
+const demoteAnchor = (e: number) => (e >= 0.9 ? 1 : e >= 0.45 ? 0.25 : 0);
 import type { DailyJudgment, MacroSnap, PredictDailyRow, Stance } from "./types";
 
 function fmtPx(v: number): string {
@@ -75,6 +79,9 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
   const summary: Record<string, unknown> = { date: now.date, judged: [], after: [], scored: 0, backfilled: 0 };
   let news: NewsRisk | null = null; // 뉴스 위험도 — 하루 1회 AI 호출 (당일 행에 캐시, 종목 간 공유)
   let newsLoaded = false;
+  let anchorJg: DailyJudgment | null = null; // 삼전(앵커) 판정 — symbols 배열에서 삼전이 먼저 처리됨
+  let anchorAfterJg: DailyJudgment | null = null;
+  const perfTexts: string[] = []; // 주간 성능 문자 (금요일)
 
   for (const sym of CFG.symbols) {
     const bars = await fetchDaily(sym.code, CFG.daysFetch);
@@ -131,10 +138,49 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     }
     summary.scored = (summary.scored as number) + scored;
 
+    // 2-1. 주간 성능 집계 (금요일 15:40+) — 7모델 최근 60채점일 r3 적중, 판정자 우위 대조군 감지 (스펙 5-10)
+    if (now.weekday === CFG.perf.weekday && now.minuteOfDay >= CFG.perf.afterMin) {
+      const scoredRows = [...have.values()]
+        .filter((r) => r.label_r3 !== null && r.model_stances)
+        .sort((a, b) => (a.date < b.date ? -1 : 1))
+        .slice(-CFG.perf.lookback);
+      if (scoredRows.length >= 10) {
+        const accs: { id: string; acc: number; n: number }[] = [];
+        for (const m of MODELS) {
+          let ok = 0, tot = 0;
+          for (const r of scoredRows) {
+            const s = r.model_stances![m.id];
+            if (!s || s === "flat") continue;
+            tot++;
+            if (s === "long" ? r.label_r3! > 0 : r.label_r3! < 0) ok++;
+          }
+          if (tot > 0) accs.push({ id: m.id, acc: (100 * ok) / tot, n: tot });
+        }
+        const mine = accs.find((a) => a.id === "minervini");
+        const best = accs.filter((a) => a.id !== "minervini" && a.n >= CFG.perf.swapMinN).sort((a, b) => b.acc - a.acc)[0];
+        let line = `${sym.name} 미너비니 ${mine ? `${Math.round(mine.acc)}%(${mine.n})` : "—"}`;
+        if (best) line += `·최고 ${best.id} ${Math.round(best.acc)}%(${best.n})`;
+        if (mine && best && best.acc - mine.acc >= CFG.perf.swapLeadPp) line += ` ⚠교체검토`;
+        perfTexts.push(line);
+      }
+    }
+
     // 3. 오늘 마감 판정 (창 내 + 오늘 봉 존재 시)
     const todayBar = bars[bars.length - 1].date === now.date ? bars[bars.length - 1] : null;
     if (inJudgeWindow && todayBar) {
-    const jg = judgeDaily(bars, macro, { supertrendBrake: sym.supertrendBrake });
+    let jg = judgeDaily(bars, macro, { supertrendBrake: sym.supertrendBrake });
+    if (sym.anchorTo && anchorJg) {
+      // 삼전 앵커 모드: 비중은 삼전 판정 강등 파생, 자체 모델 스탠스는 기록·채점 유지(모니터링)
+      const exposure = demoteAnchor(anchorJg.exposure);
+      jg = {
+        ...jg,
+        exposure,
+        baseExposure: demoteAnchor(anchorJg.baseExposure),
+        gates: [`삼전앵커 ${Math.round(anchorJg.exposure * 100)}%→강등`, ...anchorJg.gates],
+        stopPx: exposure > 0 ? Math.floor((jg.closePx * (1 - jg.stopPct)) / 10) * 10 : null,
+      };
+    }
+    if (!sym.anchorTo) anchorJg = jg;
     const flow = await fetchRecentFlow(sym.code); // 확정치는 전일까지 — 표시·기록용 (게이트 아님)
     if (!newsLoaded) {
       const cached = have.get(now.date)?.macro;
@@ -201,13 +247,17 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       const after = await fetchAfterPrice(sym.code, now.date.replace(/-/g, ""), nowHHMMSS);
       if (after) {
         const adjusted = bars.slice(0, -1).concat([{ ...todayBar, close: after.px, high: Math.max(todayBar.high, after.px), low: Math.min(todayBar.low, after.px) }]);
-        const jgAfter = judgeDaily(adjusted, macro, { supertrendBrake: sym.supertrendBrake });
-        const stopHit = todayRow.stance === "long" && todayRow.stop_px !== null && after.px <= todayRow.stop_px;
-        const flipped = jgAfter.stance !== todayRow.stance;
+        let jgAfter = judgeDaily(adjusted, macro, { supertrendBrake: sym.supertrendBrake });
+        if (sym.anchorTo && anchorAfterJg) jgAfter = { ...jgAfter, exposure: demoteAnchor(anchorAfterJg.exposure) };
+        if (!sym.anchorTo) anchorAfterJg = jgAfter;
+        const stopHit = todayRow.exposure > 0 && todayRow.stop_px !== null && after.px <= todayRow.stop_px;
+        const flipped = sym.anchorTo ? tierOf(jgAfter.exposure) !== tierOf(todayRow.exposure) : jgAfter.stance !== todayRow.stance;
         (summary.after as unknown[]).push({ symbol: sym.code, px: after.px, at: after.time, stance: jgAfter.stance, flipped, stopHit });
         if (CFG.sms.enabled && (flipped || stopHit)) {
           const chgPct = ((after.px / todayBar.close - 1) * 100).toFixed(1);
-          const reason = stopHit ? "손절선 하회" : jgAfter.stance === "long" ? "추세 충족 전환" : "추세 이탈";
+          const reason = stopHit ? "손절선 하회"
+            : sym.anchorTo ? `삼전앵커 재판정→${actionLabel(jgAfter.stance, jgAfter.exposure)}`
+            : jgAfter.stance === "long" ? "추세 충족 전환" : "추세 이탈";
           const action = stopHit || (flipped && todayRow.stance === "long")
             ? "애프터장 마감 전 매도 권고"
             : flipped && jgAfter.stance === "long" ? "내일 갭 대비 애프터 매수 검토" : "관망";
@@ -227,6 +277,16 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
         }
       }
     }
+  }
+
+  // 주간 성능 문자 (금요일) — 교체는 자동이 아니라 권고: ⚠교체검토가 뜨면 사용자 승인 후 수동 전환
+  if (CFG.sms.enabled && perfTexts.length > 0) {
+    await dispatchToChannels("signal", now.date, {
+      key: `pdaily_perf_${now.date}`,
+      severity: "low",
+      text: `[일봉 성능] 최근 ${CFG.perf.lookback}채점일 r3 방향적중 — ${perfTexts.join(" | ")}. 판정 교체는 승인 후 반영`,
+      smsSubject: "일봉 성능",
+    });
   }
 
   return summary;

@@ -6,11 +6,18 @@ export const PREDICT_DAILY_CONFIG = {
   // 삼전: 5-6 실측 채택. 하닉: 5-9 재평가(2026-07-22 사용자 전제 "급등 사이클 재현 없음+위험 탈출 최우선")로
   // ON 전환 — 완만기(2018~23) 보험료 6년 -7~8%p·MDD 32→30·급락 방어 +3%p. ⚠급등 재개 시 비용 큼(-536%p/2.5년)
   // — 하닉 신고가+중장기 만장일치 지속 등 급등 재개 징후 확인 시 재검토할 것.
+  // anchorTo: 삼전 앵커 모드 (2026-07-22 사용자 확정, 스펙 5-10) — 하닉 비중을 삼전 판정에서 강등 파생
+  //   (삼전 100→하닉 100 / 50→25 / 25↓→0). 실측: 하닉 자체 신호 대비 전 구간 우위(완만기 +2→+44%,
+  //   급락기 -28→-9%). 하닉 자체 7모델은 계속 채점(모니터링·교체 후보 탐색용).
   symbols: [
-    { code: "005930", name: "삼전", supertrendBrake: true },
-    { code: "000660", name: "하닉", supertrendBrake: true },
+    { code: "005930", name: "삼전", supertrendBrake: true, anchorTo: null as string | null },
+    { code: "000660", name: "하닉", supertrendBrake: true, anchorTo: "005930" as string | null },
   ],
   brakeCap: 0.5,
+
+  // 주간 성능 문자·교체 권고 (금요일 15:40+): 최근 60채점일 r3 기준 — 대조군이 판정자를
+  // +10%p 이상(표본 20+) 상회하면 "교체 검토" 경고 동봉. 자동 교체 아님 — 사용자 승인 후 수동 교체.
+  perf: { weekday: 5, afterMin: 15 * 60 + 40, lookback: 60, swapLeadPp: 10, swapMinN: 20 },
 
   daysFetch: 420, // 웜업 272 + 백필·채점 여유
   warmup: 272, // 미너비니 252봉 + 200MA 기울기 20봉
