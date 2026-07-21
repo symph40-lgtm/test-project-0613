@@ -108,6 +108,30 @@ export function atr14(bars: DailyBar[]): (number | null)[] {
   return out;
 }
 
+// 수퍼트렌드(10,3) 상승/하락 — 장세 레이어용 ATR 추적선 (2026-07-22 레짐 연구로 편입, 스펙 5-6)
+export function supertrendUp(bars: DailyBar[]): boolean[] {
+  const n = bars.length;
+  const atr: (number | null)[] = new Array(n).fill(null);
+  let prev: number | null = null, sum = 0;
+  for (let i = 1; i < n; i++) {
+    const tr = Math.max(bars[i].high - bars[i].low, Math.abs(bars[i].high - bars[i - 1].close), Math.abs(bars[i].low - bars[i - 1].close));
+    if (prev === null) { sum += tr; if (i === 10) { prev = sum / 10; atr[i] = prev; } }
+    else { prev = (prev * 9 + tr) / 10; atr[i] = prev; }
+  }
+  const out: boolean[] = new Array(n).fill(true);
+  let fu = NaN, fl = NaN, up = true;
+  for (let i = 11; i < n; i++) {
+    const mid = (bars[i].high + bars[i].low) / 2;
+    const bu = mid + 3 * atr[i]!, bl = mid - 3 * atr[i]!;
+    fu = isNaN(fu) || bu < fu || bars[i - 1].close > fu ? bu : fu;
+    fl = isNaN(fl) || bl > fl || bars[i - 1].close < fl ? bl : fl;
+    if (up && bars[i].close < fl) up = false;
+    else if (!up && bars[i].close > fu) up = true;
+    out[i] = up;
+  }
+  return out;
+}
+
 // ISO 주차 키 (엘더 주봉 리샘플)
 export function isoWeekKey(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z");

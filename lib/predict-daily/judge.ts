@@ -2,7 +2,7 @@
 // 근거: docs/predict-daily-spec.md 5-3(확정 운영안 v0.2)·6장 실측.
 
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
-import { atr14, MODELS } from "./models";
+import { atr14, MODELS, supertrendUp } from "./models";
 import type { DailyBar, DailyJudgment, MacroSnap, Stance } from "./types";
 
 // 매월 첫 금요일 = NFP 발표일 근사 (그날 밤 21:30 KST 발표 — 마감 판정에 감산)
@@ -19,10 +19,15 @@ export function todayEvent(dateStr: string): string | null {
 }
 
 // bars의 마지막 봉 시점 기준 판정. macro는 null이면 게이트 생략(수집 실패 폴백).
-export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudgment {
+// opts.supertrendBrake: 수퍼트렌드 하락 시 비중 상한 50% (삼전 전용 — config.symbols 참조)
+export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { supertrendBrake?: boolean }): DailyJudgment {
   const i = bars.length - 1;
   const modelStances: Record<string, Stance> = {};
   for (const m of MODELS) modelStances[m.id] = m.run(bars)[i];
+  const stUp = supertrendUp(bars)[i];
+  let hi52 = -Infinity;
+  for (let j = Math.max(0, i - 251); j <= i; j++) hi52 = Math.max(hi52, bars[j].close);
+  const dd = bars[i].close / hi52 - 1;
 
   const stance = modelStances["minervini"];
   const votes = (["donchian", "wilder", "weinstein", "elder"] as const).reduce(
@@ -35,6 +40,10 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudg
 
   let exposure = baseExposure;
   const gates: string[] = [];
+  if (opts?.supertrendBrake && !stUp && exposure > CFG.brakeCap) {
+    exposure = CFG.brakeCap;
+    gates.push("수퍼트렌드 하락 브레이크");
+  }
   if (exposure > 0 && macro?.y10Chg != null && macro.y10Chg >= CFG.macroGate.y10SpikePp) {
     exposure *= CFG.macroGate.factor;
     gates.push(`10Y급등(+${macro.y10Chg.toFixed(2)}%p)`);
@@ -65,10 +74,12 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null): DailyJudg
     stopPct,
     closePx,
     modelStances,
+    stUp,
+    dd,
   };
 }
 
 // 과거 구간 백필용 — j 인덱스까지 자른 시계열로 당시 판정 재현 (매크로 게이트만 소급 생략 — 이벤트는 결정론적이라 적용됨)
-export function judgeAt(bars: DailyBar[], j: number): DailyJudgment {
-  return judgeDaily(bars.slice(0, j + 1), null);
+export function judgeAt(bars: DailyBar[], j: number, opts?: { supertrendBrake?: boolean }): DailyJudgment {
+  return judgeDaily(bars.slice(0, j + 1), null, opts);
 }

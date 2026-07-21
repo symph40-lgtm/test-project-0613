@@ -43,7 +43,7 @@ function macroLine(m: MacroSnap | null): string {
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
 function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${macroLine(macro)}${flowLine(flow)}`;
 }
 
 function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[]): string {
@@ -56,7 +56,12 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   else why.push("하락 추세");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}.${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+}
+
+// 장세 표기 (사용자 지시 2026-07-22 "장세 판단 우선") — 수퍼트렌드 방향 + 52주 고점 대비 낙폭
+function regimeLine(j: DailyJudgment): string {
+  return `장세 ${j.stUp ? "상승" : "하락"}(고점比${Math.round(j.dd * 100)}%).`;
 }
 
 export async function runPredictDailyService(): Promise<Record<string, unknown>> {
@@ -85,7 +90,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const lastCompleted = bars.length - (isClosed(bars[bars.length - 1].date) ? 1 : 2);
     for (let j = Math.max(CFG.warmup, lastCompleted - CFG.backfillDays + 1); j <= lastCompleted; j++) {
       if (have.has(bars[j].date)) continue;
-      const jg = judgeAt(bars, j);
+      const jg = judgeAt(bars, j, { supertrendBrake: sym.supertrendBrake });
       const row: PredictDailyRow = {
         date: bars[j].date, symbol: sym.code,
         stance: jg.stance, exposure: jg.exposure, base_exposure: jg.baseExposure,
@@ -127,7 +132,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     // 3. 오늘 마감 판정 (창 내 + 오늘 봉 존재 시)
     const todayBar = bars[bars.length - 1].date === now.date ? bars[bars.length - 1] : null;
     if (inJudgeWindow && todayBar) {
-    const jg = judgeDaily(bars, macro);
+    const jg = judgeDaily(bars, macro, { supertrendBrake: sym.supertrendBrake });
     const flow = await fetchRecentFlow(sym.code); // 확정치는 전일까지 — 표시·기록용 (게이트 아님)
     if (!newsLoaded) {
       const cached = have.get(now.date)?.macro;
@@ -194,7 +199,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       const after = await fetchAfterPrice(sym.code, now.date.replace(/-/g, ""), nowHHMMSS);
       if (after) {
         const adjusted = bars.slice(0, -1).concat([{ ...todayBar, close: after.px, high: Math.max(todayBar.high, after.px), low: Math.min(todayBar.low, after.px) }]);
-        const jgAfter = judgeDaily(adjusted, macro);
+        const jgAfter = judgeDaily(adjusted, macro, { supertrendBrake: sym.supertrendBrake });
         const stopHit = todayRow.stance === "long" && todayRow.stop_px !== null && after.px <= todayRow.stop_px;
         const flipped = jgAfter.stance !== todayRow.stance;
         (summary.after as unknown[]).push({ symbol: sym.code, px: after.px, at: after.time, stance: jgAfter.stance, flipped, stopHit });

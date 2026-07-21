@@ -2,10 +2,13 @@
 // 모든 상수는 10.5년 백테스트(scripts/daily-swing-*.ts) 근거 — 변경 시 반드시 재검증.
 
 export const PREDICT_DAILY_CONFIG = {
+  // supertrendBrake: 수퍼트렌드(10,3) 하락 시 비중 상한 50% — 삼전만 (실측: 삼전 급락월 -23.7→-12.5%·
+  // MDD 27→23·10.5년 비용 연 -0.8%p 소액 / 하닉은 전 브레이크가 수익 -200~-540%p 훼손으로 기각, 스펙 5-6)
   symbols: [
-    { code: "005930", name: "삼전" },
-    { code: "000660", name: "하닉" },
+    { code: "005930", name: "삼전", supertrendBrake: true },
+    { code: "000660", name: "하닉", supertrendBrake: false },
   ],
+  brakeCap: 0.5,
 
   daysFetch: 420, // 웜업 272 + 백필·채점 여유
   warmup: 272, // 미너비니 252봉 + 200MA 기울기 20봉

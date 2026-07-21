@@ -37,6 +37,8 @@ export type DailyJudgment = {
   stopPct: number; // 변동성 연동 손절폭 (2.5×ATR, 6~12% 클램프)
   closePx: number;
   modelStances: Record<string, Stance>; // 7모델 스냅샷
+  stUp: boolean; // 수퍼트렌드(10,3) 상승 여부 — 장세 표기·삼전 브레이크
+  dd: number; // 52주 고점 대비 낙폭 (음수, 장세 표기)
 };
 
 export type PredictDailyRow = {
