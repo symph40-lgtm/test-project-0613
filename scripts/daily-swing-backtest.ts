@@ -226,6 +226,40 @@ function runMinervini(bars: PredictDailyBar[]): Stance[] {
   });
 }
 
+// 니슨 캔들 패턴 (7번째, 2026-07 사용자 질문 "일봉 모양도 참고하나"로 편입 검증):
+// 망치형(하락 후 긴 아랫꼬리)·유성형(상승 후 긴 윗꼬리)·상승/하락 장악형. 신호 후 3일 보유.
+function runNison(bars: PredictDailyBar[]): Stance[] {
+  const n = bars.length;
+  const closes = bars.map((b) => b.close);
+  const e20 = ema(closes, 20);
+  const st: Stance[] = new Array(n).fill("flat");
+  let pos: Stance = "flat";
+  let hold = 0;
+  for (let i = 25; i < n; i++) {
+    const b = bars[i], p = bars[i - 1];
+    const range = b.high - b.low;
+    if (pos !== "flat") {
+      hold++;
+      if (hold >= 3) { pos = "flat"; hold = 0; }
+    }
+    if (range > 0 && e20[i] !== null) {
+      const body = Math.abs(b.close - b.open);
+      const upW = b.high - Math.max(b.open, b.close);
+      const lowW = Math.min(b.open, b.close) - b.low;
+      const afterDecline = b.close < e20[i]!; // 하락 국면
+      const afterRise = b.close > e20[i]!;
+      const hammer = afterDecline && lowW >= 2 * body && upW <= body; // 망치형
+      const shootingStar = afterRise && upW >= 2 * body && lowW <= body; // 유성형
+      const bullEngulf = afterDecline && p.close < p.open && b.close > b.open && b.open <= p.close && b.close >= p.open; // 상승장악형
+      const bearEngulf = afterRise && p.close > p.open && b.close < b.open && b.open >= p.close && b.close <= p.open; // 하락장악형
+      if (hammer || bullEngulf) { pos = "long"; hold = 0; }
+      else if (shootingStar || bearEngulf) { pos = "short"; hold = 0; }
+    }
+    st[i] = pos;
+  }
+  return st;
+}
+
 const MODELS: { id: string; label: string; run: (bars: PredictDailyBar[]) => Stance[] }[] = [
   { id: "donchian", label: "돈치안·터틀 (20/10 채널)", run: runDonchian },
   { id: "wilder", label: "와일더 (DMI/ADX)", run: runWilder },
@@ -233,6 +267,7 @@ const MODELS: { id: string; label: string; run: (bars: PredictDailyBar[]) => Sta
   { id: "elder", label: "엘더 (삼중창+임펄스)", run: runElder },
   { id: "raschke", label: "라쉬케 (Holy Grail)", run: runRaschke },
   { id: "minervini", label: "미너비니 (추세 템플릿)", run: runMinervini },
+  { id: "nison", label: "니슨 (캔들 패턴)", run: runNison },
 ];
 
 // ── 채점 ─────────────────────────────────────────────────────────────
@@ -393,6 +428,63 @@ async function main() {
         const d = dist[m];
         const f = (x: number, tot: number) => (tot > 0 ? `${((100 * x) / tot).toFixed(0)}%` : "—");
         console.log(`     ${MODELS[m].label.padEnd(24)} 급락: ${f(d.dn.short, dnN)}/${f(d.dn.flat, dnN)}/${f(d.dn.long, dnN)}  |  급등: ${f(d.up.long, upN)}/${f(d.up.flat, upN)}/${f(d.up.short, upN)}`);
+      }
+    }
+
+    // ── 급락 후 대응 — "첫날은 놓쳐도 다음날·다다음날은 맞추는가" (사용자 질문 2026-07)
+    // 급락일 t: 당일 수익 ≤ -2σ (σ는 전일 기준 — 급락 자체로 σ가 부풀지 않게). 채점:
+    //   당일 종가 판정 stance[t] → r1(t→t+1)·r3(t→t+3), 익일 종가 판정 stance[t+1] → r3(t+1→t+4)
+    for (const period of [{ name: "전체", from: first }, { name: "최근 3년", from: Math.max(first, last - 750) }]) {
+      const crashes: number[] = [];
+      for (let i = Math.max(period.from, 23); i <= last - 1; i++) {
+        if (vol20[i - 1] !== null && rets[i] <= -2 * vol20[i - 1]!) crashes.push(i);
+      }
+      if (crashes.length === 0) continue;
+      let reb1 = 0, reb3 = 0, tailN = 0, tailReb = 0, noTailN = 0, noTailReb = 0;
+      for (const t of crashes) {
+        const r1n = bars[t + 1].close / bars[t].close - 1;
+        const r3n = bars[t + 3].close / bars[t].close - 1;
+        if (r1n > 0) reb1++;
+        if (r3n > 0) reb3++;
+        const b = bars[t], range = b.high - b.low;
+        const lowW = range > 0 ? (Math.min(b.open, b.close) - b.low) / range : 0;
+        if (lowW >= 0.35) { tailN++; if (r3n > 0) tailReb++; } // 아랫꼬리가 레인지 35%+ = 하단 매수 방어 흔적
+        else { noTailN++; if (r3n > 0) noTailReb++; }
+      }
+      const fp = (a: number, b: number) => (b > 0 ? `${((100 * a) / b).toFixed(0)}%` : "—");
+      console.log(`\n── 급락 후 대응 [${period.name}] — 급락일(≤-2σ) ${crashes.length}일 · 익일 반등 ${fp(reb1, crashes.length)} · 3일 후 상승 ${fp(reb3, crashes.length)}`);
+      console.log(`   급락일 캔들 아랫꼬리(레인지 35%+) ${tailN}일 → 3일 상승 ${fp(tailReb, tailN)}  |  꼬리 미미 ${noTailN}일 → ${fp(noTailReb, noTailN)}`);
+      console.log(`   모델                          당일종가 스탠스(S/F/L)   r1적중   r3적중   | 익일종가 스탠스(S/F/L)   r3적중`);
+      for (let m = 0; m < MODELS.length; m++) {
+        const c0: Record<Stance, number> = { long: 0, short: 0, flat: 0 };
+        const c1: Record<Stance, number> = { long: 0, short: 0, flat: 0 };
+        let h1 = 0, t1 = 0, h3 = 0, t3 = 0, h3b = 0, t3b = 0;
+        for (const t of crashes) {
+          const s0 = stances[m][t];
+          c0[s0]++;
+          if (s0 !== "flat") {
+            const want = s0 === "long" ? 1 : -1;
+            const r1n = bars[t + 1].close / bars[t].close - 1;
+            const r3n = bars[t + 3].close / bars[t].close - 1;
+            if (r1n !== 0) { t1++; if (Math.sign(r1n) === want) h1++; }
+            if (r3n !== 0) { t3++; if (Math.sign(r3n) === want) h3++; }
+          }
+          if (t + 4 <= n - 1) {
+            const s1 = stances[m][t + 1];
+            c1[s1]++;
+            if (s1 !== "flat") {
+              const want = s1 === "long" ? 1 : -1;
+              const r3n = bars[t + 4].close / bars[t + 1].close - 1;
+              if (r3n !== 0) { t3b++; if (Math.sign(r3n) === want) h3b++; }
+            }
+          }
+        }
+        const N = crashes.length;
+        console.log(
+          `   ${MODELS[m].label.padEnd(24)} ${fp(c0.short, N)}/${fp(c0.flat, N)}/${fp(c0.long, N)}`.padEnd(52) +
+          ` ${fp(h1, t1).padStart(5)}(${t1})  ${fp(h3, t3).padStart(5)}(${t3})  | ${fp(c1.short, N)}/${fp(c1.flat, N)}/${fp(c1.long, N)}`.padEnd(40) +
+          `  ${fp(h3b, t3b).padStart(5)}(${t3b})`
+        );
       }
     }
 
