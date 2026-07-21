@@ -64,7 +64,7 @@ async function minutesCached(code: string, date: string, kind: "KRX" | "NX"): Pr
 // ── 피셔 상태기계 스트리밍 — 상태 전이 타임라인 (전이 시각 = 봉 완성 컷 = 봉시각+1분)
 type FState = "none" | "up" | "down";
 type Transition = { cut: string; state: FState; px: number };
-function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, confirm: number, reversal: number): Transition[] {
+function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, confirm: number, reversal: number, strongWon?: number): Transition[] {
   if (bars.length < orMinutes + 1) return [];
   const or = bars.slice(0, orMinutes);
   const aUp = Math.max(...or.map((b) => b.high)) + offsetWon;
@@ -74,6 +74,11 @@ function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, c
   for (const b of bars.slice(orMinutes)) {
     upRun = b.close > aUp ? upRun + 1 : 0;
     downRun = b.close < aDown ? downRun + 1 : 0;
+    // 강돌파 오버라이드: A선을 strongWon 이상 크게 돌파한 종가는 확인봉을 즉시 충족 처리
+    if (strongWon !== undefined) {
+      if (b.close > aUp + strongWon) upRun = Math.max(upRun, confirm, reversal);
+      if (b.close < aDown - strongWon) downRun = Math.max(downRun, confirm, reversal);
+    }
     let next: FState = state;
     if (state === "none") {
       if (upRun >= confirm) next = "up";
@@ -92,12 +97,12 @@ const stateAt = (tl: Transition[], cut: string): Transition | null => {
 
 // ── 하루 시뮬레이션 — 라이브 이중창 구조. 반환: 첫 방향 확인(컷·방향·가격) + 이후 뒤집힘 수
 type DaySim = { confirmCut: string; dir: "up" | "down"; entryPx: number; flips: number } | null;
-type SimCfg = { earlyRatio: number; confirm: number; lateRatio?: number; lateConfirm?: number; reversal?: number; noPreWindow?: boolean };
+type SimCfg = { earlyRatio: number; confirm: number; lateRatio?: number; lateConfirm?: number; reversal?: number; noPreWindow?: boolean; strongRatio?: number };
 function simulateDay(pre: MinuteBar[] | null, krx: MinuteBar[], range10: number, cfg: SimCfg): DaySim {
   const rev = cfg.reversal ?? 5;
   const lateRatio = cfg.lateRatio ?? 0.15, lateConfirm = cfg.lateConfirm ?? 8;
   const winA = cfg.noPreWindow ? krx : [...(pre ?? []), ...krx]; // 10:30 이전 컷용 (라이브: NXT 08:00 시작)
-  const tlA = fisherStream(winA, 15, cfg.earlyRatio * range10, cfg.confirm, rev);
+  const tlA = fisherStream(winA, 15, cfg.earlyRatio * range10, cfg.confirm, rev, cfg.strongRatio !== undefined ? cfg.strongRatio * range10 : undefined);
   const tlB = fisherStream(krx, 15, lateRatio * range10, lateConfirm, rev);
   // 유효 판정 타임라인: 컷 09:30~10:30 → A창, 10:31~14:00 → B창
   const effAt = (cut: string) => (cut <= "10:30" ? stateAt(tlA, cut) : stateAt(tlB, cut));
@@ -325,6 +330,44 @@ async function main() {
     if (s) { cN++; cCuts.push(s.confirmCut); if ((s.dir === "up" ? "leverage" : "inverse") === d.label) cHit++; }
   }
   console.log(`      (대조) 본주 09시창: 신호 ${cN}회·방향적중 ${cN ? ((cHit / cN) * 100).toFixed(0) : "—"}%·중앙확인 ${medianCut(cCuts)} — ETF와의 차이 중 '창 차이' 성분 분리용`);
+
+  // ══ ⑤ 강돌파 즉시확인 스윕 (2026-07-22 사용자 제안) — A선을 margin×10일평균폭 이상 크게
+  // 돌파한 종가는 확인봉(4봉) 즉시 충족. 조기창(0.05·4봉) 위에 얹어 임계값별 성능 비교.
+  console.log("\n══ ⑤ 강돌파 즉시확인 스윕 (조기창 0.05·4봉 + 강돌파 margin×range10) ══");
+  const margins: (number | undefined)[] = [undefined, 0.05, 0.1, 0.15, 0.2, 0.3];
+  for (const p of periods) {
+    const set = days.filter((d) => d.date >= p.from && d.date <= TODAY);
+    console.log(`\n── ${p.name}: ${set.length}일 ──`);
+    console.log("강돌파margin | 신호  | 방향적중 | 중앙확인  | ≤09:35 | 누적(-1.5%) | 컷수(노이즈)");
+    for (const m of margins) {
+      let n = 0, hit = 0, cuts: string[] = [], early = 0, cumStop = 0, stops = 0, noise = 0;
+      for (const d of set) {
+        const s = simulateDay(d.pre, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: m });
+        if (!s) continue;
+        n++;
+        const verdict: Verdict = s.dir === "up" ? "leverage" : "inverse";
+        if (verdict === d.label) hit++;
+        cuts.push(s.confirmCut);
+        if (s.confirmCut <= "09:35") early++;
+        const sign = s.dir === "up" ? 1 : -1;
+        const raw = ((d.close - s.entryPx) / s.entryPx) * 100 * sign;
+        const st = stopHit(d.krx, s.confirmCut, s.dir, s.entryPx, 1.5);
+        if (st) { cumStop += -1.5; stops++; if (verdict === d.label) noise++; }
+        else cumStop += raw;
+      }
+      const lbl = m === undefined ? "없음(현행)  " : `${m.toFixed(2)}×r10   `;
+      console.log(`${lbl} | ${String(n).padStart(3)}회 | ${n ? ((hit / n) * 100).toFixed(1).padStart(5) : "  —"}% | ${medianCut(cuts)}   | ${String(early).padStart(3)}회 | ${cumStop >= 0 ? "+" : ""}${cumStop.toFixed(1).padStart(6)}%p | ${stops}(${noise})`);
+    }
+  }
+  // 어제(7/21) 개별 확인 — 강돌파 임계별 확인 시각
+  const t2 = days.find((d) => d.date === TODAY);
+  if (t2) {
+    console.log(`\n7/21 강돌파 임계별 첫 확인:`);
+    for (const m of margins) {
+      const s = simulateDay(t2.pre, t2.krx, t2.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: m });
+      console.log(`  margin ${m === undefined ? "없음" : m.toFixed(2)}: ${s ? `${s.confirmCut} ${s.dir === "up" ? "레버" : "인버"} @${s.entryPx}` : "미확인"}`);
+    }
+  }
 }
 
 main().catch((e) => { console.error("분석 실패:", e); process.exit(1); });

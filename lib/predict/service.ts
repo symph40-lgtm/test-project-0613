@@ -124,6 +124,7 @@ async function checkpointStream(
       const early = runFisher(input, {
         offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
         confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+        strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, // 강돌파 즉시확인 (2026-07-22)
       });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;

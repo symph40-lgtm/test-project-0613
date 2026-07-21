@@ -22,6 +22,11 @@ export const PREDICT_CONFIG = {
   // 계속 감시, 주기 성능 문자(predict_perf)로 피드백. 열화 시 0.10·8봉 복귀.
   earlyOffsetRatio: 0.05,
   earlyConfirmMinutes: 4, // 조기창 A 확인 연속봉 (기본 8 → 4)
+  // 강돌파 즉시확인 (사용자 제안 2026-07-22): A선을 0.10×10일평균폭 이상 크게 돌파한 종가는
+  // 확인봉 없이 즉시 판정 — "움직임이 강하면 성능이 좀 떨어져도 빨리". 스윕: 220일 +74.8→+84.6%p·
+  // 노이즈컷 20→18, 전쟁후·레버후 중립(손해 없음). 0.05는 과민(악화)이라 기각. 스파이크형
+  // 급등락에만 작동 — 7/21 같은 계단식 상승은 확인봉 경로(09:46) 그대로.
+  earlyStrongBreakRatio: 0.1,
   earlyOffsetUntil: "10:30", // 이 체크포인트까지(포함) 적용
   // 판정 변경 문자 — dispatch 공용 경로 (일시정지·조용일 정책 자동 적용).
   // ruleReminder: 실투자 초기 규칙 환기 문구 동봉 (사용자 지정 2026-07-17 "당분간" — 몸에 배면 false로)
@@ -116,6 +121,7 @@ export const PREDICT_CONFIG = {
     confirmMinutes: 8, // A 확인: OR의 절반
     reversalMinutes: 5, // C 철회
     earlyConfirmBy: "09:45",
+    strongBreakRatio: 0, // 강돌파 즉시확인 — 기본 비활성 (조기창만 earlyStrongBreakRatio로 활성)
   },
   dalton: {
     vaBinWon: 500, // 하닉 호가 단위

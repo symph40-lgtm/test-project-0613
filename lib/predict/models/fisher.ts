@@ -12,6 +12,9 @@ export type FisherCfg = {
   confirmMinutes?: number;
   reversalMinutes?: number;
   earlyConfirmBy?: string;
+  // 강돌파 즉시확인 (2026-07-22 사용자 제안): A선을 이 비율×10일평균폭 이상 크게 돌파한 종가는
+  // 확인봉을 즉시 충족 처리. 0 = 비활성. 검증: 0.10에서 220일 +74.8→+84.6%p·최근 구간 중립.
+  strongBreakRatio?: number;
 };
 
 export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
@@ -38,6 +41,11 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   for (const b of rest) {
     upRun = b.close > aUp ? upRun + 1 : 0;
     downRun = b.close < aDown ? downRun + 1 : 0;
+    if (cfg.strongBreakRatio > 0) {
+      const sm = cfg.strongBreakRatio * range10;
+      if (b.close > aUp + sm) upRun = Math.max(upRun, cfg.confirmMinutes, cfg.reversalMinutes);
+      if (b.close < aDown - sm) downRun = Math.max(downRun, cfg.confirmMinutes, cfg.reversalMinutes);
+    }
     if (state === "none") {
       if (upRun >= cfg.confirmMinutes) (state = "up"), (confirmedAt = b.time);
       else if (downRun >= cfg.confirmMinutes) (state = "down"), (confirmedAt = b.time);

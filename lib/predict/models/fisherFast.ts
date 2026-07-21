@@ -9,6 +9,7 @@ import { runFisher } from "./fisher";
 import type { DayInput, ModelOutput } from "../types";
 
 export function runFisherFast(input: DayInput): ModelOutput {
-  const out = runFisher(input, { offsetRangeRatio: 0.05, confirmMinutes: 4 });
+  // 조기창 실적용 상수와 동일 세트 유지 (0.05·4봉 + 강돌파 0.10 — 2026-07-22)
+  const out = runFisher(input, { offsetRangeRatio: 0.05, confirmMinutes: 4, strongBreakRatio: 0.1 });
   return { ...out, model: "fisherf" };
 }
