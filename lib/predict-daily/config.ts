@@ -2,11 +2,13 @@
 // 모든 상수는 10.5년 백테스트(scripts/daily-swing-*.ts) 근거 — 변경 시 반드시 재검증.
 
 export const PREDICT_DAILY_CONFIG = {
-  // supertrendBrake: 수퍼트렌드(10,3) 하락 시 비중 상한 50% — 삼전만 (실측: 삼전 급락월 -23.7→-12.5%·
-  // MDD 27→23·10.5년 비용 연 -0.8%p 소액 / 하닉은 전 브레이크가 수익 -200~-540%p 훼손으로 기각, 스펙 5-6)
+  // supertrendBrake: 수퍼트렌드(10,3) 하락 시 비중 상한 50%.
+  // 삼전: 5-6 실측 채택. 하닉: 5-9 재평가(2026-07-22 사용자 전제 "급등 사이클 재현 없음+위험 탈출 최우선")로
+  // ON 전환 — 완만기(2018~23) 보험료 6년 -7~8%p·MDD 32→30·급락 방어 +3%p. ⚠급등 재개 시 비용 큼(-536%p/2.5년)
+  // — 하닉 신고가+중장기 만장일치 지속 등 급등 재개 징후 확인 시 재검토할 것.
   symbols: [
     { code: "005930", name: "삼전", supertrendBrake: true },
-    { code: "000660", name: "하닉", supertrendBrake: false },
+    { code: "000660", name: "하닉", supertrendBrake: true },
   ],
   brakeCap: 0.5,
 
