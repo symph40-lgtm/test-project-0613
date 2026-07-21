@@ -311,10 +311,11 @@ export async function runPredictService(): Promise<PredictRunResult> {
   }
 
   // ③c 15:10 당일청산 매도 문자 (ops 지시 2026-07-21: "월~금 15:10 레버리지 매도 문자").
-  // 창 15:05~15:28에 들어온 호출에서 1회 발송 (14:30 Vercel 크론이 Hobby 지연 +34~54분으로
-  // 15:04~15:24에 도착 — 이 창이 주 운반체. 정시성 보강은 cron-job.org 15:08 KST 잡 권장).
+  // 창 15:09~15:28에 들어온 호출에서 1회 발송 — 장중 ~2분 간격 외부 호출(7/21 revisions 실측:
+  // 체크포인트가 매시 :02에 기록)이 주 운반체라 실발송 ≈15:09~15:11. 백업: 14:30 Vercel 크론
+  // (Hobby 지연 +34~54분 → 15:04~15:24 도착분 중 15:09 이후 것).
   // 당일 판정 스트림에 방향이 한 번이라도 있었던 날만 발송 — 무추세일은 보유가 없어 소음.
-  if (todayBar && minuteOfDay >= 15 * 60 + 5 && minuteOfDay <= 15 * 60 + 28) {
+  if (todayBar && minuteOfDay >= 15 * 60 + 9 && minuteOfDay <= 15 * 60 + 28) {
     try {
       const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
       const row = dow >= 1 && dow <= 5 ? await loadDayRow(today) : null;
