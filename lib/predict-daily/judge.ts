@@ -48,6 +48,15 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
   let hi52 = -Infinity;
   for (let j = Math.max(0, i - 251); j <= i; j++) hi52 = Math.max(hi52, bars[j].close);
   const dd = bars[i].close / hi52 - 1;
+  // 60일 추세 t-통계 (수익률 신호대잡음 × √60) — |t|<1 = 변동장 (스펙 5-8: 5기법 중 변동 재현 최고 67~69%)
+  let trendT = 0;
+  if (i >= 60) {
+    const rs: number[] = [];
+    for (let j = i - 59; j <= i; j++) rs.push(bars[j].close / bars[j - 1].close - 1);
+    const mean = rs.reduce((a, b) => a + b, 0) / rs.length;
+    const sd = Math.sqrt(rs.reduce((s, v) => s + (v - mean) * (v - mean), 0) / rs.length);
+    trendT = sd > 0 ? (mean / sd) * Math.sqrt(rs.length) : 0;
+  }
 
   const stance = modelStances["minervini"];
   const votes = (["donchian", "wilder", "weinstein", "elder"] as const).reduce(
@@ -101,6 +110,7 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
     stUp,
     dd,
     midVote,
+    trendT,
   };
 }
 

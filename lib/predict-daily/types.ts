@@ -40,6 +40,7 @@ export type DailyJudgment = {
   stUp: boolean; // 수퍼트렌드(10,3) 상승 여부 — 단기 장세 표기·삼전 브레이크
   dd: number; // 52주 고점 대비 낙폭 (음수, 장세 표기)
   midVote: number; // 중장기 투표합 −3~+3 (와인스타인·골든크로스·엘더조류) — 표기·재진입 가속
+  trendT: number; // 60일 추세 t-통계 — |t|<1 변동장 판별 (5기법 비교 중 변동 재현 최고, 표기 전용)
 };
 
 export type PredictDailyRow = {
