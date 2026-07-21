@@ -279,12 +279,17 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     }
   }
 
-  // 주간 성능 문자 (금요일) — 교체는 자동이 아니라 권고: ⚠교체검토가 뜨면 사용자 승인 후 수동 전환
+  // 주간 성능 문자 (금요일) — 교체는 자동이 아니라 권고: ⚠교체검토가 뜨면 사용자 승인 후 수동 전환.
+  // 행동 지침 동봉(decision-notify 원칙): /ops 지시 또는 작업 세션 요청, 무응답=현행 유지.
   if (CFG.sms.enabled && perfTexts.length > 0) {
+    const hasSwapAlert = perfTexts.some((t) => t.includes("⚠"));
+    const action = hasSwapAlert
+      ? " ▶교체 검토 원하시면 /ops에 '일봉 교체 검토' 지시 또는 작업 세션에서 요청. 무응답=현행 유지"
+      : "";
     await dispatchToChannels("signal", now.date, {
       key: `pdaily_perf_${now.date}`,
-      severity: "low",
-      text: `[일봉 성능] 최근 ${CFG.perf.lookback}채점일 r3 방향적중 — ${perfTexts.join(" | ")}. 판정 교체는 승인 후 반영`,
+      severity: hasSwapAlert ? "medium" : "low",
+      text: `[일봉 성능] 최근 ${CFG.perf.lookback}채점일 r3 방향적중 — ${perfTexts.join(" | ")}.${action}`,
       smsSubject: "일봉 성능",
     });
   }
