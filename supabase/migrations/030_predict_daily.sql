@@ -10,6 +10,7 @@ create table if not exists public.predict_daily_days (
   base_exposure real not null,         -- 게이트 전 (이진: 1 또는 0)
   model_stances jsonb,                 -- 7모델 스냅샷 (대조군 채점용)
   macro jsonb,                         -- {sox, fxLevel, fxChg, y10, y10Chg} 판정 시점 값
+  flow jsonb,                          -- 최근 외인·기관 수급 확정치 (표시용 — 게이트 아님, 실측 기각)
   gates jsonb,                         -- 적용 감산 사유 ["10Y급등(+0.09%p)", "이벤트:FOMC"]
   event text,
   stop_px real,                        -- 손절가 (-8%, 매수 시)

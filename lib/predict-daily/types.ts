@@ -39,6 +39,7 @@ export type PredictDailyRow = {
   base_exposure: number;
   model_stances: Record<string, Stance> | null;
   macro: MacroSnap | null;
+  flow: { date: string; frgn: number; inst: number }[] | null; // 최근 외인·기관 수급 (표시·기록용)
   gates: string[] | null;
   event: string | null;
   stop_px: number | null;
