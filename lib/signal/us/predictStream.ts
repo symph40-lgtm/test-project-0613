@@ -344,12 +344,17 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       const rf = runUsFisher(w, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
       const rm = runUsFisher(w, hist, M.offsetRangeRatio, { confirmBars: M.confirmBars });
       const curV = revs[revs.length - 1].verdict;
+      // 정확도 동봉 (사용자 지시 2026-07-22 밤): 이시각 실측적중(슬롯 실측 — 라이브 20회↑ 우선,
+      // 미달 시 백테스트 사전값) + 유사장 적중(시초레인지 폭 유사형태 버킷) — 판정 문자와 동일 눈금
+      const nowH = minToHHMM(minuteOfDay);
+      const slotPct = slotHitPct(nowH);
+      const statTail = `(이시각 실측적중 ${slotPct ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
       if (rf.verdict !== "none" && rf.verdict !== curV) {
         try {
           await dispatchToChannels("signal", today, {
             key: `uspredict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
             severity: "medium",
-            text: `[미국예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict)}`,
+            text: `[미국예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict)}`,
             smsSubject: "미국 조기경보", suppressSms: quiet,
           });
         } catch { /* 발송 실패 무시 */ }
@@ -358,7 +363,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             await dispatchToChannels("signal", today, {
               key: `uspredict_fm_${rm.verdict}`,
               severity: "medium",
-              text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]}. 피셔F 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
+              text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
               smsSubject: "미국 조기경보", suppressSms: quiet,
             });
           } catch { /* 발송 실패 무시 */ }
@@ -368,7 +373,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             await dispatchToChannels("signal", today, {
               key: `uspredict_fmopp_${rm.verdict}`,
               severity: "medium",
-              text: `[미국예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -${stopEtfPct.toFixed(1)}% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
+              text: `[미국예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -${stopEtfPct.toFixed(1)}% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
               smsSubject: "미국 조기경보", suppressSms: quiet,
             });
           } catch { /* 발송 실패 무시 */ }
