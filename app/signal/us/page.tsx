@@ -58,13 +58,13 @@ export default async function UsSignalPage() {
       {/* 미장 예측 스트림 (사용자 지정 2026-07-21) — 국장 동일 구조: 프리장 user 모델 · 정규장 피셔.
           판정 지수 SOXX — SOXL(3x)/SOXS(-3x) 체결 (4차 지시: SMH→SOXX 교체, USD/SSG는 저유동 폐기) */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
-        <p className="mb-1 text-[14px] font-semibold">예측 스트림 (프리장 사용자모델 → 정규장 피셔 · 기준 SOXX)</p>
+        <p className="mb-1 text-[14px] font-semibold">예측 스트림 (3단계 피셔 F→M→본 · 기준 SOXX)</p>
         <p className="mb-2 text-[12px] leading-relaxed text-ink-48">
-          한국 예측 체크포인트 스트림의 미국판 — 프리장(08:30~09:25 ET)은 사용자모델(RV1+T6), 정규장(10:00~14:30 ET)은
-          피셔(오프셋 0.15×avgRange10 — 한국·SMH와 동일값이 SOXX 실측에서도 유지). 확정 14:30 ET.
+          한국 예측 체크포인트 스트림의 미국판 — 조기창(프리장 08:30 ET~11:00 ET)은 <b>피셔F</b>(0.05·1봉·강돌파, 07:00 창),
+          이후는 <b>본피셔</b>(0.15, 09:30 창). 확정 14:30 ET. 본판정 구간엔 피셔F 반전 임시판정(1단계 50%) →
+          피셔M 중간확인(2단계 +30%p) → 본피셔 확정(3단계 +20%p) 비중 프로토콜 문자.
           기준 지수 <b>SOXX</b>(SOXL과 상관 0.999·β 2.95) — 상방=<b>SOXL(3x)</b>·하방=<b>SOXS(-3x)</b>,
-          스탑 ETF -6.0%(SOXX -2.0% — 적중일 반등 관통률 10%로 완화, 누적 동일·스탑컷 절반)·16:00 ET 당일청산.
-          <b>분봉 상수는 38일 소표본 검증(야후 분봉 한계) — 소액만.</b>
+          스탑 ETF -6.0%(SOXX -2.0%)·16:00 ET 당일청산. <b>분봉 상수는 38일 소표본 검증(야후 분봉 한계) — 소액만.</b>
         </p>
         {predDays === null ? (
           <p className="text-[13px] text-ink-48">마이그레이션 029(us_predict_days) 적용 대기 — 적용 후 판정·채점이 여기 쌓입니다.</p>
@@ -83,7 +83,7 @@ export default async function UsSignalPage() {
                   (강도 {todayRow.strength}% · {todayRow.stage === "final" ? "확정" : "진행 중"})
                   {todayRow.revisions && todayRow.revisions.length > 0 && (
                     <span className="ml-1 text-[12px] text-ink-48">
-                      [{todayRow.revisions.map((r) => `${r.checkpoint ?? "모니터"}${r.judge === "user" ? "(u)" : ""} ${r.verdict === "leverage" ? "레버" : r.verdict === "inverse" ? "인버" : "무"}`).join(" → ")}]
+                      [{todayRow.revisions.map((r) => `${r.checkpoint ?? "모니터"}${r.judge === "fisherF" ? "(F)" : r.judge === "user" ? "(u)" : ""} ${r.verdict === "leverage" ? "레버" : r.verdict === "inverse" ? "인버" : "무"}`).join(" → ")}]
                     </span>
                   )}
                 </p>

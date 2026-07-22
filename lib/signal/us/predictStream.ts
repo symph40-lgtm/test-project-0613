@@ -1,20 +1,23 @@
-// 미장 예측 스트림 서비스 (사용자 지정 2026-07-21 2차 "국장과 동일한 방식" · 4차 "SOXX 프락시") —
-// 한국 predict 체크포인트 스트림(lib/predict/service.ts checkpointStream)의 미국판.
-// 판정자: 프리장(08:30~09:25 ET) = user 모델(RV1+T6) / 정규장(10:00~14:30) = 피셔.
+// 미장 예측 스트림 서비스 (사용자 지정 2026-07-21 "국장과 동일한 방식"·"SOXX 프락시" ·
+// 2026-07-22 "사용자모델 제거 — 피셔F/M/본 3단계로 대체") — 한국 predict 체크포인트 스트림
+// (lib/predict/service.ts checkpointStream, v1.13)의 미국판.
+// 판정자: 조기창(프리장 08:30~09:25 + 정규장 ~11:00 ET) = 피셔F(0.05·1봉·강돌파, 07:00 창) /
+//         이후(11:30~14:30) = 본피셔(0.15·2봉, 09:30 창). 사용자모델(RV1+T6)은 판정자에서 폐기.
+// 3단계 비중 프로토콜 (한국 2026-07-22와 동일): 피셔F 반전 임시판정(1단계 50%) → 피셔M(0.10·2봉)
+// 중간확인(2단계 +30%p, 반대면 30%p 축소 경고) → 본피셔 확정(3단계 +20%p, 누적 100%).
 // 판정 지수 SOXX — 상방 = SOXL(3x) · 하방 = SOXS(-3x). 상수 근거는 config.usPredict 주석.
-// (기존 SMH 프락시 → USD/SSG 체결 모델은 폐기 — "편차가 크고 거래량도 작다".)
 // 채점: 정규장 라벨(±0.9% SOXX 스케일) + 확정 판정 부호 적중 + 첫 방향 체크포인트 진입 손익.
 // 저장: us_predict_days (마이그레이션 029). 트리거: /api/signal/us/state (cron-job.org).
 
 import YahooFinance from "yahoo-finance2";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
-import { atrPct, avgRange } from "@/lib/predict/indicators";
+import { avgRange } from "@/lib/predict/indicators";
 import type { PredictDailyBar, Verdict } from "@/lib/predict/types";
 import { US_SIGNAL_CONFIG } from "./config";
 import { etNow } from "./data";
 import {
-  ET_CLOSE, ET_OPEN, ET_PRE_START, labelUsDay, pnlFromCut, runUsFisher, runUsUserModel, type UsBar,
+  ET_CLOSE, ET_OPEN, ET_PRE_START, labelUsDay, pnlFromCut, runUsFisher, type UsBar,
 } from "./models";
 
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
@@ -30,7 +33,9 @@ const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.s
 const minToHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const ALL_CPS: string[] = [...UP.preCheckpoints, ...UP.regCheckpoints];
 
-type Rev = { at: string; checkpoint?: string; verdict: Verdict; strength: number; judge: "user" | "fisher" };
+// judge: "user"는 폐기된 사용자모델의 과거 기록 호환용 (2026-07-21 이전 행)
+type Judge = "user" | "fisherF" | "fisher";
+type Rev = { at: string; checkpoint?: string; verdict: Verdict; strength: number; judge: Judge };
 type Row = {
   date: string; final_verdict: Verdict; strength: number; stage: "open" | "final";
   revisions: Rev[] | null; label: Verdict | null; r_oc: number | null;
@@ -160,17 +165,20 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const prevClose = hist[hist.length - 1]?.close;
   if (hist.length < 30 || range10 === null || !prevClose) return result;
 
-  const judgeAt = (cut: string): { verdict: Verdict; strength: number; judge: "user" | "fisher" } | null => {
+  const judgeAt = (cut: string): { verdict: Verdict; strength: number; judge: Judge } | null => {
     const cutMin = hhmmToMin(cut);
-    if (cut < "09:30") {
-      const w = pre.filter((b) => b.etMin + 5 <= cutMin);
-      if (w.length < 4) return null;
-      const out = runUsUserModel(w, prevClose, { rv1Premarket: UP.rv1Premarket });
-      return { verdict: out.verdict, strength: Math.round(out.confidence * 100), judge: "user" };
+    if (cut <= UP.earlyUntilCp) {
+      // 조기창 — 피셔F (07:00 창: 프리장+정규장 연속봉)
+      const w = [...pre, ...reg].filter((b) => b.etMin + 5 <= cutMin);
+      if (w.length < 5) return null;
+      const F = UP.fisherF;
+      const out = runUsFisher(w, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
+      return { verdict: out.verdict, strength: Math.round(out.confidence * 100), judge: "fisherF" };
     }
+    // 본판정 — 본피셔 (09:30 창). 강돌파는 스트림에만 적용 (한국 lateStrongBreak 0.1 대응)
     const w = reg.filter((b) => b.etMin + 5 <= cutMin);
     if (w.length < 6) return null;
-    const out = runUsFisher(w, hist, UP.offsetRangeRatio);
+    const out = runUsFisher(w, hist, UP.offsetRangeRatio, { strongBreakRatio: 0.1 });
     return { verdict: out.verdict, strength: Math.round(out.confidence * 100), judge: "fisher" };
   };
 
@@ -209,10 +217,22 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const Q = US_SIGNAL_CONFIG.quietSms;
   const quiet = kstMin >= Q.fromKstMin && kstMin < Q.toKstMin;
 
-  // 조기(프리장) 신호 스탑 — 한국과 동일 공식: ATR14 × 0.7배(1.5~4% 클램프) → ETF 3배 환산
-  const ES = UP.earlyStop;
-  const atrToday = atrPct(hist, 14);
-  const atrStopEtf = atrToday !== null ? SY.leverageX * Math.min(ES.maxPct, Math.max(ES.minPct, ES.k * atrToday)) : null;
+  // 자동매도 스탑 '금액' (한국 2026-07-21 지시의 미국판) — 판정 시점 ETF 현재가에 스탑 %를 적용한
+  // 절대 가격을 문자에 동봉. 매입가 기준이면 체결가가 밀린 만큼 스탑이 위로 올라와 노이즈에 컷됨.
+  // 야후 quote는 낡은 스냅샷 가드(30분) — 프리장 컷은 전일 마감가 기준이라 생략될 수 있음(정상).
+  const stopEtfPct = UP.stopPct * SY.leverageX; // SOXX -2.0% → 3x ETF -6.0%
+  const etfStopLine = async (verdict: Verdict): Promise<string> => {
+    try {
+      const sym = verdict === "leverage" ? SY.leverage : SY.inverse;
+      const q = await yf.quote(sym);
+      const px = typeof q.regularMarketPrice === "number" ? q.regularMarketPrice : null;
+      const t = q.regularMarketTime instanceof Date ? q.regularMarketTime
+        : typeof q.regularMarketTime === "number" ? new Date(q.regularMarketTime * 1000) : null;
+      if (!px || !t || Date.now() - t.getTime() > 30 * 60_000) return "";
+      const stop = px * (1 - stopEtfPct / 100);
+      return `\n▶자동매도 스탑: ${sym} $${stop.toFixed(2)} (판정시점 $${px.toFixed(2)} -${stopEtfPct.toFixed(1)}% — 매입가 아닌 이 값에 고정)`;
+    } catch { return ""; }
+  };
 
   // 시초 레인지 폭 (09:30~09:45 ET) — 유사장 적중·광폭 경고 (한국 orBuckets 규칙의 SMH판)
   const OB = UP.orBuckets;
@@ -224,12 +244,12 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     : orWidthPct >= OB.wideMinPct ? OB.hit.wide : orWidthPct >= OB.calmBelowPct ? OB.hit.mid : OB.hit.calm;
   const wideOr = orWidthPct !== null && orWidthPct >= OB.wideMinPct;
 
-  const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number; judge: "user" | "fisher" }, kind: "change" | "hold", sinceCp?: string) => {
+  const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number; judge: Judge }, kind: "change" | "hold", sinceCp?: string) => {
     if (!UP.sms.enabled) return;
-    const judgeKo = v.judge === "user" ? "사용자모델" : "피셔";
+    const judgeKo = v.judge === "fisherF" ? "피셔F" : v.judge === "user" ? "사용자모델" : "피셔";
     const hitPct = v.verdict !== "none" ? slotHitPct(whenLabel) : null;
-    // 유사장 적중은 정규장(피셔) 컷에만 — 표본 있는 버킷(mid)만 표기 (한국과 동일 위치)
-    const similar = v.verdict !== "none" && v.judge === "fisher" && similarHit !== null ? `·유사장 적중 ${similarHit}%` : "";
+    // 유사장 적중은 정규장 컷에만 — 표본 있는 버킷만 표기 (한국과 동일 위치)
+    const similar = v.verdict !== "none" && whenLabel >= "09:30" && similarHit !== null ? `·유사장 적중 ${similarHit}%` : "";
     const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
     let text: string;
     if (kind === "hold") {
@@ -238,20 +258,22 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       text = prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
         : `[미국예측·${judgeKo}] ${whenLabel} ET 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} ${tail}`;
-      // 규칙 환기 — 한국 predict와 동일 체계 (사용자 지정 2026-07-21 3차. LMS 전환 감수,
-      // config.usPredict.sms.ruleReminder=false로 끄면 단문 복귀)
+      // 방향 판정이면 자동매도 스탑 금액 동봉 (ruleReminder와 무관 — 실매매 핵심 정보, 한국 동일)
+      if (v.verdict !== "none") text += await etfStopLine(v.verdict);
+      // 규칙 환기 — 한국 predict와 동일 체계 (config.usPredict.sms.ruleReminder=false로 끄면 단문 복귀)
       if (UP.sms.ruleReminder) {
         if (v.verdict !== "none") {
-          text += v.judge === "user"
-            ? `\n▶조기신호: 1/3만 선진입 · 스탑 ETF ${atrStopEtf !== null ? `-${atrStopEtf.toFixed(1)}%` : "ATR 0.7배"}(오늘 ATR 기준) · 10:00 ET 피셔 확인 후 본진입. 16:00 ET 당일청산.`
-            : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -${(UP.stopPct * SY.leverageX).toFixed(1)}% 고정(${SY.judge} -${UP.stopPct}% — 역행=확인실패, 즉시 컷) · 16:00 ET 당일청산.`;
+          // 프리장 피셔F 컷 = 1/3 선진입·개장 후 본진입 (한국 v1.13 프리장 지침) / 정규장 = 3단계 본진입
+          text += whenLabel < "09:30"
+            ? `\n▶프리장 피셔F 신호: 개장(09:30 ET) 후 시가 부근 1/3 선진입 · 스탑 진입가 ETF -${stopEtfPct.toFixed(1)}% · 개장 후 판정 유지 확인 시 본진입. 16:00 ET 당일청산.`
+            : `\n▶피셔 확인: 본진입 가능(3단계: 추가 +20%p, 누적 100%) · 스탑 ETF -${stopEtfPct.toFixed(1)}% 고정(${SY.judge} -${UP.stopPct}% — 역행=확인실패, 즉시 컷) · 16:00 ET 당일청산.`;
           text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서. 미국 소표본 — 소액만.`;
         } else if (prev !== null) {
           text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:30 ET) 반대 보유 금지.`;
         }
-        // 광폭 시초레인지 경고 — SMH 90분위(2.2%) 초과. 유사일 표본 부족(4일)이라 수치 단정 없이
-        // 비중 축소만 권장 (한국은 광폭일 적중 급락 43% 실측 — SMH는 라이브 누적으로 확인)
-        if (wideOr && v.verdict !== "none" && v.judge === "fisher") {
+        // 광폭 시초레인지 경고 — SOXX 90분위(2.7%) 초과. 유사일 표본 부족(4일)이라 수치 단정 없이
+        // 비중 축소만 권장 (한국은 광폭일 적중 급락 43% 실측 — SOXX는 라이브 누적으로 확인)
+        if (wideOr && v.verdict !== "none" && whenLabel >= "09:30") {
           text += `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭(90분위 초과) — 유사일 표본 부족, 비중 축소 권장.`;
         }
       }
@@ -304,6 +326,50 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       revs = [...revs, { at: new Date().toISOString(), verdict: fin.verdict, strength: fin.strength, judge: fin.judge }];
       changed = true;
       await sms(nowHHMM, last.verdict, fin, "change");
+    }
+  }
+
+  // 피셔F 반전 조기 경보 + 피셔M 중간확인 (한국 2026-07-22 3단계의 미국판 — 본판정 구간
+  // 11:05~14:30 ET, 창은 정규장 09:30 시작). 본 판정과 다른 방향을 F가 확인하면 1단계(50%) 임시
+  // 판정, M(0.10·2봉)이 동방향 재확인하면 2단계(+30%p 누적 80%), 반대면 신뢰 하락 경고(30%p 축소).
+  // 본 피셔가 확정하면 스트림 판정 변경 문자가 3단계(+20%p 누적 100%)를 안내. 키는 방향별 1일 1회.
+  if (minuteOfDay >= hhmmToMin("11:05") && minuteOfDay <= hhmmToMin(UP.finalCp) && revs.length > 0 && UP.sms.enabled) {
+    const w = reg.filter((b) => b.etMin + 5 <= minuteOfDay);
+    if (w.length >= 6) {
+      const F = UP.fisherF, M = UP.fisherM;
+      const rf = runUsFisher(w, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
+      const rm = runUsFisher(w, hist, M.offsetRangeRatio, { confirmBars: M.confirmBars });
+      const curV = revs[revs.length - 1].verdict;
+      if (rf.verdict !== "none" && rf.verdict !== curV) {
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `uspredict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
+            severity: "medium",
+            text: `[미국예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict)}`,
+            smsSubject: "미국 조기경보", suppressSms: quiet,
+          });
+        } catch { /* 발송 실패 무시 */ }
+        if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `uspredict_fm_${rm.verdict}`,
+              severity: "medium",
+              text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]}. 피셔F 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
+              smsSubject: "미국 조기경보", suppressSms: quiet,
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+        if (rm.verdict !== "none" && rm.verdict !== rf.verdict) {
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `uspredict_fmopp_${rm.verdict}`,
+              severity: "medium",
+              text: `[미국예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -${stopEtfPct.toFixed(1)}% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
+              smsSubject: "미국 조기경보", suppressSms: quiet,
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+      }
     }
   }
 

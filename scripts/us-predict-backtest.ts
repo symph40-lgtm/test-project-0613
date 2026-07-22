@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YahooFinance from "yahoo-finance2";
-import { runUsUserModel, runUsFisher, pnlFromCut, ET_OPEN, ET_CLOSE, ET_PRE_START } from "../lib/signal/us/models";
+import { runUsFisher, pnlFromCut, ET_OPEN, ET_CLOSE, ET_PRE_START } from "../lib/signal/us/models";
 import type { UsBar } from "../lib/signal/us/models";
 import { computeSwingStructure } from "../lib/signal/engine/trend";
 import type { PredictDailyBar, Verdict } from "../lib/predict/types";
@@ -255,26 +255,47 @@ async function main() {
   const abs220 = d220.map((b) => Math.abs(((b.close - b.open) / b.open) * 100));
   console.log(`  |rOC| 중앙 ${median(abs220).toFixed(2)}% (참고: 하닉 라벨 1.2%)`);
 
-  // ── ① 프리장 user 모델 — RV1 임계 2안(정규장 분위 vs 프리장 분위) × RV1 프리장 적용 여부
-  console.log("\n── ① 프리장 user 모델 (진입 = 정규장 시가 · 스탑 1.5%) ──");
-  const M5_SETS: [string, { single: number; sum3: number; sum5: number; sum7: number } | undefined][] = [
-    ["정규장분위(config)", undefined],
-    ["프리장99%분위", { single: 0.65, sum3: 1.1, sum5: 1.6, sum7: 1.9 }],
-  ];
-  for (const [setName, m5] of M5_SETS) {
-    for (const rv1Pre of [true, false]) {
-      if (!rv1Pre && setName !== "정규장분위(config)") continue; // T6단독은 임계 무관 — 1회만
-      for (const cut of ["08:30", "09:00", "09:25"]) {
-        const s = S0();
-        for (const day of days) {
-          const w = day.pre.filter((b) => b.etMin + 5 <= hhmmToMin(cut));
-          if (w.length < 4) continue;
-          const out = runUsUserModel(w, day.prevClose, { rv1Premarket: rv1Pre, m5, swing: { minAmpPct: 0.5, tolPct: 0.375 } });
-          addScore(s, day, out.verdict, ET_OPEN, 1.5);
+  // ── ① 프리장·조기창 피셔F 스윕 (사용자 지시 2026-07-22: 사용자모델 폐기 → 피셔F 판정자)
+  //   창 = 07:00 ET 시작(프리장+정규장 연속봉). 프리장 컷 진입 = 정규장 시가, 정규장 컷 = 컷 시점.
+  console.log("\n── ① 조기창 피셔F 스윕 (07:00 창 · 스탑 2.0% · 강돌파 sb) ──");
+  const F_CUTS = ["08:30", "09:00", "09:25", "10:00", "10:30", "11:00"];
+  for (const off of [0.03, 0.05, 0.075, 0.1]) {
+    for (const cb of [1, 2]) {
+      for (const sb of [0, 0.1]) {
+        const parts: string[] = [];
+        for (const cut of F_CUTS) {
+          const s = S0();
+          for (const day of days) {
+            const w = [...day.pre, ...day.reg].filter((b) => b.etMin >= ET_PRE_START && b.etMin + 5 <= hhmmToMin(cut));
+            if (w.length < 3 + cb + 1) continue;
+            const out = runUsFisher(w, day.hist, off, { confirmBars: cb, strongBreakRatio: sb });
+            addScore(s, day, out.verdict, Math.max(hhmmToMin(cut), ET_OPEN), 2.0);
+          }
+          parts.push(`${cut.slice(0, 5)} ${s.trades}회/${s.trades ? Math.round((s.hits / s.trades) * 100) + "%" : "—"}/${s.cum >= 0 ? "+" : ""}${s.cum.toFixed(1)}`);
         }
-        console.log(row(`[${rv1Pre ? `RV1 ${setName}` : "T6단독"}] 컷 ${cut}`, s));
+        console.log(`  F ${off}·확인${cb}봉·sb${sb}  ${parts.join("  ")}`);
       }
     }
+  }
+
+  // ── ①b 피셔M 진위 필터 (한국 실측 대응: F 발화일 중 M 동방향 확인 60% vs 미확인 16%)
+  //   정규장 창(09:30) 기준 — F(0.05·1봉·sb0.1) 첫 방향 확인일에서 M(0.10·2봉) 확인 여부별 적중.
+  console.log("\n── ①b 피셔M(0.10·2봉) 진위 필터 — F 발화일 분해 ──");
+  {
+    const sYes = S0(), sNo = S0();
+    for (const day of days) {
+      const wAll = day.reg;
+      const f = runUsFisher(wAll, day.hist, 0.05, { confirmBars: 1, strongBreakRatio: 0.1 });
+      if (f.verdict === "none") continue;
+      const m = runUsFisher(wAll, day.hist, 0.10, { confirmBars: 2 });
+      const rOC = ((day.reg[day.reg.length - 1].close - day.reg[0].open) / day.reg[0].open) * 100;
+      const hit = (f.verdict === "leverage" && rOC > 0) || (f.verdict === "inverse" && rOC < 0);
+      const tgt = m.verdict === f.verdict ? sYes : sNo;
+      tgt.trades++;
+      if (hit) tgt.hits++;
+    }
+    console.log(`  M 동방향 확인: ${sYes.trades}일 · F 방향적중 ${sYes.trades ? Math.round((sYes.hits / sYes.trades) * 100) + "%" : "—"}`);
+    console.log(`  M 미확인/반대: ${sNo.trades}일 · F 방향적중 ${sNo.trades ? Math.round((sNo.hits / sNo.trades) * 100) + "%" : "—"}`);
   }
 
   // ── ② 정규장 피셔 오프셋 스윕
