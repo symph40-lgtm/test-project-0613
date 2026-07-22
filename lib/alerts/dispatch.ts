@@ -55,9 +55,11 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
 // 한국: 방향 제시(판정확정·횡보선언·V반등·RV1)와 장중브리핑 차단.
 // 미국: us_trend_*(USD/SSG 판정 확정·해제)·us_rev_*(RV1 모멘텀 "SSG 검토") 차단 — USD/SSG는
 //   저유동으로 체결 폐기됐는데 검토 문구가 계속 나가던 충돌 (2026-07-21 23:03 실측).
-// 유지: 수급반전(flow)·급변·스윙(move·swing·us_move·us_swing — 정보성)·거래량(vol)·아침브리핑·
-//   예측(predict_*·uspredict_*). 판정 '기록'은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
-const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|ebrief_.*)$/;
+//   us_move·us_swing(SMH 급변·스윙 정보)도 차단 (사용자 지시 2026-07-23: "[스탁가드 미국] 꺼줘"
+//   — 미장 실투자 채널은 [미국예측] 스트림으로 일원화).
+// 유지: 수급반전(flow)·급변·스윙(한국 move·swing)·거래량(vol)·아침브리핑·예측(predict_*·uspredict_*).
+//   판정 '기록'은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
+const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|us_(move|swing)_.*|ebrief_.*)$/;
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
@@ -65,14 +67,21 @@ export async function dispatchToChannels(
   alert: ChannelAlert,
   emailSubject?: string,
   snapshot?: Record<string, unknown>,
+  // 중복 방지 창 오버라이드 (2026-07-23 실측 사고): 미장 거래일은 KST로 이틀에 걸쳐 KST 달력일
+  // 창이 어제 세션 새벽 발송을 오늘 저녁 발송과 한 창으로 묶는다 (uspredict_chg_none_leverage
+  // 7/22 02:10 발송 → 같은 날 22:50·00:05 복귀 문자 2건 억제·소실). 미장 계열은 dedupHours로
+  // '최근 N시간' 창을 쓴다 — 세션 길이(≤8h) < N < 세션 간격(≥16h)이면 세션 단위 1회가 보장된다.
+  opts?: { dedupHours?: number },
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
   if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지
 
-  // 오늘(KST) 이미 발송된 alertKey인지 확인
-  const kstDayStartUtc = new Date(`${date}T00:00:00+09:00`).toISOString();
+  // 중복 창: 기본 = 오늘(KST) 0시부터 / dedupHours 지정 시 = 최근 N시간
+  const kstDayStartUtc = opts?.dedupHours
+    ? new Date(Date.now() - opts.dedupHours * 3600e3).toISOString()
+    : new Date(`${date}T00:00:00+09:00`).toISOString();
   const { data: sentToday } = await admin
     .from("alerts")
     .select("user_id, message")

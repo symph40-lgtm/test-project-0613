@@ -299,9 +299,10 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
         : ALL_CPS.includes(whenLabel)
           ? `uspredict_cp${whenLabel.replace(":", "")}_${v.verdict}`
           : `uspredict_chg_${prev ?? "none"}_${v.verdict}`;
+      // dedupHours 16: 미장 거래일이 KST 이틀에 걸쳐 생기는 어제 세션 새벽 발송과의 키 충돌 방지
       await dispatchToChannels("signal", today, {
         key, severity: kind === "hold" ? "low" : "medium", text, smsSubject: "미국 예측", suppressSms: quiet,
-      });
+      }, undefined, undefined, { dedupHours: 16 });
     } catch { /* 발송 실패는 판정 기록을 막지 않는다 */ }
   };
 
@@ -372,7 +373,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             severity: "medium",
             text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
             smsSubject: "미국 조기경보", suppressSms: quiet,
-          });
+          }, undefined, undefined, { dedupHours: 16 });
         } catch { /* 발송 실패 무시 */ }
       }
       if (rf.verdict !== "none" && rf.verdict !== curV) {
@@ -382,7 +383,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             severity: "medium",
             text: `[미국예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict)}`,
             smsSubject: "미국 조기경보", suppressSms: quiet,
-          });
+          }, undefined, undefined, { dedupHours: 16 });
         } catch { /* 발송 실패 무시 */ }
         if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
           try {
@@ -391,7 +392,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
               severity: "medium",
               text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
               smsSubject: "미국 조기경보", suppressSms: quiet,
-            });
+            }, undefined, undefined, { dedupHours: 16 });
           } catch { /* 발송 실패 무시 */ }
         }
         if (rm.verdict !== "none" && rm.verdict !== rf.verdict) {
@@ -401,7 +402,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
               severity: "medium",
               text: `[미국예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -${stopEtfPct.toFixed(1)}% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
               smsSubject: "미국 조기경보", suppressSms: quiet,
-            });
+            }, undefined, undefined, { dedupHours: 16 });
           } catch { /* 발송 실패 무시 */ }
         }
       }

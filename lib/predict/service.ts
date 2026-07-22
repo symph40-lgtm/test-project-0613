@@ -136,6 +136,19 @@ async function checkpointStream(
     }
     const primary = cutHHMM < cfg.earlyModelBefore ? ("user" as const) : undefined;
     const fin = finalizeJudgment(outputs, runEnsemble(outputs, acc), primary);
+    // 핸드오프 유예 (사용자 지시 2026-07-23 — 미장 7/22 실측 사고의 국장판): 조기창(≤10:30)
+    // 피셔F가 확인한 방향을 본판정 구간에서 본피셔가 아직 미확인(none)이라는 이유로 '방향
+    // 소멸'로 뒤집지 않는다. 본피셔 none이면 피셔F(0.05·4봉·강돌파)를 재평가해 방향 유지 중이면
+    // 승계 — 소멸·전환은 F의 C철회 또는 본피셔의 반대 확인 때만. 본피셔는 한번 확인하면 C반전
+    // 외엔 none으로 안 돌아가므로 이 폴백은 핸드오프~본피셔 첫 확인 사이에만 작동한다.
+    if (fin.finalVerdict === "none" && cutHHMM > PREDICT_CONFIG.earlyOffsetUntil) {
+      const fb = runFisher(input, {
+        offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
+        confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+        strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
+      });
+      if (fb.verdict !== "none") return { verdict: fb.verdict, strength: Number((fb.confidence * 100).toFixed(0)) };
+    }
     return { verdict: fin.finalVerdict, strength: fin.strengthPct };
   };
 
@@ -332,6 +345,23 @@ async function checkpointStream(
         { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
         { offsetRangeRatio: 0.10, confirmMinutes: 8 },
       );
+      // ②c-0 피셔M 동방향 중간확인 (사용자 지시 2026-07-23 — 미장과 동일): 현 판정이 조기창
+      // 피셔F 단계(본피셔 미확인)일 때 M이 같은 방향을 확인하면 2단계(+30%p) 확대 통지.
+      // 본피셔가 이미 확인했으면 3단계라 생략. 키는 방향별 1일 1회 (반전 케이스와 공유).
+      const rMainNow = runFisher(
+        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
+        { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio },
+      );
+      if (rm.verdict !== "none" && rm.verdict === curV && rMainNow.verdict === "none") {
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `predict_fm_${rm.verdict}`,
+            severity: "medium",
+            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}`,
+            smsSubject: "예측 조기경보",
+          });
+        } catch { /* 발송 실패 무시 */ }
+      }
       if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
         try {
           await dispatchToChannels("signal", today, {
