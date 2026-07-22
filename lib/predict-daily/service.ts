@@ -213,11 +213,13 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const flow = await fetchRecentFlow(sym.code); // 확정치는 전일까지 — 표시·기록용 (게이트 아님)
     if (!newsLoaded) {
       const cached = have.get(now.date)?.macro;
-      if (cached?.newsRisk != null) news = { score: cached.newsRisk, note: cached.newsNote ?? "" };
+      if (cached?.newsRisk != null) news = { score: cached.newsRisk, note: cached.newsNote ?? "", detail: cached.newsDetail ?? undefined };
       else news = await assessNewsRisk();
       newsLoaded = true;
     }
-    const macro2 = macro ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null } : null;
+    const macro2 = macro
+      ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null, newsDetail: news?.detail ?? null }
+      : null;
     const existing = have.get(now.date) && have.get(now.date)!.source !== "backfill" ? have.get(now.date)! : null;
     // 직전 완결 거래일의 스탠스 (변경 감지 기준)
     const prevRow = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1)).pop() ?? null;

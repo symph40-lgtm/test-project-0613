@@ -25,6 +25,7 @@ export type MacroSnap = {
   dxyChg: number | null; // 간밤 DXY % (게이트: ≥+0.8% 급등 시 감산)
   newsRisk?: number | null; // 뉴스 위험도 0~10 (AI, 표시·라이브 채점 전용 — 게이트 아님)
   newsNote?: string | null; // 핵심 위험 요인 한 줄
+  newsDetail?: { t: string; s: number }[] | null; // 개별 뉴스별 삼전 영향도 상위 3건 (기록용)
 };
 
 export type DailyJudgment = {

@@ -6,7 +6,11 @@
 import { getAiClient, hasAiKey, parseJsonLoose } from "@/lib/ai/client";
 import { fetchNews } from "@/lib/news/fetch";
 
-export type NewsRisk = { score: number; note: string };
+export type NewsRisk = {
+  score: number;
+  note: string;
+  detail?: { t: string; s: number }[]; // 개별 뉴스별 삼전 영향도 상위 3건 (기록용 — DB macro.newsDetail)
+};
 
 const QUERIES = [
   "삼성전자 SK하이닉스",
@@ -34,27 +38,32 @@ export async function assessNewsRisk(): Promise<NewsRisk | null> {
     }
     if (titles.length === 0) return { score: 0, note: "특이 뉴스 없음" };
 
-    const prompt = `너는 한국 반도체 대형주(삼성전자·SK하이닉스)를 2~5일 보유하는 스윙 트레이더의 리스크 애널리스트다.
-아래 최근 24시간 헤드라인을 보고, 향후 1~3거래일 한국 증시(특히 두 종목)의 "하방 위험"을 0~10 정수로 평가하라.
+    const prompt = `너는 삼성전자를 기준으로 2~5일 보유하는 스윙 트레이더의 리스크 애널리스트다.
+아래 최근 24시간 헤드라인 각각이 삼성전자 주가에 미칠 영향을 평가한 뒤(악재만 — 호재·무관은 0점),
+향후 1~3거래일 "하방 위험" 종합 점수를 0~10 정수로 매겨라.
 
-기준: 0~2 평온 / 3~4 통상 잡음 / 5~6 경계(정책·지정학 불확실성이 구체화) / 7~8 위험(전쟁·급격한 정책 충격 임박, 대형 규제 발표) / 9~10 위기(개전·금융 시스템 위기).
-주의: 호재는 무시하라(하방 위험 척도다). 헤드라인의 상투적 공포 표현("폭락 공포" 따위)에 끌려가지 말고 실체적 사건·발언·일정 중심으로 평가하라. 이미 시장에 다 반영된 오래된 이슈는 가중하지 말라.
+종합 기준: 0~2 평온 / 3~4 통상 잡음 / 5~6 경계(정책·지정학 불확실성 구체화) / 7~8 위험(전쟁·급격한 정책 충격 임박, 대형 규제 발표) / 9~10 위기(개전·금융 시스템 위기).
+주의: 상투적 공포 표현("폭락 공포" 따위)에 끌려가지 말고 실체적 사건·발언·일정 중심. 이미 시장에 반영된 오래된 이슈는 가중하지 말 것.
 
-JSON만 출력: {"score": 정수, "note": "가장 중요한 위험 요인 한 줄(15자 이내, 없으면 '특이사항 없음')"}
+JSON만 출력:
+{"score": 종합 정수, "note": "핵심 악재 한 줄 요약(공백 포함 25자 이내, 잘리지 않는 완결 문구, 없으면 '특이사항 없음')", "top": [{"t": "뉴스 요약(20자 이내)", "s": 삼전 악재영향 0~10}, ...상위 3건]}
 
 헤드라인:
 ${titles.join("\n")}`;
 
     const res = await getAiClient().messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 200,
+      max_tokens: 400,
       messages: [{ role: "user", content: prompt }],
     });
     const text = res.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
-    const j = parseJsonLoose<{ score?: number; note?: string }>(text);
+    const j = parseJsonLoose<{ score?: number; note?: string; top?: { t?: string; s?: number }[] }>(text);
     const score = Math.max(0, Math.min(10, Math.round(Number(j.score ?? 0))));
-    const note = String(j.note ?? "").slice(0, 20) || "특이사항 없음";
-    return { score, note };
+    const note = String(j.note ?? "").slice(0, 28) || "특이사항 없음";
+    const detail = Array.isArray(j.top)
+      ? j.top.slice(0, 3).map((x) => ({ t: String(x.t ?? "").slice(0, 24), s: Math.max(0, Math.min(10, Math.round(Number(x.s ?? 0)))) }))
+      : undefined;
+    return { score, note, detail };
   } catch {
     return null; // 실패 시 표기 생략 — 판정에는 영향 없음
   }
