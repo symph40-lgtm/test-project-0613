@@ -321,6 +321,23 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+      // ②c 피셔M 중간확인 (2026-07-22 사용자 3단계 설계: F 임시 일부진입 → M 중간확인 확대 → 본 피셔 본격).
+      // 상수 0.10·8봉 = 구 조기창 검증 상수. 224일 실측(tmp-fisherm-stage): F 발화 197일 중 M 동방향 확인
+      // 159일 적중 60%(F+23분) vs M 미확인 38일 적중 16% — M 확인이 F 임시판정의 진위 필터.
+      const rm = runFisher(
+        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
+        { offsetRangeRatio: 0.10, confirmMinutes: 8 },
+      );
+      if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `predict_fm_${rm.verdict}`,
+            severity: "medium",
+            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]}. 피셔F 임시판정 신뢰↑(실측: M확인 시 적중 60%·미확인 시 16%) — 비중 확대 검토, 확정은 본 피셔. 무응답=현행 유지`,
+            smsSubject: "예측 조기경보",
+          });
+        } catch { /* 발송 실패 무시 */ }
+      }
     }
   }
 
