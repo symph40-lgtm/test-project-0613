@@ -311,7 +311,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
             severity: "medium",
-            text: `[예측·피셔F] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 저문턱 참고용(단독 신호는 오발 잦음), 본진입은 피셔 확인 대기. 무응답=현행 유지`,
+            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음, 확정은 피셔 확인 문자. 무응답=현행 유지`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
