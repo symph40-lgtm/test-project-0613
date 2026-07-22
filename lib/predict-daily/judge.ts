@@ -62,14 +62,12 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
   const votes = (["donchian", "wilder", "weinstein", "elder"] as const).reduce(
     (a, id) => a + (modelStances[id] === "long" ? 1 : modelStances[id] === "short" ? -1 : 0), 0);
 
-  // 사다리 v3 (스펙 5-4·5-7): 풀보유(1.0) / 재진입 가속(0.5 — 중장기 만장일치) / 완충(0.25) / 전량 현금(0)
+  // 사다리 v4 (스펙 5-7 개정): 풀보유(1.0, 미너비니) / 와인스타인 생존(0.5) / 붕괴(0).
+  // 중장기 투표는 장세 표기 전용 (재진입 가속 규칙은 와인스타인 단독 50%로 대체 — 삼전 실측 우위).
   const midVote = midTermVote(bars, i, modelStances["weinstein"]);
   let baseExposure = 0;
   if (stance === "long") baseExposure = votes >= CFG.ladder.strongVotes ? 1 : CFG.ladder.base;
-  else if (stance === "flat") {
-    if (midVote >= CFG.ladder.reentryVotes) baseExposure = CFG.ladder.reentry;
-    else if (modelStances["weinstein"] === "long") baseExposure = CFG.ladder.weakHold;
-  }
+  else if (stance === "flat" && modelStances["weinstein"] === "long") baseExposure = CFG.ladder.weakHold;
 
   let exposure = baseExposure;
   const gates: string[] = [];
