@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YahooFinance from "yahoo-finance2";
-import { runUsFisher, pnlFromCut, ET_OPEN, ET_CLOSE, ET_PRE_START } from "../lib/signal/us/models";
+import { runUsUserModel, runUsFisher, pnlFromCut, ET_OPEN, ET_CLOSE, ET_PRE_START } from "../lib/signal/us/models";
 import type { UsBar } from "../lib/signal/us/models";
 import { computeSwingStructure } from "../lib/signal/engine/trend";
 import type { PredictDailyBar, Verdict } from "../lib/predict/types";
