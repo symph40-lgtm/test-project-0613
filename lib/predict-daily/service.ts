@@ -6,7 +6,7 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { fetchAfterPrice } from "./after";
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
 import { fetchDaily, kstNowDaily } from "./data";
-import { fetchRecentFlow, flowLine, type FlowDay } from "./flow";
+import { fetchKospiFlow, fetchRecentFlow, flowLine, kospiLine, type FlowDay } from "./flow";
 import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
 import { MODELS } from "./models";
@@ -47,20 +47,20 @@ function macroLine(m: MacroSnap | null): string {
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
 function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number, mw?: MwStats): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}`;
 }
 
 function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[], mw?: MwStats): string {
   const label = actionLabel(j.stance, j.exposure);
   const head = prevLabel && prevLabel !== label ? `${prevLabel} → ${label}` : label;
   const why: string[] = [];
-  if (j.stance === "long") why.push(j.votes >= 3 ? "추세+타모델 합의" : "미너비니 추세");
-  else if (j.stance === "flat" && j.baseExposure > 0) why.push("추세 이탈·장기추세 생존");
-  else if (j.stance === "flat") why.push("추세 이탈");
-  else why.push("하락 추세");
+  if (j.stance === "long") why.push(j.votes >= 3 ? "미너비니 추세+타모델 합의" : "미너비니 추세 충족");
+  else if (j.stance === "flat" && j.baseExposure > 0) why.push("추세 이탈(미너비니)·장기추세 생존(와인스타인)");
+  else if (j.stance === "flat") why.push("추세 이탈(미너비니·와인스타인)");
+  else why.push("하락 추세(역정렬)");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)} 무응답=현행 유지`;
 }
 
 // 미너비니·와인스타인 판정 병기 + 누적 실측 적중 (사용자 지시 2026-07-22 — 매일의 판정·실제 결과를 누적 평가해 표기)
@@ -93,7 +93,7 @@ function mwLine(j: DailyJudgment, st?: MwStats): string {
 function regimeLine(j: DailyJudgment): string {
   const mid = j.midVote >= 1 ? "↑" : j.midVote <= -1 ? "↓" : "→";
   const kind = j.trendT >= 1 ? "상승장" : j.trendT <= -1 ? "하락장" : "변동장";
-  return `장세 단기${j.stUp ? "↑" : "↓"}·중장기${mid}(${j.midVote >= 0 ? "+" : ""}${j.midVote})·${kind}·고점比${Math.round(j.dd * 100)}%.`;
+  return `장세 단기${j.stUp ? "↑" : "↓"}(수퍼)·중장기${mid}(3지표${j.midVote >= 0 ? "+" : ""}${j.midVote})·${kind}·52주고점比${Math.round(j.dd * 100)}%.`;
 }
 
 export async function runPredictDailyService(): Promise<Record<string, unknown>> {
@@ -217,8 +217,9 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       else news = await assessNewsRisk();
       newsLoaded = true;
     }
+    const kospi = await fetchKospiFlow(); // 코스피 외인 현물·선물 확정치 (표시 전용 — 동시 상관 0.40 실측)
     const macro2 = macro
-      ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null, newsDetail: news?.detail ?? null }
+      ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null, newsDetail: news?.detail ?? null, kospiFlow: kospi }
       : null;
     const existing = have.get(now.date) && have.get(now.date)!.source !== "backfill" ? have.get(now.date)! : null;
     // 직전 완결 거래일의 스탠스 (변경 감지 기준)

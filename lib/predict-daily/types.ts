@@ -26,6 +26,7 @@ export type MacroSnap = {
   newsRisk?: number | null; // 뉴스 위험도 0~10 (AI, 표시·라이브 채점 전용 — 게이트 아님)
   newsNote?: string | null; // 핵심 위험 요인 한 줄
   newsDetail?: { t: string; s: number }[] | null; // 개별 뉴스별 삼전 영향도 상위 3건 (기록용)
+  kospiFlow?: { date: string; cash: number; cash3: number; fut: number; fut3: number } | null; // 코스피 외인 현물(억)·선물(계약) — 표시 전용
 };
 
 export type DailyJudgment = {
