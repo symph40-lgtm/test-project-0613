@@ -289,6 +289,32 @@ async function checkpointStream(
     }
   }
 
+  // ②b 피셔F 반전 조기 경보 (2026-07-22 사용자 복기: 본 피셔 13:57 vs 피셔F 12:10 인버스 확인).
+  // 224일 실측: 동일 방향 확인 시 피셔F 평균 37분 선행(본 피셔가 13시 이후에야 확인한 날은 80분),
+  // 확인시점 진입 캡처 +146.5%p vs 본 피셔 +64.2%p. 단 본 피셔 무판정일의 피셔F 단독 신호는 80%가
+  // 손해(과다 판정) — 판정 교체가 아니라 '조기 경보 문자'로만 편입. 본진입 판단은 본 피셔 유지.
+  if (minuteOfDay >= hhmmToMin("10:35") && minuteOfDay <= hhmmToMin(lastCp) && revs.length > 0 && PREDICT_CONFIG.sms.enabled) {
+    const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+    const ffBars = krx.filter((b) => b.time < nowHHMM2);
+    if (ffBars.length >= 20) {
+      const rf = runFisher(
+        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
+        { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes },
+      );
+      const curV = revs[revs.length - 1].verdict;
+      if (rf.verdict !== "none" && rf.verdict !== curV) {
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `predict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
+            severity: "medium",
+            text: `[예측·피셔F] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 저문턱 참고용(단독 신호는 오발 잦음), 본진입은 피셔 확인 대기. 무응답=현행 유지`,
+            smsSubject: "예측 조기경보",
+          });
+        } catch { /* 발송 실패 무시 */ }
+      }
+    }
+  }
+
   if (!changed || revs.length === 0) return false;
   const isFinal = revs.some((r) => r.checkpoint === lastCp);
   await upsertCheckpointDay(today, revs[revs.length - 1], revs, isFinal, prior);
