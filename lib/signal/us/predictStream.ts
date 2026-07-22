@@ -179,7 +179,19 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     const w = reg.filter((b) => b.etMin + 5 <= cutMin);
     if (w.length < 6) return null;
     const out = runUsFisher(w, hist, UP.offsetRangeRatio, { strongBreakRatio: 0.1 });
-    return { verdict: out.verdict, strength: Math.round(out.confidence * 100), judge: "fisher" };
+    if (out.verdict !== "none") return { verdict: out.verdict, strength: Math.round(out.confidence * 100), judge: "fisher" };
+    // 핸드오프 유예 (2026-07-22 실측 사고: 11:01 모니터링이 본피셔 '미확인'을 '방향 소멸'로
+    // 오표시 → 4분 뒤 본피셔 확인으로 복귀, 문자 2건 왕복). 본피셔가 none인 것은 반전 증거가
+    // 아니므로 조기창 피셔F가 방향을 유지 중이면 그 판정을 승계한다. 소멸·전환은 F 자신의
+    // C철회 또는 본피셔의 반대 확인 때만 발생. (본피셔는 한번 확인하면 C반전 외엔 none으로
+    // 돌아가지 않아, 이 폴백은 사실상 핸드오프~본피셔 첫 확인 사이 구간에만 작동)
+    const wEarly = [...pre, ...reg].filter((b) => b.etMin + 5 <= cutMin);
+    if (wEarly.length >= 5) {
+      const F = UP.fisherF;
+      const fb = runUsFisher(wEarly, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
+      if (fb.verdict !== "none") return { verdict: fb.verdict, strength: Math.round(fb.confidence * 100), judge: "fisherF" };
+    }
+    return { verdict: "none", strength: Math.round(out.confidence * 100), judge: "fisher" };
   };
 
   // 시각별 적중 — 라이브 슬롯(표본 20↑) 우선, 미달 시 백테스트 사전값 (한국과 동일 체계.
@@ -343,12 +355,26 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       const F = UP.fisherF, M = UP.fisherM;
       const rf = runUsFisher(w, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
       const rm = runUsFisher(w, hist, M.offsetRangeRatio, { confirmBars: M.confirmBars });
+      const rMainNow = runUsFisher(w, hist, UP.offsetRangeRatio, { strongBreakRatio: 0.1 });
       const curV = revs[revs.length - 1].verdict;
       // 정확도 동봉 (사용자 지시 2026-07-22 밤): 이시각 실측적중(슬롯 실측 — 라이브 20회↑ 우선,
       // 미달 시 백테스트 사전값) + 유사장 적중(시초레인지 폭 유사형태 버킷) — 판정 문자와 동일 눈금
       const nowH = minToHHMM(minuteOfDay);
       const slotPct = slotHitPct(nowH);
       const statTail = `(이시각 실측적중 ${slotPct ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
+      // 비중 사다리 2단계 (2026-07-22 사용자 지적 — 동방향 M 확인도 통지): 현 판정이 조기창
+      // 피셔F 단계(본피셔 미확인)일 때 M이 같은 방향을 확인하면 +30%p 확대 신호. 반전 케이스와
+      // 같은 키(방향별 1일 1회) — 본피셔가 이미 확인한 뒤에는 3단계라 불필요.
+      if (rm.verdict !== "none" && rm.verdict === curV && rMainNow.verdict === "none") {
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `uspredict_fm_${rm.verdict}`,
+            severity: "medium",
+            text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
+            smsSubject: "미국 조기경보", suppressSms: quiet,
+          });
+        } catch { /* 발송 실패 무시 */ }
+      }
       if (rf.verdict !== "none" && rf.verdict !== curV) {
         try {
           await dispatchToChannels("signal", today, {
