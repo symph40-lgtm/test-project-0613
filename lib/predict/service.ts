@@ -216,6 +216,9 @@ async function checkpointStream(
         text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {
         text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
+      } else {
+        // 첫 판정이 무추세 (사용자 지시 2026-07-22) — 상태 통지 + 대기 지침
+        text += `\n▶방향 없음 — 진입 대기. 방향 확인 시 즉시 문자.`;
       }
       // 광폭 레인지 저신뢰 경고 (OR ≥4%, 220일 중 11일 유형 — 피셔 적중 43%로 하락)
       if (wideOr && next.verdict !== "none") {
@@ -263,8 +266,9 @@ async function checkpointStream(
     const prev = revs.length ? revs[revs.length - 1].verdict : null;
     revs = [...revs, { at: new Date().toISOString(), checkpoint: cp, verdict: fin.verdict, strength: fin.strength }];
     changed = true;
-    // 문자: 방향 등장·소멸·전환만 (첫 기록이 '추세없음'이면 조용)
-    if (fin.verdict !== prev && !(prev === null && fin.verdict === "none")) {
+    // 문자: 방향 등장·소멸·전환 + 첫 판정은 '추세없음'이어도 발송 (사용자 지시 2026-07-22 —
+    // 아침 첫 판정은 시스템 가동·상태 확인 겸 무추세도 통지). 무추세 '유지'는 계속 조용.
+    if (fin.verdict !== prev) {
       await smsChange(cp, prev, fin);
     } else if (fin.verdict === prev && fin.verdict !== "none") {
       // 방향 유지 — 끊김 없이 이어진 동일 판정 중 체크포인트가 정확히 2개째일 때 1회 확인
