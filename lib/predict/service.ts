@@ -208,9 +208,10 @@ async function checkpointStream(
     // 장문(LMS) 전환을 감수하고 동봉. config.sms.ruleReminder=false로 끄면 단문 복귀.
     if (PREDICT_CONFIG.sms.ruleReminder) {
       if (next.verdict !== "none") {
-        // 신호 유형별 스탑을 계산값으로 — 조기(09:30 전)=ATR 0.7배(ETF 환산), 피셔=ETF -3% 고정
-        text += whenLabel < cfg.earlyModelBefore
-          ? `\n▶조기신호: 1/3만 선진입 · 스탑 ETF ${atrStopEtf !== null ? `-${atrStopEtf.toFixed(1)}%` : "ATR 0.7배"}(오늘 ATR 기준) · 09:30 피셔 확인 후 본진입. 당일청산.`
+        // 신호 유형별 지침 — 프리장(≤09:00) 피셔F는 ETF 미개장이라 09:00 시가 1/3 선진입,
+        // 정규장 피셔는 본진입. 스탑은 공히 ETF -3% (v1.13 — 프리장도 피셔 판정자)
+        text += whenLabel <= "09:00"
+          ? `\n▶프리장 피셔 신호: ETF 개장(09:00) 후 시가 부근 1/3 선진입 · 스탑 진입가 ETF -3% · 09:30 판정 유지 확인 후 본진입. 당일청산.`
           : `\n▶피셔 확인: 본진입 가능 · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
         text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {

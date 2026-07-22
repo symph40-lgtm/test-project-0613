@@ -428,6 +428,57 @@ async function main() {
     }
   }
 
+  // ══ ⑧ 프리장 피셔F 대체 + 9시 독립창 (2026-07-22 사용자 제안)
+  //  A(현행): 08:00창, 피셔 개시 09:30
+  //  B(프리장 피셔F): 08:00창, 개시 08:30 — 09:30 전 확인 시 진입은 정규장 시가(ETF 프리장 없음)
+  //  C(9시 독립창): 09:00창(프리장 무시), 개시 09:20 (OR 09:00~09:15 + 확인 4봉 최소 시간)
+  //  D(제안 결합): 프리장(B, ~09:29) 확인 있으면 그걸로, 없으면 C
+  console.log("\n══ ⑧ 프리장 피셔F 대체·9시 독립창 검증 (0.05·4봉+강돌파 0.10, 스탑 -1.5%) ══");
+  for (const p of periods) {
+    const set = days.filter((d) => d.date >= p.from && d.date <= TODAY);
+    type R = { n: number; hit: number; cum: number; stops: number; cuts: string[] };
+    const mk = (): R => ({ n: 0, hit: 0, cum: 0, stops: 0, cuts: [] });
+    const res: Record<string, R> = { A: mk(), B: mk(), C: mk(), D: mk() };
+    const score = (r: R, d: DayData, s: NonNullable<DaySim>, entryOverride?: number, stopFrom?: string) => {
+      r.n++;
+      const verdict: Verdict = s.dir === "up" ? "leverage" : "inverse";
+      if (verdict === d.label) r.hit++;
+      r.cuts.push(s.confirmCut);
+      const entry = entryOverride ?? s.entryPx;
+      const sign = s.dir === "up" ? 1 : -1;
+      const raw = ((d.close - entry) / entry) * 100 * sign;
+      const st = stopHit(d.krx, stopFrom ?? s.confirmCut, s.dir, entry, 1.5);
+      if (st) { r.cum += -1.5; r.stops++; } else r.cum += raw;
+    };
+    for (const d of set) {
+      const a = simulateDay(d.pre, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1 });
+      if (a) score(res.A, d, a);
+      // B: 개시 08:30 — 확인이 09:30 전이면 진입 정규장 시가·스탑도 09:00부터
+      const b = simulateDay(d.pre, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1, startMin: 8 * 60 + 30 });
+      const bPre = b && b.confirmCut < "09:30" ? b : null;
+      // 확인이 09:00 이전(프리장 완성 신호)일 때만 정규장 시가 진입 — 09:01~09:29 확인의
+      // 시가 진입은 미래참조라 확인가 진입으로 채점
+      const bOpen = bPre && bPre.confirmCut <= "09:00" ? d.krx[0]?.open : undefined;
+      const bStopFrom = bPre && bPre.confirmCut <= "09:00" ? "09:00" : undefined;
+      if (bPre) score(res.B, d, bPre, bOpen, bStopFrom);
+      // C: 9시 독립창
+      const c = simulateDay(null, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1, noPreWindow: true, startMin: 9 * 60 + 20 });
+      if (c) score(res.C, d, c);
+      // D: 결합
+      if (bPre) score(res.D, d, bPre, bOpen, bStopFrom);
+      else if (c) score(res.D, d, c);
+    }
+    console.log(`\n── ${p.name}: ${set.length}일 ──`);
+    const NAMES: Record<string, string> = {
+      A: "A 현행(08창·09:30개시)   ", B: "B 프리장 피셔F(~09:29만) ", C: "C 9시 독립창(09:20개시)  ", D: "D 결합(B우선→C)        ",
+    };
+    for (const k of ["A", "B", "C", "D"]) {
+      const r = res[k];
+      if (r.n === 0) { console.log(`${NAMES[k]}: 신호 0회`); continue; }
+      console.log(`${NAMES[k]}: 신호 ${String(r.n).padStart(3)}회 · 방향적중 ${((r.hit / r.n) * 100).toFixed(1).padStart(5)}% · 중앙확인 ${medianCut(r.cuts)} · 누적 ${r.cum >= 0 ? "+" : ""}${r.cum.toFixed(1).padStart(6)}%p · 거래당 ${fmtPct(r.cum / r.n)} · 컷 ${r.stops}`);
+    }
+  }
+
   // 어제(7/21) 개별 확인 — 강돌파 임계별 확인 시각
   const t2 = days.find((d) => d.date === TODAY);
   if (t2) {
