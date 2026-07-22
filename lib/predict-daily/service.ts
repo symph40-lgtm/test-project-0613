@@ -45,12 +45,12 @@ function macroLine(m: MacroSnap | null): string {
 }
 
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
-function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number): string {
+function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number, mw?: MwStats): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j)}${macroLine(macro)}${flowLine(flow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}`;
 }
 
-function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[]): string {
+function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[], mw?: MwStats): string {
   const label = actionLabel(j.stance, j.exposure);
   const head = prevLabel && prevLabel !== label ? `${prevLabel} → ${label}` : label;
   const why: string[] = [];
@@ -60,13 +60,33 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   else why.push("하락 추세");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
 }
 
-// 미너비니·와인스타인 판정 병기 (사용자 지시 2026-07-22 — 갭 대비 참고: 와인스타인이 최근 구간 갭적중 우위)
+// 미너비니·와인스타인 판정 병기 + 누적 실측 적중 (사용자 지시 2026-07-22 — 매일의 판정·실제 결과를 누적 평가해 표기)
 const stanceKo = (s: Stance) => (s === "long" ? "매수" : s === "short" ? "매도" : "중립");
-function mwLine(j: DailyJudgment): string {
-  return ` 미너비니 ${stanceKo(j.modelStances["minervini"])}·와인 ${stanceKo(j.modelStances["weinstein"])}.`;
+type MwStat = { acc: number; n: number } | null;
+type MwStats = { m: MwStat; w: MwStat };
+
+// 저장된 채점 행(라벨 r3 확정분)에서 두 모델의 누적 방향적중 산출 — 표본 5회 미만이면 표기 생략
+function mwAcc(rows: PredictDailyRow[]): MwStats {
+  const calc = (id: string): MwStat => {
+    let ok = 0, n = 0;
+    for (const r of rows) {
+      if (r.label_r3 === null || !r.model_stances) continue;
+      const s = r.model_stances[id];
+      if (!s || s === "flat") continue;
+      n++;
+      if (s === "long" ? r.label_r3 > 0 : r.label_r3 < 0) ok++;
+    }
+    return n >= 5 ? { acc: (100 * ok) / n, n } : null;
+  };
+  return { m: calc("minervini"), w: calc("weinstein") };
+}
+
+function mwLine(j: DailyJudgment, st?: MwStats): string {
+  const f = (s: MwStat) => (s ? `(적중${Math.round(s.acc)}%/${s.n})` : "");
+  return ` 미너비니 ${stanceKo(j.modelStances["minervini"])}${f(st?.m ?? null)}·와인 ${stanceKo(j.modelStances["weinstein"])}${f(st?.w ?? null)}.`;
 }
 
 // 장세 표기 (사용자 지시 2026-07-22) — 단기(수퍼트렌드) + 중장기(3지표 투표) + 성격(t-통계 3분류) + 낙폭
@@ -143,6 +163,9 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       }
     }
     summary.scored = (summary.scored as number) + scored;
+
+    // 미너비니·와인스타인 누적 실측 (매일 문자 표기용 — 저장된 채점 행 전체, 사용자 지시 2026-07-22)
+    const mwStats = mwAcc([...have.values()]);
 
     // 2-1. 주간 성능 집계 (금요일 15:40+) — 7모델 최근 60채점일 r3 적중, 판정자 우위 대조군 감지 (스펙 5-10)
     if (now.weekday === CFG.perf.weekday && now.minuteOfDay >= CFG.perf.afterMin) {
@@ -237,7 +260,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow) : holdText(sym.name, jg, macro2, flow, since, streak),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats),
         smsSubject: "일봉 판정",
       });
     }
@@ -271,7 +294,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
             await dispatchToChannels("signal", now.date, {
               key: `pdaily_after_${sym.code}_${now.date}_${stopHit ? "stop" : jgAfter.stance}`,
               severity: "high",
-              text: `[일봉·애프터] ${pxPart} — ${reason}. ${action}.${mwLine(jgAfter)} 무응답=현행 유지`,
+              text: `[일봉·애프터] ${pxPart} — ${reason}. ${action}.${mwLine(jgAfter, mwStats)} 무응답=현행 유지`,
               smsSubject: "일봉 애프터",
             });
             // 기록: revisions에 애프터 재판정 누적 (같은 스탠스 반복은 생략)
@@ -285,7 +308,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
             await dispatchToChannels("signal", now.date, {
               key: `pdaily_aftersum_${sym.code}_${now.date}`,
               severity: "low",
-              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${mwLine(jgAfter)} ${regimeLine(jgAfter)}`,
+              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}`,
               smsSubject: "일봉 애프터",
             });
           }
