@@ -47,7 +47,7 @@ function macroLine(m: MacroSnap | null): string {
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
 function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${macroLine(macro)}${flowLine(flow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j)}${macroLine(macro)}${flowLine(flow)}`;
 }
 
 function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[]): string {
@@ -60,7 +60,13 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   else why.push("하락 추세");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j)}${macroLine(macro)}${flowLine(flow)} 무응답=현행 유지`;
+}
+
+// 미너비니·와인스타인 판정 병기 (사용자 지시 2026-07-22 — 갭 대비 참고: 와인스타인이 최근 구간 갭적중 우위)
+const stanceKo = (s: Stance) => (s === "long" ? "매수" : s === "short" ? "매도" : "중립");
+function mwLine(j: DailyJudgment): string {
+  return ` 미너비니 ${stanceKo(j.modelStances["minervini"])}·와인 ${stanceKo(j.modelStances["weinstein"])}.`;
 }
 
 // 장세 표기 (사용자 지시 2026-07-22) — 단기(수퍼트렌드) + 중장기(3지표 투표) + 성격(t-통계 3분류) + 낙폭
@@ -253,26 +259,35 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
         const stopHit = todayRow.exposure > 0 && todayRow.stop_px !== null && after.px <= todayRow.stop_px;
         const flipped = sym.anchorTo ? tierOf(jgAfter.exposure) !== tierOf(todayRow.exposure) : jgAfter.stance !== todayRow.stance;
         (summary.after as unknown[]).push({ symbol: sym.code, px: after.px, at: after.time, stance: jgAfter.stance, flipped, stopHit });
-        if (CFG.sms.enabled && (flipped || stopHit)) {
+        if (CFG.sms.enabled) {
           const chgPct = ((after.px / todayBar.close - 1) * 100).toFixed(1);
-          const reason = stopHit ? "손절선 하회"
-            : sym.anchorTo ? `삼전앵커 재판정→${actionLabel(jgAfter.stance, jgAfter.exposure)}`
-            : jgAfter.stance === "long" ? "추세 충족 전환" : "추세 이탈";
-          const action = stopHit || (flipped && todayRow.stance === "long")
-            ? "애프터장 마감 전 매도 권고"
-            : flipped && jgAfter.stance === "long" ? "내일 갭 대비 애프터 매수 검토" : "관망";
-          const key = `pdaily_after_${sym.code}_${now.date}_${stopHit ? "stop" : jgAfter.stance}`;
-          await dispatchToChannels("signal", now.date, {
-            key,
-            severity: "high",
-            text: `[일봉·애프터] ${sym.name} 애프터 ${fmtPx(after.px)}(${chgPct.startsWith("-") ? "" : "+"}${chgPct}%) — ${reason}. ${action}. 무응답=현행 유지`,
-            smsSubject: "일봉 애프터",
-          });
-          // 기록: revisions에 애프터 재판정 누적 (같은 스탠스 반복은 생략)
-          const revs = todayRow.revisions ?? [];
-          const lastRev = revs[revs.length - 1];
-          if (!lastRev || lastRev.stance !== jgAfter.stance) {
-            await upsertDay({ ...todayRow, revisions: [...revs, { at: new Date().toISOString(), stance: jgAfter.stance, exposure: jgAfter.exposure }] });
+          const pxPart = `${sym.name} 애프터 ${fmtPx(after.px)}(${chgPct.startsWith("-") ? "" : "+"}${chgPct}%)`;
+          if (flipped || stopHit) {
+            const reason = stopHit ? "손절선 하회"
+              : jgAfter.stance === "long" ? "추세 충족 전환" : "추세 이탈";
+            const action = stopHit || (flipped && todayRow.stance === "long")
+              ? "애프터장 마감 전 매도 권고"
+              : flipped && jgAfter.stance === "long" ? "내일 갭 대비 애프터 매수 검토" : "관망";
+            await dispatchToChannels("signal", now.date, {
+              key: `pdaily_after_${sym.code}_${now.date}_${stopHit ? "stop" : jgAfter.stance}`,
+              severity: "high",
+              text: `[일봉·애프터] ${pxPart} — ${reason}. ${action}.${mwLine(jgAfter)} 무응답=현행 유지`,
+              smsSubject: "일봉 애프터",
+            });
+            // 기록: revisions에 애프터 재판정 누적 (같은 스탠스 반복은 생략)
+            const revs = todayRow.revisions ?? [];
+            const lastRev = revs[revs.length - 1];
+            if (!lastRev || lastRev.stance !== jgAfter.stance) {
+              await upsertDay({ ...todayRow, revisions: [...revs, { at: new Date().toISOString(), stance: jgAfter.stance, exposure: jgAfter.exposure }] });
+            }
+          } else {
+            // 매일 애프터 요약 (2026-07-22 사용자 지시 — 전환 없어도 내일 전망 발송, 하루 1회 키로 중복 방지)
+            await dispatchToChannels("signal", now.date, {
+              key: `pdaily_aftersum_${sym.code}_${now.date}`,
+              severity: "low",
+              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${mwLine(jgAfter)} ${regimeLine(jgAfter)}`,
+              smsSubject: "일봉 애프터",
+            });
           }
         }
       }
