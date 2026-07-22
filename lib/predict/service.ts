@@ -128,6 +128,11 @@ async function checkpointStream(
       });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;
+    } else if (cutHHMM > PREDICT_CONFIG.earlyOffsetUntil) {
+      // 본판정 구간도 강돌파 즉시확인 (2026-07-22, 스트림 전용) — 스파이크형 급변 시 8봉 대기 생략
+      const late = runFisher(input, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio });
+      const i = outputs.findIndex((o) => o.model === "fisher");
+      if (i >= 0) outputs[i] = late;
     }
     const primary = cutHHMM < cfg.earlyModelBefore ? ("user" as const) : undefined;
     const fin = finalizeJudgment(outputs, runEnsemble(outputs, acc), primary);

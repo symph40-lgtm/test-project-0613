@@ -29,7 +29,7 @@ if (existsSync(envPath)) {
 const CACHE_DIR = resolve(process.cwd(), ".predict-cache");
 const CODE = "000660";
 const ETF = "0193T0"; // KODEX SK하이닉스단일종목레버리지 (2026-05-27 상장, 신탁 1.37조 최대)
-const TODAY = "2026-07-21";
+const TODAY = "2026-07-22";
 const WAR_FROM = "2026-03-02"; // "전쟁 난 3월 이후"
 const LEV_FROM = "2026-05-27"; // 단일종목 레버리지 상장일
 
@@ -64,16 +64,29 @@ async function minutesCached(code: string, date: string, kind: "KRX" | "NX"): Pr
 // ── 피셔 상태기계 스트리밍 — 상태 전이 타임라인 (전이 시각 = 봉 완성 컷 = 봉시각+1분)
 type FState = "none" | "up" | "down";
 type Transition = { cut: string; state: FState; px: number; via?: "run" | "strong" };
-function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, confirm: number, reversal: number, strongWon?: number): Transition[] {
+// ofWindow: 비연속 확인 — 최근 ofWindow봉 중 confirm봉 이상이면 충족 (지그재그 되돌림에 카운터가
+// 리셋되지 않게). 미지정이면 원전대로 '연속' confirm봉.
+function fisherStream(bars: MinuteBar[], orMinutes: number, offsetWon: number, confirm: number, reversal: number, strongWon?: number, ofWindow?: number): Transition[] {
   if (bars.length < orMinutes + 1) return [];
   const or = bars.slice(0, orMinutes);
   const aUp = Math.max(...or.map((b) => b.high)) + offsetWon;
   const aDown = Math.min(...or.map((b) => b.low)) - offsetWon;
   const out: Transition[] = [];
   let state: FState = "none", natUp = 0, natDown = 0;
+  const upHist: boolean[] = [], downHist: boolean[] = [];
   for (const b of bars.slice(orMinutes)) {
-    natUp = b.close > aUp ? natUp + 1 : 0;
-    natDown = b.close < aDown ? natDown + 1 : 0;
+    if (ofWindow !== undefined) {
+      upHist.push(b.close > aUp); downHist.push(b.close < aDown);
+      if (upHist.length > ofWindow) { upHist.shift(); downHist.shift(); }
+      natUp = upHist.filter(Boolean).length;
+      natDown = downHist.filter(Boolean).length;
+      // 양방향 동시 충족 모순 방지 — 현재 봉이 속한 쪽만 인정
+      if (b.close <= aUp) natUp = Math.min(natUp, confirm - 1);
+      if (b.close >= aDown) natDown = Math.min(natDown, confirm - 1);
+    } else {
+      natUp = b.close > aUp ? natUp + 1 : 0;
+      natDown = b.close < aDown ? natDown + 1 : 0;
+    }
     let upRun = natUp, downRun = natDown;
     // 강돌파 오버라이드: A선을 strongWon 이상 크게 돌파한 종가는 확인봉을 즉시 충족 처리
     if (strongWon !== undefined) {
@@ -476,6 +489,112 @@ async function main() {
       const r = res[k];
       if (r.n === 0) { console.log(`${NAMES[k]}: 신호 0회`); continue; }
       console.log(`${NAMES[k]}: 신호 ${String(r.n).padStart(3)}회 · 방향적중 ${((r.hit / r.n) * 100).toFixed(1).padStart(5)}% · 중앙확인 ${medianCut(r.cuts)} · 누적 ${r.cum >= 0 ? "+" : ""}${r.cum.toFixed(1).padStart(6)}%p · 거래당 ${fmtPct(r.cum / r.n)} · 컷 ${r.stops}`);
+    }
+  }
+
+  // ══ ⑨ 본판정 구간(10:31~14:00) 가속 검증 (2026-07-22 사용자 질문 — 13:24 하락, 13:58 판정)
+  // 라이브 파이프라인 전체(프리장 피셔F → 10:30 창전환 → 본피셔)를 멀티레그로 시뮬:
+  // 방향 확인 시 진입, 전환 시 청산+반대 진입, 소멸 시 청산, 레그당 스탑 -1.5%(컷 후 재진입 없음),
+  // 잔여는 종가 청산. 본피셔 구간 변형: 강돌파 margin / 비연속 확인(8 of 12) / 결합.
+  console.log("\n══ ⑨ 본판정 구간 가속 — 멀티레그 전체 파이프라인 (스탑 -1.5%) ══");
+  type LateVar = { name: string; strong?: number; ofWin?: number };
+  const LATE_VARS: LateVar[] = [
+    { name: "L0 현행(0.15·8연속)      " },
+    { name: "L1 +강돌파 0.10          ", strong: 0.1 },
+    { name: "L2 +강돌파 0.15          ", strong: 0.15 },
+    { name: "L3 +강돌파 0.20          ", strong: 0.2 },
+    { name: "L4 8of12 비연속          ", ofWin: 12 },
+    { name: "L5 강돌파0.15+8of12      ", strong: 0.15, ofWin: 12 },
+  ];
+  type Leg = { dir: FState; entryCut: string; entryPx: number };
+  const runPipeline = (d: DayData, v: LateVar) => {
+    const winA = [...(d.pre ?? []), ...d.krx];
+    const tlA = fisherStream(winA, 15, 0.05 * d.range10, 4, 5, 0.1 * d.range10);
+    const tlB = fisherStream(d.krx, 15, 0.15 * d.range10, 8, 5,
+      v.strong !== undefined ? v.strong * d.range10 : undefined, v.ofWin);
+    const closeByTime = new Map(d.krx.map((b) => [b.time, b.close]));
+    const lastCloseBefore = (cut: string): number => {
+      let px = d.krx[0]?.open ?? 0;
+      for (const b of d.krx) { if (b.time < cut) px = b.close; else break; }
+      return px;
+    };
+    // 유효 판정 타임라인 (컷 08:31~13:59)
+    const events: { cut: string; state: FState; px: number }[] = [];
+    let cur: FState = "none";
+    for (let m = 8 * 60 + 31; m <= 13 * 60 + 59; m++) {
+      const cut = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+      const s = cut <= "10:30" ? stateAt(tlA, cut) : stateAt(tlB, cut);
+      const st = s?.state ?? "none";
+      if (st !== cur) {
+        events.push({ cut, state: st, px: s && s.cut === cut ? s.px : lastCloseBefore(cut) });
+        cur = st;
+      }
+    }
+    // 멀티레그 채점
+    let cum = 0, legs = 0, stops = 0;
+    let pos: Leg | null = null;
+    let stopped = false; // 스탑 후 다음 '판정 변경'까지 재진입 금지
+    const settle = (exitPx: number) => {
+      if (!pos) return;
+      const sign = pos.dir === "up" ? 1 : -1;
+      cum += Math.max(-1.5, ((exitPx - pos.entryPx) / pos.entryPx) * 100 * sign);
+      pos = null;
+    };
+    const stopScan = (fromCut: string, toCut: string): { at: string } | null => {
+      if (!pos) return null;
+      const lvl = pos.dir === "up" ? pos.entryPx * 0.985 : pos.entryPx * 1.015;
+      for (const b of d.krx) {
+        if (b.time < fromCut || b.time >= toCut) continue;
+        if (pos.dir === "up" ? b.low <= lvl : b.high >= lvl) return { at: b.time };
+      }
+      return null;
+    };
+    let prevCut = "09:00";
+    for (const e of [...events, { cut: "15:30", state: "none" as FState, px: d.close }]) {
+      // 직전 레그의 스탑을 이 이벤트 전 구간에서 스캔
+      const st = stopScan(prevCut, e.cut);
+      if (st && pos) {
+        cum += -1.5; stops++; legs++; pos = null; stopped = true;
+      }
+      if (e.cut === "15:30") { if (pos) { legs++; settle(d.close); } break; }
+      if (pos && (e.state === "none" || e.state !== pos.dir)) { legs++; settle(e.px); }
+      if (e.state !== "none" && !pos) {
+        if (stopped) { stopped = false; } // 스탑 후 첫 판정 변경 — 재진입 허용 재개
+        const entryPx = e.cut <= "09:00" ? d.krx[0]?.open ?? e.px : e.px;
+        pos = { dir: e.state, entryCut: e.cut > "09:00" ? e.cut : "09:00", entryPx };
+      }
+      prevCut = e.cut > "09:00" ? e.cut : "09:00";
+    }
+    const finalState = ((): FState => {
+      const s = stateAt(tlB, "13:59");
+      return s?.state ?? "none";
+    })();
+    return { cum, legs, stops, finalState, events };
+  };
+  for (const p of periods) {
+    const set = days.filter((d) => d.date >= p.from && d.date <= TODAY);
+    console.log(`\n── ${p.name}: ${set.length}일 ──`);
+    console.log("변형                      | 레그  | 누적       | 컷수 | 14시 3분류 | 14시 방향적중");
+    for (const v of LATE_VARS) {
+      let cum = 0, legs = 0, stops = 0, acc = 0, dirT = 0, dirC = 0;
+      for (const d of set) {
+        const r = runPipeline(d, v);
+        cum += r.cum; legs += r.legs; stops += r.stops;
+        const verdict: Verdict = r.finalState === "up" ? "leverage" : r.finalState === "down" ? "inverse" : "none";
+        if (verdict === d.label) acc++;
+        if (verdict !== "none") { dirT++; if (verdict === d.label) dirC++; }
+      }
+      console.log(`${v.name} | ${String(legs).padStart(4)} | ${cum >= 0 ? "+" : ""}${cum.toFixed(1).padStart(7)}%p | ${String(stops).padStart(3)} | ${((acc / set.length) * 100).toFixed(1).padStart(6)}% | ${dirT ? ((dirC / dirT) * 100).toFixed(1).padStart(5) + "%" : "  —  "} (${dirT}회)`);
+    }
+  }
+  // 오늘(7/22) 재현 — 변형별 인버스 확인 시각
+  const t922 = days.find((d) => d.date === TODAY);
+  if (t922) {
+    console.log(`\n7/22 재현 — 변형별 판정 전이 (10:30 이후):`);
+    for (const v of LATE_VARS) {
+      const r = runPipeline(t922, v);
+      const late = r.events.filter((e) => e.cut > "10:29");
+      console.log(`  ${v.name}: ${late.map((e) => `${e.cut} ${e.state === "up" ? "레버" : e.state === "down" ? "인버" : "없음"} @${e.px}`).join(" → ") || "전이 없음"}`);
     }
   }
 
