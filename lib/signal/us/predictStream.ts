@@ -165,6 +165,17 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const prevClose = hist[hist.length - 1]?.close;
   if (hist.length < 30 || range10 === null || !prevClose) return result;
 
+  // 분봉 커버리지 가드 (한국 2026-07-20 실측 규칙 이식 — 정합 감사 2026-07-23): 야후 응답이
+  // 호출마다 들쭉날쭉하면 피셔 상태기계가 불가능한 전이로 진동. 정규장 예상 5분봉의 80% 미만이면
+  // 이번 호출은 판정 생략 (프리장 봉은 원래 성겨서 가드 제외).
+  if (minuteOfDay > ET_OPEN + 10) {
+    const expectReg = Math.floor((Math.min(minuteOfDay, ET_CLOSE) - ET_OPEN) / 5);
+    if (expectReg > 2 && reg.length < expectReg * 0.8) {
+      console.error(`[uspredict] 분봉 커버리지 부족 (${reg.length}/${expectReg}) — 이번 호출 판정 생략`);
+      return result;
+    }
+  }
+
   const judgeAt = (cut: string): { verdict: Verdict; strength: number; judge: Judge } | null => {
     const cutMin = hhmmToMin(cut);
     if (cut <= UP.earlyUntilCp) {

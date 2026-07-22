@@ -11,6 +11,7 @@ import { collectUsTick, appendUsTick, loadUsTicks, fetchSmhDaily, etNow, toVirtu
 import { decideUs, buildUsSignalAlert, buildUsMoveAlerts } from "@/lib/signal/us/engine";
 import { maybeSendUsReversalAlert, maybeSendUsTrendCancel } from "@/lib/signal/us/alerts";
 import { runUsPredictStream } from "@/lib/signal/us/predictStream";
+import { runUsDailyService } from "@/lib/signal/us/daily";
 import { US_SIGNAL_CONFIG } from "@/lib/signal/us/config";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,10 @@ export async function GET(req: NextRequest) {
     // + 채점 백필. 실패해도 신호 흐름 무관. 라이브 판정 08:31~14:33 ET (KST 21:31~03:33 서머타임)
     // — 크론 시작을 20:55 KST로 당기면 프리장 체크포인트(21:30~)부터 실시간 커버.
     const predict = isWeekday ? await runUsPredictStream().catch(() => null) : null;
+
+    // 미장 일봉 스윙 (사용자 지시 2026-07-23) — 마감 판정(16:05~ ET)·애프터장 마감 지침 문자
+    // (19:55~20:15 ET = 08:55~09:15 KST 여름). 창 밖이면 함수가 즉시 반환. ⚠크론 KST 9~10시 필요.
+    const daily = isWeekday ? await runUsDailyService().catch(() => null) : null;
 
     const tick = await collectUsTick();
     let stored = false;
@@ -77,7 +82,7 @@ export async function GET(req: NextRequest) {
       sent += await maybeSendUsReversalAlert(judgment, quiet).catch(() => 0);
     }
 
-    return NextResponse.json({ judgment, predict, tickCount: rows.length, stored, sent });
+    return NextResponse.json({ judgment, predict, daily, tickCount: rows.length, stored, sent });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "internal error" }, { status: 500 });
   }
