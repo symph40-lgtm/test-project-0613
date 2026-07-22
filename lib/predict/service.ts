@@ -217,7 +217,7 @@ async function checkpointStream(
         // 정규장 피셔는 본진입. 스탑은 공히 ETF -3% (v1.13 — 프리장도 피셔 판정자)
         text += whenLabel <= "09:00"
           ? `\n▶프리장 피셔 신호: ETF 개장(09:00) 후 시가 부근 1/3 선진입 · 스탑 진입가 ETF -3% · 09:30 판정 유지 확인 후 본진입. 당일청산.`
-          : `\n▶피셔 확인: 본진입 가능(3단계 — F 선진입 시 잔여 +20%p) · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
+          : `\n▶피셔 확인: 본진입 가능(3단계: 추가 +20%p, 누적 100%) · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
         text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {
         text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
@@ -311,12 +311,13 @@ async function checkpointStream(
         { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes },
       );
       const curV = revs[revs.length - 1].verdict;
+      const ffStop = PREDICT_CONFIG.stops.fisher.etfPct; // 단계 문자 공통 스탑 표기 (사용자 지시 2026-07-22)
       if (rf.verdict !== "none" && rf.verdict !== curV) {
         try {
           await dispatchToChannels("signal", today, {
             key: `predict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
             severity: "medium",
-            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토(스탑 ETF -3%). 피셔M 중간확인 대기. 무응답=현행 유지`,
+            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict, ffStop)}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -333,7 +334,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_fm_${rm.verdict}`,
             severity: "medium",
-            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]}. 피셔F 신뢰↑(실측: M확인 시 적중 60%·미확인 16%). ▶2단계: +30%p(누적 80%) 검토. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지`,
+            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]}. 피셔F 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -344,7 +345,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_fmopp_${rm.verdict}`,
             severity: "medium",
-            text: `[예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락. ▶F 선진입분 30%p 축소(잔여 20%), 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
+            text: `[예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -3% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
