@@ -270,6 +270,9 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서. 미국 소표본 — 소액만.`;
         } else if (prev !== null) {
           text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:30 ET) 반대 보유 금지.`;
+        } else {
+          // 첫 판정이 무추세 (한국 2026-07-22 지시 동일) — 상태 통지 + 대기 지침
+          text += `\n▶방향 없음 — 진입 대기. 방향 확인 시 즉시 문자.`;
         }
         // 광폭 시초레인지 경고 — SOXX 90분위(2.7%) 초과. 유사일 표본 부족(4일)이라 수치 단정 없이
         // 비중 축소만 권장 (한국은 광폭일 적중 급락 43% 실측 — SOXX는 라이브 누적으로 확인)
@@ -303,8 +306,9 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     revs = [...revs, { at: new Date().toISOString(), checkpoint: cp, verdict: fin.verdict, strength: fin.strength, judge: fin.judge }];
     changed = true;
     if (cp !== pending[pending.length - 1]) continue;
-    // 방향 등장·소멸·전환 문자 (첫 기록 '추세없음'은 조용) — 비교 기준은 이번 호출 전 마지막 판정
-    if (fin.verdict !== verdictBefore && !(verdictBefore === null && fin.verdict === "none")) {
+    // 문자: 방향 등장·소멸·전환 + 첫 판정은 '추세없음'이어도 발송 (한국 2026-07-22 지시 동일 —
+    // 프리장 첫 판정은 시스템 가동·상태 확인 겸 무추세도 통지). 무추세 '유지'는 계속 조용.
+    if (fin.verdict !== verdictBefore) {
       await sms(cp, verdictBefore, fin, "change");
     } else if (fin.verdict === verdictBefore && fin.verdict !== "none") {
       // 유지 확인 (사용자 지정 2026-07-20 한국 체계): 동일 판정 연속 체크포인트 2개째에 1회
