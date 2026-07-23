@@ -336,13 +336,16 @@ export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]>
   return (data ?? []) as PredictModelRow[];
 }
 
-// 삼전 병기 스냅샷 상태 (2026-07-23) — F/M/본 전이 감지용 (ops_settings 키-값, 마이그레이션 025)
-export type SsState = { date: string; F: Verdict; M: Verdict; B: Verdict };
+// 피셔 전이 모니터 상태 (2026-07-23, 삼전·하닉 통합) — F/M/본 전이 감지용 (ops_settings, 마이그레이션 025)
+export type FisherTierState = { F: Verdict; M: Verdict; B: Verdict };
+export type SsState = { date: string; ss: FisherTierState; hx: FisherTierState };
 
 export async function loadSsState(): Promise<SsState | null> {
   const admin = createAdminClient();
   const { data } = await admin.from("ops_settings").select("value").eq("key", "predict_ss_state").maybeSingle();
-  return (data?.value as SsState | null) ?? null;
+  const v = data?.value as Partial<SsState> | null;
+  if (!v || typeof v !== "object" || !v.date || !v.ss || !v.hx) return null; // 구형(삼전 단독) 스키마는 무시
+  return v as SsState;
 }
 
 export async function saveSsState(s: SsState): Promise<void> {

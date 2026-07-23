@@ -29,6 +29,11 @@ const SCORE_MIN = 15 * 60 + 35; // 15:35부터 당일 채점
 const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 const V_KO: Record<Verdict, string> = { leverage: "레버리지", inverse: "인버스", none: "추세없음" };
 
+// 체크포인트 스트림 문자 폐기 (2026-07-23 사용자 확정: 사용자모델·체크포인트 문자 중단) —
+// 방향 통지는 ②b 통합 피셔 전이 모니터(삼전·하닉 동일 사슬)가 전담. 판정 기록·채점·성능/청산/애프터
+// 문자는 그대로 유지. 스트림 문자를 되살리려면 true로.
+const STREAM_SMS = false;
+
 async function judgeOneDay(
   date: string,
   complete: PredictDailyBar[], // date 이전의 완결 일봉들 (오래된→최신)
@@ -213,26 +218,31 @@ async function checkpointStream(
   let ssF: Verdict = "none", ssM: Verdict = "none", ssB: Verdict = "none";
   let ssFReason = "", ssMReason = "", ssBReason = "";
   try {
-    if (minuteOfDay >= hhmmToMin("09:20")) {
+    if (minuteOfDay >= hhmmToMin("08:25")) {
       const nowHHMMs = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       const ssDaily = await fetchDailyPredict("005930", 140);
       const ssHist = ssDaily.filter((b) => b.date < today);
+      const ssPre = await fetchNxtPremarket("005930", ymd); // 프리장부터 (하닉과 동일 창 규칙)
       const ssMin = (await fetchDayMinutes("005930", ymd, PREDICT_CONFIG.judgeHour)) ?? (await fetchTodayMinutes("005930", PREDICT_CONFIG.judgeHour));
-      const ssBars = (ssMin ?? []).filter((b) => b.time < nowHHMMs);
-      if (ssBars.length >= 20 && ssHist.length >= 11) {
-        const ssInput = { date: today, dailyHistory: ssHist, openPx: ssBars[0].open, morning: ssBars, prevDayMinutes: null };
-        const f = runFisher(ssInput, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
-        const m = runFisher(ssInput, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
-        const b = runFisher(ssInput, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio });
+      const ssReg = (ssMin ?? []).filter((b) => b.time < nowHHMMs);
+      const ssCont = [...(ssPre ?? []), ...ssReg]; // F·M = 08:00 연속창, 본 = 09:00 정규장창
+      if (ssCont.length >= 20 && ssHist.length >= 11) {
+        const inCont = { date: today, dailyHistory: ssHist, openPx: ssCont[0].open, morning: ssCont, prevDayMinutes: null };
+        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
+        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
+        const b = ssReg.length >= 20
+          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio })
+          : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
-        ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssBars[ssBars.length - 1].close.toLocaleString()}원`;
+        const ssPxBar = ssReg.length ? ssReg[ssReg.length - 1] : ssCont[ssCont.length - 1];
+        ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssPxBar.close.toLocaleString()}원`;
       }
     }
   } catch { /* 삼전 스냅샷 실패 — 병기 생략 */ }
 
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
-    if (!PREDICT_CONFIG.sms.enabled) return;
+    if (!STREAM_SMS || !PREDICT_CONFIG.sms.enabled) return;
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
     const judgeKo = judge === "user" ? "사용자모델" : "피셔"; // 어떤 모델의 판정인지 명시 (사용자 요청 2026-07-20)
     const hitPct = next.verdict !== "none" ? slotHitPct(whenLabel) : null;
@@ -289,7 +299,7 @@ async function checkpointStream(
   // 유지 확인 문자 (사용자 지정 2026-07-20): 같은 방향 판정이 체크포인트 2개 연속 유지되면
   // 1회만 확인 발송 — "바뀔 때 + 유지 확인 한 번" 체계.
   const smsHold = async (cp: string, verdict: Verdict, strength: number, sinceCp: string) => {
-    if (!PREDICT_CONFIG.sms.enabled) return;
+    if (!STREAM_SMS || !PREDICT_CONFIG.sms.enabled) return;
     const judgeKo = cp < cfg.earlyModelBefore ? "사용자모델" : "피셔";
     const hitPct = slotHitPct(cp);
     try {
@@ -337,108 +347,79 @@ async function checkpointStream(
     }
   }
 
-  // ②b 피셔F 반전 조기 경보 (2026-07-22 사용자 복기: 본 피셔 13:57 vs 피셔F 12:10 인버스 확인).
-  // 224일 실측: 동일 방향 확인 시 피셔F 평균 37분 선행(본 피셔가 13시 이후에야 확인한 날은 80분),
-  // 확인시점 진입 캡처 +146.5%p vs 본 피셔 +64.2%p. 단 본 피셔 무판정일의 피셔F 단독 신호는 80%가
-  // 손해(과다 판정) — 판정 교체가 아니라 '조기 경보 문자'로만 편입. 본진입 판단은 본 피셔 유지.
-  if (minuteOfDay >= hhmmToMin("10:35") && minuteOfDay <= hhmmToMin(lastCp) && revs.length > 0 && PREDICT_CONFIG.sms.enabled) {
-    const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
-    const ffBars = krx.filter((b) => b.time < nowHHMM2);
-    if (ffBars.length >= 20) {
-      const rf = runFisher(
-        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
-        { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes },
-      );
-      const curV = revs[revs.length - 1].verdict;
-      const ffStop = PREDICT_CONFIG.stops.fisher.etfPct; // 단계 문자 공통 스탑 표기 (사용자 지시 2026-07-22)
-      // 정확도 동봉 (사용자 지시 2026-07-22 밤 — 미장과 동일): 이시각 실측적중(슬롯 실측,
-      // 라이브 20회↑ 우선·미달 시 사전값) + 유사장 적중(시초레인지 폭 버킷) — 판정 문자와 동일 눈금
-      const statTail = `(이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
-      if (rf.verdict !== "none" && rf.verdict !== curV) {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `predict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
-            severity: "medium",
-            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict, ffStop)}${ssTail}`,
-            smsSubject: "예측 조기경보",
-          });
-        } catch { /* 발송 실패 무시 */ }
-      }
-      // ②c 피셔M 중간확인 (2026-07-22 사용자 3단계 설계: F 임시 일부진입 → M 중간확인 확대 → 본 피셔 본격).
-      // 상수 0.10·8봉 = 구 조기창 검증 상수. 224일 실측(tmp-fisherm-stage): F 발화 197일 중 M 동방향 확인
-      // 159일 적중 60%(F+23분) vs M 미확인 38일 적중 16% — M 확인이 F 임시판정의 진위 필터.
-      const rm = runFisher(
-        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
-        { offsetRangeRatio: 0.10, confirmMinutes: 8 },
-      );
-      // ②c-0 피셔M 동방향 중간확인 (사용자 지시 2026-07-23 — 미장과 동일): 현 판정이 조기창
-      // 피셔F 단계(본피셔 미확인)일 때 M이 같은 방향을 확인하면 2단계(+30%p) 확대 통지.
-      // 본피셔가 이미 확인했으면 3단계라 생략. 키는 방향별 1일 1회 (반전 케이스와 공유).
-      const rMainNow = runFisher(
-        { date: today, dailyHistory: complete.slice(-120), openPx: krx[0]?.open ?? ffBars[0].open, morning: ffBars, prevDayMinutes: null },
-        { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio },
-      );
-      if (rm.verdict !== "none" && rm.verdict === curV && rMainNow.verdict === "none") {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `predict_fm_${rm.verdict}`,
-            severity: "medium",
-            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}${ssTail}`,
-            smsSubject: "예측 조기경보",
-          });
-        } catch { /* 발송 실패 무시 */ }
-      }
-      if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `predict_fm_${rm.verdict}`,
-            severity: "medium",
-            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}${ssTail}`,
-            smsSubject: "예측 조기경보",
-          });
-        } catch { /* 발송 실패 무시 */ }
-      }
-      // ②c-2 피셔M 반대 방향 = 피셔F 신뢰 하락 경고 (사용자 지시 2026-07-22: 반대면 30%p 축소 지침)
-      if (rm.verdict !== "none" && rf.verdict !== "none" && rm.verdict !== rf.verdict) {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `predict_fmopp_${rm.verdict}`,
-            severity: "medium",
-            text: `[예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -3% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지${ssTail}`,
-            smsSubject: "예측 조기경보",
-          });
-        } catch { /* 발송 실패 무시 */ }
-      }
-    }
-  }
-
-  // ②d 삼전 트리거 (2026-07-23, 전이 기반 개정 — 사용자 지시 "판정이 바뀔 때는 계속 문자"):
-  // 직전 상태(ops_settings predict_ss_state)와 비교해 등장·전환·소멸 모든 전이를 통지.
-  // 키는 하닉 모니터링과 동일 원칙의 전이 키(prev→next, 같은 전이는 1일 1회 — 폭주 방지).
-  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("09:20") && minuteOfDay <= hhmmToMin(lastCp) && ssTail) {
+  // ②b 통합 피셔 전이 모니터 (2026-07-23 사용자 확정: 하닉 기존 문자 방식 폐기 — 삼전·하닉 동일 사슬).
+  // 두 종목 모두 F(0.05·4봉)/M(0.10·8봉)/본(0.15·8봉+강돌파)을 같은 규칙으로 감시.
+  // 창: F·M = 08:00 연속창(NXT 프리장 포함 — "프리장부터"), 본 = 09:00 정규장창 (nowcast 관례와 동일).
+  // 상수는 하닉 220일+224일 실측 검증분 — 오프셋이 각 종목 10일 평균폭에 비례라 변동폭은 종목별 자동 적응.
+  // 문자: 등장·전환·소멸 모든 전이 통지(전이 키 — 같은 전이 1일 1회), 어느 트리거든 두 종목 상태 병기.
+  // 판정 기록·채점·성능/청산/애프터 문자는 기존 스트림 유지 — 방향 통지 층만 이 모니터로 일원화.
+  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("08:25") && minuteOfDay <= hhmmToMin(lastCp)) {
     try {
-      const prevSs = await loadSsState();
-      const sameDay = prevSs !== null && prevSs.date === today;
-      const curV2 = revs.length ? revs[revs.length - 1].verdict : ("none" as Verdict);
-      const trigs: [string, string, Verdict, Verdict, string][] = [
-        ["F", "피셔F 임시판정", sameDay ? prevSs!.F : "none", ssF, ssFReason],
-        ["M", "피셔M 중간확인", sameDay ? prevSs!.M : "none", ssM, ssMReason],
-        ["B", "본피셔 확정", sameDay ? prevSs!.B : "none", ssB, ssBReason],
-      ];
-      let anyChange = false;
-      for (const [code2, nm, pv, v, reason] of trigs) {
-        if (v === pv) continue;
-        anyChange = true;
-        const label = pv === "none" ? `${V_KO[v]} 확인` : v === "none" ? `${V_KO[pv]} 소멸` : `${V_KO[pv]}→${V_KO[v]} 전환`;
-        await dispatchToChannels("signal", today, {
-          key: `predict_ss${code2}_${pv}_${v}`,
-          severity: "medium",
-          text: `[예측·삼전 ${nm}] ${label}${v !== "none" ? ` — ${reason.split(" — ")[0]}` : ""}.\n하닉: 공식 ${V_KO[curV2]}${ssTail} ▶실행 지침(비중·스탑)은 하닉 스트림 문자 기준, 삼전은 기준 신호 참고. 무응답=현행 유지`,
-          smsSubject: "예측 조기경보",
-        });
+      const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+      const statTail = `(이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
+      const ffStop = PREDICT_CONFIG.stops.fisher.etfPct;
+      // 하닉 3단계 (F·M 08 연속창 / 본 09 정규장창)
+      const hxCont = [...(pre ?? []), ...krx].filter((b) => b.time < nowHHMM2);
+      const hxReg = krx.filter((b) => b.time < nowHHMM2);
+      let hxFo: ReturnType<typeof runFisher> | null = null;
+      let hxMo: ReturnType<typeof runFisher> | null = null;
+      let hxBo: ReturnType<typeof runFisher> | null = null;
+      if (hxCont.length >= 20) {
+        const inC = { date: today, dailyHistory: complete.slice(-120), openPx: hxCont[0].open, morning: hxCont, prevDayMinutes: null };
+        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
+        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
       }
-      if (anyChange || !sameDay) await saveSsState({ date: today, F: ssF, M: ssM, B: ssB });
-    } catch { /* 상태 조회·발송 실패는 스트림을 막지 않는다 */ }
+      if (hxReg.length >= 20) {
+        hxBo = runFisher(
+          { date: today, dailyHistory: complete.slice(-120), openPx: hxReg[0].open, morning: hxReg, prevDayMinutes: null },
+          { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio },
+        );
+      }
+      const hxF2: Verdict = hxFo?.verdict ?? "none";
+      const hxM2: Verdict = hxMo?.verdict ?? "none";
+      const hxB2: Verdict = hxBo?.verdict ?? "none";
+      const hxPx = hxReg.length ? hxReg[hxReg.length - 1].close : hxCont.length ? hxCont[hxCont.length - 1].close : null;
+      const hxLine = `\n하닉: F${ssLab(hxF2)}·M${ssLab(hxM2)}·본${ssLab(hxB2)}${hxPx !== null ? ` ${hxPx.toLocaleString()}원` : ""}`;
+      const bothLines = `${hxLine}${ssTail || "\n삼전: 스냅샷 없음"}`;
+
+      const prevState = await loadSsState();
+      const sameDay = prevState !== null && prevState.date === today;
+      type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict };
+      const trigs: Trig[] = [
+        { sym: "hx", symKo: "하닉", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.hx.F : "none", cur: hxF2, reason: hxFo?.reason ?? "", fDir: hxF2 },
+        { sym: "hx", symKo: "하닉", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.hx.M : "none", cur: hxM2, reason: hxMo?.reason ?? "", fDir: hxF2 },
+        { sym: "hx", symKo: "하닉", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.hx.B : "none", cur: hxB2, reason: hxBo?.reason ?? "", fDir: hxF2 },
+        { sym: "ss", symKo: "삼전", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.ss.F : "none", cur: ssF, reason: ssFReason, fDir: ssF },
+        { sym: "ss", symKo: "삼전", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.ss.M : "none", cur: ssM, reason: ssMReason, fDir: ssF },
+        { sym: "ss", symKo: "삼전", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.ss.B : "none", cur: ssB, reason: ssBReason, fDir: ssF },
+      ];
+      const guideOf = (t: Trig): string => {
+        if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
+        if (t.prev !== "none" && t.prev !== t.cur) return "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
+        if (t.tier === "F") return "▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기.";
+        if (t.tier === "M") {
+          const warn = t.fDir !== "none" && t.cur !== t.fDir ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
+          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%.${warn}`;
+        }
+        return "▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -3% 고정·당일청산.";
+      };
+      let anyChange = false;
+      for (const t of trigs) {
+        if (t.cur === t.prev) continue;
+        anyChange = true;
+        const label = t.prev === "none" ? `${V_KO[t.cur]} 확인` : t.cur === "none" ? `${V_KO[t.prev]} 소멸` : `${V_KO[t.prev]}→${V_KO[t.cur]} 전환`;
+        const stopLine = t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
+            severity: t.tier === "B" ? "high" : "medium",
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guideOf(t)} 무응답=현행 유지${stopLine}${bothLines}`,
+            smsSubject: "예측 판정",
+          });
+        } catch { /* 발송 실패 무시 */ }
+      }
+      if (anyChange || !sameDay) await saveSsState({ date: today, ss: { F: ssF, M: ssM, B: ssB }, hx: { F: hxF2, M: hxM2, B: hxB2 } });
+    } catch { /* 모니터 실패는 스트림(기록·채점)을 막지 않는다 */ }
   }
 
   if (!changed || revs.length === 0) return false;
