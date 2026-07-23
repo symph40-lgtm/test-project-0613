@@ -17,7 +17,7 @@ import { runSectorService } from "./sector";
 import {
   countAlertKey, hasJudgment, hasModelRows, lastAlertDateLike, listUnscoredDates, loadAccuracyStats,
   loadAfterPerf, loadDayRow, loadLiveModelPerf, loadRecentDays, loadRescueStats, loadSectorPerf,
-  saveJudgment, scoreDay, upsertCheckpointDay, type Revision,
+  loadSsState, saveJudgment, saveSsState, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
 import { MODEL_LABELS } from "./types";
 import type { PredictDailyBar, Verdict } from "./types";
@@ -412,26 +412,33 @@ async function checkpointStream(
     }
   }
 
-  // ②d 삼전 트리거 (사용자 지시 2026-07-23): 삼전 F/M/본이 방향을 확인하면 두 종목 상태를 한 문자에.
-  // 실행 상품(레버/인버 ETF) 지침은 하닉 스트림 문자 기준 — 삼전은 기준 신호 참고용. 단계·방향별 1일 1회.
-  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("09:20") && minuteOfDay <= hhmmToMin(lastCp)) {
-    const curV2 = revs.length ? revs[revs.length - 1].verdict : ("none" as Verdict);
-    const trigs: [string, string, Verdict, string][] = [
-      ["F", "피셔F 임시판정", ssF, ssFReason],
-      ["M", "피셔M 중간확인", ssM, ssMReason],
-      ["B", "본피셔 확정", ssB, ssBReason],
-    ];
-    for (const [code2, nm, v, reason] of trigs) {
-      if (v === "none") continue;
-      try {
+  // ②d 삼전 트리거 (2026-07-23, 전이 기반 개정 — 사용자 지시 "판정이 바뀔 때는 계속 문자"):
+  // 직전 상태(ops_settings predict_ss_state)와 비교해 등장·전환·소멸 모든 전이를 통지.
+  // 키는 하닉 모니터링과 동일 원칙의 전이 키(prev→next, 같은 전이는 1일 1회 — 폭주 방지).
+  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("09:20") && minuteOfDay <= hhmmToMin(lastCp) && ssTail) {
+    try {
+      const prevSs = await loadSsState();
+      const sameDay = prevSs !== null && prevSs.date === today;
+      const curV2 = revs.length ? revs[revs.length - 1].verdict : ("none" as Verdict);
+      const trigs: [string, string, Verdict, Verdict, string][] = [
+        ["F", "피셔F 임시판정", sameDay ? prevSs!.F : "none", ssF, ssFReason],
+        ["M", "피셔M 중간확인", sameDay ? prevSs!.M : "none", ssM, ssMReason],
+        ["B", "본피셔 확정", sameDay ? prevSs!.B : "none", ssB, ssBReason],
+      ];
+      let anyChange = false;
+      for (const [code2, nm, pv, v, reason] of trigs) {
+        if (v === pv) continue;
+        anyChange = true;
+        const label = pv === "none" ? `${V_KO[v]} 확인` : v === "none" ? `${V_KO[pv]} 소멸` : `${V_KO[pv]}→${V_KO[v]} 전환`;
         await dispatchToChannels("signal", today, {
-          key: `predict_ss${code2}_${v}`,
+          key: `predict_ss${code2}_${pv}_${v}`,
           severity: "medium",
-          text: `[예측·삼전 ${nm}] ${V_KO[v]} — ${reason.split(" — ")[0]}.\n하닉: 공식 ${V_KO[curV2]}${ssTail} ▶실행 지침(비중·스탑)은 하닉 스트림 문자 기준, 삼전은 기준 신호 참고. 무응답=현행 유지`,
+          text: `[예측·삼전 ${nm}] ${label}${v !== "none" ? ` — ${reason.split(" — ")[0]}` : ""}.\n하닉: 공식 ${V_KO[curV2]}${ssTail} ▶실행 지침(비중·스탑)은 하닉 스트림 문자 기준, 삼전은 기준 신호 참고. 무응답=현행 유지`,
           smsSubject: "예측 조기경보",
         });
-      } catch { /* 발송 실패 무시 */ }
-    }
+      }
+      if (anyChange || !sameDay) await saveSsState({ date: today, F: ssF, M: ssM, B: ssB });
+    } catch { /* 상태 조회·발송 실패는 스트림을 막지 않는다 */ }
   }
 
   if (!changed || revs.length === 0) return false;

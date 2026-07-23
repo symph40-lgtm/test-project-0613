@@ -335,3 +335,17 @@ export async function loadModelRows(dates: string[]): Promise<PredictModelRow[]>
     .in("date", dates);
   return (data ?? []) as PredictModelRow[];
 }
+
+// 삼전 병기 스냅샷 상태 (2026-07-23) — F/M/본 전이 감지용 (ops_settings 키-값, 마이그레이션 025)
+export type SsState = { date: string; F: Verdict; M: Verdict; B: Verdict };
+
+export async function loadSsState(): Promise<SsState | null> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("ops_settings").select("value").eq("key", "predict_ss_state").maybeSingle();
+  return (data?.value as SsState | null) ?? null;
+}
+
+export async function saveSsState(s: SsState): Promise<void> {
+  const admin = createAdminClient();
+  await admin.from("ops_settings").upsert({ key: "predict_ss_state", value: s }, { onConflict: "key" });
+}
