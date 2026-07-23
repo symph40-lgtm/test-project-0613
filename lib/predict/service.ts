@@ -206,6 +206,31 @@ async function checkpointStream(
     } catch { return ""; }
   };
 
+  // 삼전 병기 스냅샷 (사용자 지시 2026-07-23): 피셔 단계 문자에 삼전·하닉 동시 상태 동봉 —
+  // 삼전도 동일 규칙(F 0.05·4 / M 0.10·8 / 본 0.15·8+강돌파, 09:00 정규장창)으로 판정. 실패 시 병기 생략.
+  const ssLab = (v: Verdict) => (v === "leverage" ? "레버" : v === "inverse" ? "인버" : "없음");
+  let ssTail = ""; // "\n삼전: F레버·M없음·본없음 270,250원"
+  let ssF: Verdict = "none", ssM: Verdict = "none", ssB: Verdict = "none";
+  let ssFReason = "", ssMReason = "", ssBReason = "";
+  try {
+    if (minuteOfDay >= hhmmToMin("09:20")) {
+      const nowHHMMs = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+      const ssDaily = await fetchDailyPredict("005930", 140);
+      const ssHist = ssDaily.filter((b) => b.date < today);
+      const ssMin = (await fetchDayMinutes("005930", ymd, PREDICT_CONFIG.judgeHour)) ?? (await fetchTodayMinutes("005930", PREDICT_CONFIG.judgeHour));
+      const ssBars = (ssMin ?? []).filter((b) => b.time < nowHHMMs);
+      if (ssBars.length >= 20 && ssHist.length >= 11) {
+        const ssInput = { date: today, dailyHistory: ssHist, openPx: ssBars[0].open, morning: ssBars, prevDayMinutes: null };
+        const f = runFisher(ssInput, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
+        const m = runFisher(ssInput, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
+        const b = runFisher(ssInput, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio });
+        ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
+        ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
+        ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssBars[ssBars.length - 1].close.toLocaleString()}원`;
+      }
+    }
+  } catch { /* 삼전 스냅샷 실패 — 병기 생략 */ }
+
   const smsChange = async (whenLabel: string, prev: Verdict | null, next: { verdict: Verdict; strength: number }) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
     const judge = whenLabel < cfg.earlyModelBefore ? "user" : PREDICT_CONFIG.primaryModel;
@@ -243,6 +268,7 @@ async function checkpointStream(
         text += `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭 — 유사일 피셔 적중 ${OB.hit.wide}%(평소 ${OB.hit.calm}~${OB.hit.mid}%). 비중 축소 권장.`;
       }
     }
+    if (ssTail) text += ssTail; // 삼전 병기 (2026-07-23)
     try {
       // 키에 분(minute)을 넣지 않는다 — 2026-07-20 실측 사고: 상태 저장 실패 시 매 크론마다
       // 같은 판정이 분 단위 새 키로 재발송돼 2분 간격 문자 폭주. 체크포인트는 slot 키,
@@ -333,7 +359,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
             severity: "medium",
-            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict, ffStop)}`,
+            text: `[예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict, ffStop)}${ssTail}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -357,7 +383,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_fm_${rm.verdict}`,
             severity: "medium",
-            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}`,
+            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}${ssTail}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -367,7 +393,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_fm_${rm.verdict}`,
             severity: "medium",
-            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}`,
+            text: `[예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(실측: M확인 시 정확도 60%·미확인 16%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict, ffStop)}${ssTail}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -378,11 +404,33 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_fmopp_${rm.verdict}`,
             severity: "medium",
-            text: `[예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -3% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
+            text: `[예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -3% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지${ssTail}`,
             smsSubject: "예측 조기경보",
           });
         } catch { /* 발송 실패 무시 */ }
       }
+    }
+  }
+
+  // ②d 삼전 트리거 (사용자 지시 2026-07-23): 삼전 F/M/본이 방향을 확인하면 두 종목 상태를 한 문자에.
+  // 실행 상품(레버/인버 ETF) 지침은 하닉 스트림 문자 기준 — 삼전은 기준 신호 참고용. 단계·방향별 1일 1회.
+  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("09:20") && minuteOfDay <= hhmmToMin(lastCp)) {
+    const curV2 = revs.length ? revs[revs.length - 1].verdict : ("none" as Verdict);
+    const trigs: [string, string, Verdict, string][] = [
+      ["F", "피셔F 임시판정", ssF, ssFReason],
+      ["M", "피셔M 중간확인", ssM, ssMReason],
+      ["B", "본피셔 확정", ssB, ssBReason],
+    ];
+    for (const [code2, nm, v, reason] of trigs) {
+      if (v === "none") continue;
+      try {
+        await dispatchToChannels("signal", today, {
+          key: `predict_ss${code2}_${v}`,
+          severity: "medium",
+          text: `[예측·삼전 ${nm}] ${V_KO[v]} — ${reason.split(" — ")[0]}.\n하닉: 공식 ${V_KO[curV2]}${ssTail} ▶실행 지침(비중·스탑)은 하닉 스트림 문자 기준, 삼전은 기준 신호 참고. 무응답=현행 유지`,
+          smsSubject: "예측 조기경보",
+        });
+      } catch { /* 발송 실패 무시 */ }
     }
   }
 
