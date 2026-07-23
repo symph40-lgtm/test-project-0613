@@ -6,7 +6,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell, Disclaimer } from "../_components/Shell";
-import { setSmsPause, clearSmsPause, addDirective } from "./actions";
+import { setSmsPause, clearSmsPause, addDirective, queryFisherNow } from "./actions";
+import type { FisherNow } from "@/lib/predict/nowcast";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,12 @@ export default async function OpsPage() {
   if (!user) redirect("/login");
 
   const admin = createAdminClient();
-  const [{ data: pauseRow }, { data: directives }] = await Promise.all([
+  const [{ data: pauseRow }, { data: directives }, { data: fisherRow }] = await Promise.all([
     admin.from("ops_settings").select("value, updated_at").eq("key", "sms_pause").maybeSingle(),
     admin.from("ops_directives").select("id, created_at, content, status, note").eq("user_id", user.id).order("created_at", { ascending: false }).limit(20),
+    admin.from("ops_settings").select("value, updated_at").eq("key", "fisher_now_last").maybeSingle(),
   ]);
+  const fisherLast = (fisherRow?.value ?? null) as FisherNow | null;
   const pause = (pauseRow?.value ?? null) as { until?: string; allowStrong?: boolean } | null;
   const kstToday = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const pauseActive = pause?.until != null && kstToday <= pause.until;
@@ -60,6 +63,38 @@ export default async function OpsPage() {
             <button type="submit" className="rounded-[8px] border border-hairline px-4 py-1.5 text-[13px] hover:bg-pearl">정지 해제 (즉시 재개)</button>
           </form>
         ) : null}
+      </div>
+
+      {/* ①b 피셔 판정 실시간 알림 — 문의 즉시 계산 + 문자 발송 (사용자 지시 2026-07-23) */}
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+        <p className="mb-1 text-[14px] font-semibold">피셔 판정 실시간 알림</p>
+        <p className="mb-3 text-[12px] text-ink-48">
+          지금 시점의 피셔F → 피셔M → 본피셔 판정을 즉시 계산해 아래에 상세를 표시하고,
+          핵심 요약을 <b>문자로 바로</b> 보냅니다. (국장 = 하닉 본주 기준 · 미장 = SOXX 기준)
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <form action={queryFisherNow}>
+            <input type="hidden" name="market" value="kr" />
+            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">국장 판정 문의</button>
+          </form>
+          <form action={queryFisherNow}>
+            <input type="hidden" name="market" value="us" />
+            <button type="submit" className="rounded-[8px] border border-hairline px-4 py-1.5 text-[13px] font-semibold hover:bg-pearl">미장 판정 문의</button>
+          </form>
+        </div>
+        {fisherLast ? (
+          <div className="mt-4 rounded-[12px] bg-pearl/60 p-4">
+            <p className="text-[13px] font-semibold">{fisherLast.title} <span className="font-normal text-ink-48">· {fisherLast.asOf} 조회</span></p>
+            <ul className="mt-2 space-y-1">
+              {fisherLast.detail.map((line, i) => (
+                <li key={i} className="text-[12.5px] leading-relaxed text-ink-80">{line}</li>
+              ))}
+            </ul>
+            <p className="mt-3 border-t border-hairline/50 pt-2 text-[12px] text-ink-48 whitespace-pre-line">문자 발송분: {fisherLast.summary}</p>
+          </div>
+        ) : (
+          <p className="mt-3 text-[12px] text-ink-48">아직 조회 이력 없음 — 버튼을 누르면 최근 결과가 여기 표시됩니다.</p>
+        )}
       </div>
 
       {/* ② 자유 지시 — 다음 세션 반영 */}

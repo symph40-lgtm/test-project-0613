@@ -46,7 +46,7 @@ const etFmt = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/New_York",
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
 });
-async function fetchJudge5m(daysBack: number): Promise<Map<string, UsBar[]>> {
+export async function fetchJudge5m(daysBack: number): Promise<Map<string, UsBar[]>> {
   const byDay = new Map<string, UsBar[]>();
   try {
     const r = await yf.chart(SY.judge, {
@@ -73,7 +73,7 @@ async function fetchJudge5m(daysBack: number): Promise<Map<string, UsBar[]>> {
 }
 
 // 판정 지수(SOXX) 일봉 — avgRange10·ATR·전일 종가용 (SMH용 data.ts fetchSmhDaily와 분리)
-async function fetchJudgeDaily(count: number): Promise<PredictDailyBar[]> {
+export async function fetchJudgeDaily(count: number): Promise<PredictDailyBar[]> {
   try {
     const r = await yf.chart(SY.judge, { period1: new Date(Date.now() - (count + 10) * 86400e3), interval: "1d" });
     return (r.quotes ?? [])
