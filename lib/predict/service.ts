@@ -408,12 +408,20 @@ async function checkpointStream(
         if (t.cur === t.prev) continue;
         anyChange = true;
         const label = t.prev === "none" ? `${V_KO[t.cur]} 확인` : t.cur === "none" ? `${V_KO[t.prev]} 소멸` : `${V_KO[t.prev]}→${V_KO[t.cur]} 전환`;
-        const stopLine = t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
+        // 지연 통지 가드 (2026-07-23 실사고: 배포 직후 초기화가 2시간 전 확인을 '레버리지 확인'으로 발송
+        // → 하락 중 매수 신호로 오독). 확인 시각과 발송 시각이 30분+ 차이면 진입 지침 대신 경고.
+        const confT = t.cur !== "none" ? (t.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null) : null;
+        const lagMin = confT ? minuteOfDay - hhmmToMin(confT) : 0;
+        const stale = confT !== null && lagMin >= 30;
+        const guide = stale
+          ? `⚠지연 통지(확인 ${confT}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
+          : guideOf(t);
+        const stopLine = !stale && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guideOf(t)} 무응답=현행 유지${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${stopLine}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
