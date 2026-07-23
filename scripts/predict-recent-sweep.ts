@@ -598,6 +598,74 @@ async function main() {
     }
   }
 
+  // ══ ⑩ 스탑 방식 비교 (2026-07-23 사용자 질문): 고정 -1.5%(본주) vs 본전방어 vs 트레일링 vs 래칫.
+  // 진입 = 라이브 세트(0.05·4봉+강돌파) 첫 확인, 당일 종가 청산. 스탑 트리거는 직전 피크 기준
+  // (같은 봉에서 피크 갱신→스탑 상향은 다음 봉부터 — 미래참조 방지). ETF %는 본주 ×2.
+  console.log("\n══ ⑩ 스탑 방식 — 고정 vs 본전방어 vs 트레일 vs 래칫 (본주 %, ETF는 ×2) ══");
+  type StopMode = "fixed" | "breakeven" | "trail15" | "trail25" | "ratchet";
+  const SM: { mode: StopMode; name: string }[] = [
+    { mode: "fixed", name: "고정 -1.5% (현행)      " },
+    { mode: "breakeven", name: "본전방어(+1.5%시 본전) " },
+    { mode: "trail15", name: "트레일 피크-1.5%       " },
+    { mode: "trail25", name: "트레일 피크-2.5%       " },
+    { mode: "ratchet", name: "래칫(+1.5%마다 상향)   " },
+  ];
+  const dynExit = (d: DayData, s: NonNullable<DaySim>, mode: StopMode): { ret: number; stopped: boolean } => {
+    const sign = s.dir === "up" ? 1 : -1;
+    let peak = s.entryPx;
+    let stop = s.dir === "up" ? s.entryPx * 0.985 : s.entryPx * 1.015;
+    for (const b of d.krx) {
+      if (b.time < s.confirmCut) continue;
+      if (s.dir === "up" ? b.low <= stop : b.high >= stop) {
+        return { ret: ((stop - s.entryPx) / s.entryPx) * 100 * sign, stopped: true };
+      }
+      const fav = s.dir === "up" ? b.high : b.low;
+      if (s.dir === "up" ? fav > peak : fav < peak) {
+        peak = fav;
+        const gain = (Math.abs(peak - s.entryPx) / s.entryPx) * 100;
+        let ns = stop;
+        if (mode === "breakeven") { if (gain >= 1.5) ns = s.entryPx; }
+        else if (mode === "trail15") ns = s.dir === "up" ? peak * 0.985 : peak * 1.015;
+        else if (mode === "trail25") ns = s.dir === "up" ? peak * 0.975 : peak * 1.025;
+        else if (mode === "ratchet") {
+          const steps = Math.floor(gain / 1.5);
+          if (steps >= 1) ns = s.entryPx * (1 + sign * (steps - 1) * 0.015);
+        }
+        if (s.dir === "up" ? ns > stop : ns < stop) stop = ns;
+      }
+    }
+    return { ret: ((d.close - s.entryPx) / s.entryPx) * 100 * sign, stopped: false };
+  };
+  for (const p of periods) {
+    const set = days.filter((d) => d.date >= p.from && d.date <= TODAY);
+    const sims = set
+      .map((d) => ({ d, s: simulateDay(d.pre, d.krx, d.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1 }) }))
+      .filter((x): x is { d: DayData; s: NonNullable<DaySim> } => x.s !== null);
+    console.log(`\n── ${p.name}: 신호 ${sims.length}회 ──`);
+    console.log("정책                    | 누적       | 거래당    | 스탑발동 | 이익잠금컷 | 손실컷");
+    for (const { mode, name } of SM) {
+      let cum = 0, stops = 0, profitLock = 0, lossCut = 0;
+      for (const { d, s } of sims) {
+        const r = dynExit(d, s, mode);
+        cum += r.ret;
+        if (r.stopped) { stops++; if (r.ret >= 0) profitLock++; else lossCut++; }
+      }
+      console.log(`${name} | ${cum >= 0 ? "+" : ""}${cum.toFixed(1).padStart(7)}%p | ${fmtPct(cum / sims.length).padStart(7)} | ${String(stops).padStart(4)} | ${String(profitLock).padStart(5)} | ${lossCut}`);
+    }
+  }
+  // 7/21 사례 (10:13 레버 진입, 고점 +2.9%·종가 +0.71%) — 정책별 결과
+  const t721 = days.find((d) => d.date === "2026-07-21");
+  if (t721) {
+    const s721 = simulateDay(t721.pre, t721.krx, t721.range10, { earlyRatio: 0.05, confirm: 4, strongRatio: 0.1 });
+    if (s721) {
+      console.log(`\n7/21 사례 (${s721.confirmCut} ${s721.dir === "up" ? "레버" : "인버"} @${s721.entryPx.toLocaleString()}):`);
+      for (const { mode, name } of SM) {
+        const r = dynExit(t721, s721, mode);
+        console.log(`  ${name}: ${fmtPct(r.ret)} ${r.stopped ? "(스탑 발동)" : "(종가 청산)"}`);
+      }
+    }
+  }
+
   // 어제(7/21) 개별 확인 — 강돌파 임계별 확인 시각
   const t2 = days.find((d) => d.date === TODAY);
   if (t2) {
