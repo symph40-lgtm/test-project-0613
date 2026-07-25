@@ -468,6 +468,43 @@ async function checkpointStream(
         }
       } catch { /* 경보 실패는 모니터를 막지 않는다 */ }
 
+      // 노이즈컷 회복 문자 (사용자 승인 2026-07-25 — 스펙 2.14): 본피셔 방향 유지 중 판정가 대비
+      // 본주 -1.5% 스탑라인을 찍었다가 원판정가를 종가로 회복하면 재진입 검토 통지. 컷 시점엔 침묵
+      // (사용자 지정 — 스탑 실행은 HTS 자동매도 몫, 문자 없음). 트리거는 실측 우월안 '원진입가 회복'
+      // (A선 회복은 재컷 왕복 큼 — 실측 승률 49~50%·누적 하닉 +3.5/삼전 +7.2%p). 키 = 종목·방향 1일 1회.
+      try {
+        const stopFrac = PREDICT_CONFIG.stops.fisher.etfPct / 2 / 100; // ETF -3% = 본주 -1.5%
+        const recChecks = [
+          { sym: "hx", symKo: "하닉", bState: hxB2, reason: hxBo?.reason ?? "", reg: hxReg },
+          { sym: "ss", symKo: "삼전", bState: ssB, reason: ssBReason, reg: ssRegBars ?? [] },
+        ] as const;
+        for (const rc of recChecks) {
+          if (rc.bState === "none" || rc.reg.length < 20) continue;
+          const confT = rc.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+          const confBar = confT ? rc.reg.find((b) => b.time === confT) : undefined;
+          if (!confT || !confBar) continue;
+          const entry = confBar.close;
+          const isUp = rc.bState === "leverage";
+          const afterConf = rc.reg.filter((b) => b.time > confT);
+          const cutIdx = afterConf.findIndex((b) => (isUp ? b.low <= entry * (1 - stopFrac) : b.high >= entry * (1 + stopFrac)));
+          if (cutIdx < 0) continue; // 스탑라인 미접촉 — 해당 없음
+          const rec = afterConf.slice(cutIdx + 1).find((b) => (isUp ? b.close > entry : b.close < entry));
+          if (!rec) continue; // 아직 회복 전
+          const lagR = minuteOfDay - hhmmToMin(rec.time);
+          const staleR = lagR >= 30;
+          const guideR = staleR
+            ? `⚠지연 통지(회복 ${rec.time}, ${lagR}분 경과) — 추격 진입 금지, 현재가와 다음 문자 기준 판단.`
+            : `▶재진입 검토: 새 진입가 기준 스탑 ETF -${PREDICT_CONFIG.stops.fisher.etfPct}% 재설정 · 실측 승률 ~50%·소폭 순익 — 소액 권장.`;
+          const stopLineR = !staleR && rc.sym === "hx" ? await etfStopLine(rc.bState, PREDICT_CONFIG.stops.fisher.etfPct) : "";
+          await dispatchToChannels("signal", today, {
+            key: `predict_recut_${rc.sym}_${rc.bState}`,
+            severity: "medium",
+            text: `[예측·${rc.symKo} 회복] 스탑컷 후 원판정가 회복 — 본피셔 ${V_KO[rc.bState]} 유지 중 (판정 ${confT} ${entry.toLocaleString()}원 · 컷 ${afterConf[cutIdx].time} → 회복 ${rec.time}). ${guideR} 무응답=미진입${stopLineR}${bothLines}`,
+            smsSubject: "예측 회복",
+          });
+        }
+      } catch { /* 회복 문자 실패는 모니터를 막지 않는다 */ }
+
       // 무추세 확인 문자 (사용자 지시 2026-07-25): 방향이 없을 때도 ①프리장 ②정규장 각 1회
       // "아직 방향 없음" 통지 — 시스템 가동 확인 겸 (사용자: "추세가 없다는 것을 확인하기 위함").
       // 모든 단계(하닉·삼전 F/M/본)가 없음 + 오늘 방향 이력도 없음일 때만 — 등장·소멸은 전이 문자 전담.
