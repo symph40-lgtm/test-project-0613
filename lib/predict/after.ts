@@ -80,6 +80,79 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     result.scored.push(d);
   }
 
+  // ①b 삼전 애프터 전이 문자 (이월 지시 2026-07-25 ②번 → 07-26 승격 — 트래킹 채점 축적 확인 완료).
+  // 근거 (predict_track_days after/fisher, 224일 백테스트 시딩 채점): 방향 판정 103일 — rOC 부호
+  // 적중 89.3%(최근 40건 80%)·3분류 라벨 일치 54%(하닉 loadAfterPerf와 동일 눈금)·19:30 진입→종가
+  // 잔여 +6.47%p 누적. 판정·상수는 track.ts 애프터와 동일(오프셋 = 세션 시가 0.4%·확정 19:30) —
+  // 기록·채점은 track.ts 그대로 유지, 여기는 문자 레이어만 추가 (국장 ②b 관례: 상태 ops_settings·
+  // 전이 키 1일 1회). ⚠라이브 재현 0일 — 문구에 '시딩 검증·라이브 축적 중' 명시, 소액 지침.
+  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= 15 * 60 + 50 && minuteOfDay <= 19 * 60 + 35) {
+    try {
+      const SS = "005930";
+      const ssDaily = await fetchDailyPredict(SS, 160);
+      const ssHist = ssDaily.filter((b) => b.date < today).slice(-120);
+      const ssRange10 = avgRange(ssHist, 10);
+      const ssBars = await fetchNxtAfterMarket(SS, today.replace(/-/g, ""), "193000");
+      if (ssRange10 !== null && ssHist.length >= 30 && ssBars && ssBars.length >= 20) {
+        const offR = ((AH.offsetPct / 100) * ssBars[0].open) / ssRange10;
+        const out = runFisher(
+          { date: today, dailyHistory: ssHist, openPx: ssBars[0].open, morning: ssBars, prevDayMinutes: null },
+          { offsetRangeRatio: offR, earlyConfirmBy: "17:00" },
+        );
+        const cur = out.verdict;
+        const strength = Number((out.confidence * 100).toFixed(0));
+        const { data: stRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ss_after_state").maybeSingle();
+        const prevSt = (stRow?.value ?? null) as { date: string; verdict: Verdict } | null;
+        const prev: Verdict = prevSt && prevSt.date === today ? prevSt.verdict : "none";
+        const isFinalW = minuteOfDay >= hhmmToMin(AH.finalCp);
+        // 실측적중 동봉 — 트래킹(시딩 포함) 라벨 일치, 하닉 애프터와 동일 눈금
+        let ssAcc = "";
+        try {
+          const { data: tr } = await admin
+            .from("predict_track_days")
+            .select("verdict, label")
+            .eq("symbol", SS).eq("session", "after").eq("model", "fisher")
+            .not("label", "is", null).neq("verdict", "none").limit(2000);
+          const t = (tr ?? []).length;
+          const c = (tr ?? []).filter((r) => r.verdict === r.label).length;
+          if (t > 0) ssAcc = `·애프터 실측적중 ${Math.round((100 * c) / t)}%(${t}·시딩 포함)`;
+        } catch { /* 통계 실패는 발송을 막지 않는다 */ }
+        const ssGuide = `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 시딩 224일 검증·라이브 축적 중 — 소액만.`;
+        const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+        if (cur !== prev && !(prev === "none" && cur === "none")) {
+          const head = prev === "none" ? `${nowHHMM} 첫 판정: ${V_KO[cur]}` : `${nowHHMM} 판정 변경: ${V_KO[prev]}→${V_KO[cur]}`;
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `predict_ss_ah_${prev}_${cur}`,
+              severity: "medium",
+              text: `[예측·삼전 애프터] ${head} (강도 ${strength}%${ssAcc})${cur !== "none" ? ssGuide : ""}`,
+              smsSubject: "예측 애프터",
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+        // 확정(19:30) — 방향일 때 항상 1회 (하닉과 동일: "확정판결이 나오면 정규장처럼")
+        if (isFinalW && cur !== "none") {
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `predict_ss_ah_final_${cur}`,
+              severity: "medium",
+              text: `[예측·삼전 애프터] 확정(${AH.finalCp}): ${V_KO[cur]} (강도 ${strength}%${ssAcc})${ssGuide}`,
+              smsSubject: "예측 애프터",
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+        if (cur !== prev || !prevSt || prevSt.date !== today) {
+          await admin.from("ops_settings").upsert(
+            { key: "predict_ss_after_state", value: { date: today, verdict: cur } },
+            { onConflict: "key" },
+          );
+        }
+      }
+    } catch (e) {
+      console.error("[after] 삼전 애프터 문자 실패 (하닉 스트림은 계속):", e);
+    }
+  }
+
   // ② 라이브 스트림 (15:50~19:35 — 첫 15분 OR 형성 후)
   if (minuteOfDay < 15 * 60 + 50 || minuteOfDay > 19 * 60 + 35) return result;
   const prior = await loadAfterRow(today);
