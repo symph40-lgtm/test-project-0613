@@ -399,6 +399,19 @@ async function checkpointStream(
       const hxLine = `\n하닉: F${ssLab(hxF2)}·M${ssLab(hxM2)}·본${ssLab(hxB2)}${hxPx !== null ? ` ${hxPx.toLocaleString()}원` : ""}`;
       const bothLines = `${hxLine}${ssTail || "\n삼전: 스냅샷 없음"}`;
 
+      // 갭 경고 표기 (사용자 승인 2026-07-25 — config.gapWarn 근거 참조): |갭| ≥ 3% 날
+      // 해당 종목의 방향 전이·회복 문자에 유사일 실측 한 줄 동봉. 판정·비중 불변 — 정보 레이어.
+      const GW = PREDICT_CONFIG.gapWarn;
+      const prevHxClose = complete[complete.length - 1]?.close;
+      const hxGapPct = hxReg.length && prevHxClose ? ((hxReg[0].open - prevHxClose) / prevHxClose) * 100 : null;
+      const ssPrevClose = ssHistBars[ssHistBars.length - 1]?.close;
+      const ssGapPct = ssRegBars && ssRegBars.length && ssPrevClose ? ((ssRegBars[0].open - ssPrevClose) / ssPrevClose) * 100 : null;
+      const gapLine = (sym: "hx" | "ss"): string => {
+        const g = sym === "hx" ? hxGapPct : ssGapPct;
+        if (g === null || Math.abs(g) < GW.minAbsPct) return "";
+        return `\n⚠갭 ${g >= 0 ? "+" : ""}${g.toFixed(1)}% ${g >= 0 ? "급등" : "급락"}일 — ${GW[sym][g >= 0 ? "up" : "down"]}. 비중 축소 권장.`;
+      };
+
       const prevState = await loadSsState();
       const sameDay = prevState !== null && prevState.date === today;
       type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict };
@@ -430,15 +443,30 @@ async function checkpointStream(
         const confT = t.cur !== "none" ? (t.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null) : null;
         const lagMin = confT ? minuteOfDay - hhmmToMin(confT) : 0;
         const stale = confT !== null && lagMin >= 30;
+        // 소진 확인 가드 (2026-07-25 — 7/23 하닉 11:24 실사고, config.exhaustGuard 근거 참조):
+        // 본피셔 방향 확인이 당일 극값 대비 이미 크게 진행된 지점이면 진입 지침 대신 추격 금지.
+        let exhaustPct: number | null = null;
+        if (!stale && t.tier === "B" && t.cur !== "none") {
+          const eBars = t.sym === "hx" ? hxReg : ssRegBars ?? [];
+          if (eBars.length >= 20) {
+            const closes = eBars.map((b) => b.close);
+            const lastC = closes[closes.length - 1];
+            const ext = t.cur === "inverse" ? Math.max(...closes) : Math.min(...closes);
+            const prog = Math.abs(((lastC - ext) / ext) * 100);
+            if (prog >= PREDICT_CONFIG.exhaustGuard.minProgressPct) exhaustPct = prog;
+          }
+        }
         const guide = stale
           ? `⚠지연 통지(확인 ${confT}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
-          : guideOf(t);
-        const stopLine = !stale && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
+          : exhaustPct !== null
+            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권) — 유사일 잔여 평균 -1.2~-2.0%·적중 27~33%. 추격 진입 금지, 기보유 정리·반등 유의.`
+            : guideOf(t);
+        const stopLine = !stale && exhaustPct === null && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) : ""}${stopLine}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -505,7 +533,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_recut_${rc.sym}_${rc.bState}`,
             severity: "medium",
-            text: `[예측·${rc.symKo} 회복] 스탑컷 후 원판정가 회복 — 본피셔 ${V_KO[rc.bState]} 유지 중 (판정 ${confT} ${entry.toLocaleString()}원 · 컷 ${afterConf[cutIdx].time} → 회복 ${rec.time}). ${guideR} 무응답=미진입${stopLineR}${bothLines}`,
+            text: `[예측·${rc.symKo} 회복] 스탑컷 후 원판정가 회복 — 본피셔 ${V_KO[rc.bState]} 유지 중 (판정 ${confT} ${entry.toLocaleString()}원 · 컷 ${afterConf[cutIdx].time} → 회복 ${rec.time}). ${guideR} 무응답=미진입${staleR ? "" : gapLine(rc.sym)}${stopLineR}${bothLines}`,
             smsSubject: "예측 회복",
           });
         }
