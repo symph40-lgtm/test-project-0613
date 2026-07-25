@@ -185,6 +185,11 @@ ${news.map((n) => `- ${n.title}`).join("\n") || "없음"}
       (k200f && k200f.price !== null ? ` · K200야간선물 ${k200f.price.toFixed(1)} ${pct(k200f.changePercent)}${k200f.stale ? "(마감값)" : ""}` : ""),
     `평가: ${marketComment}`,
   ];
+  // 레짐 4분면 (사용자 지시 2026-07-25): 변동성(추적 분위) × 전일 추세 — 오늘 운영 모드 + 최근 5일 궤적
+  try {
+    const { regimeBriefLines } = await import("@/lib/predict/regime");
+    lines1.push(...(await regimeBriefLines()));
+  } catch { /* 레짐 계산 실패 — 브리핑은 정상 발송 */ }
   if (perfLine) lines1.push(perfLine);
   const sms1 = lines1.join("\n");
 
