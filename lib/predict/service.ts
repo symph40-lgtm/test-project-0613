@@ -232,10 +232,11 @@ async function checkpointStream(
       const ssCont = [...(ssPre ?? []), ...ssReg]; // F·M = 08:00 연속창, 본 = 09:00 정규장창
       if (ssCont.length >= 20 && ssHist.length >= 11) {
         const inCont = { date: today, dailyHistory: ssHist, openPx: ssCont[0].open, morning: ssCont, prevDayMinutes: null };
-        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
+        // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
+        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio });
         const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
         const b = ssReg.length >= 20
-          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes })
+          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes })
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
@@ -372,7 +373,9 @@ async function checkpointStream(
       let hxBo: ReturnType<typeof runFisher> | null = null;
       if (hxCont.length >= 20) {
         const inC = { date: today, dailyHistory: complete.slice(-120), openPx: hxCont[0].open, morning: hxCont, prevDayMinutes: null };
-        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
+        // 강돌파 동봉 (2026-07-25 정합 수정): 판정 스트림·실시간 조회의 F는 강돌파 포함인데
+        // 모니터 F에만 빠져 있었음 — 스펙(F 0.05·4봉+강돌파)대로 통일. 하닉 0.1.
+        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio });
         hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
       }
       if (hxReg.length >= 20) {
@@ -437,20 +440,15 @@ async function checkpointStream(
       // 반전을 못 잡음 (실측 커버 7/25 → 09창 25/25, 리드 중앙 하닉 11분·삼전 2분, 순효과 하닉 +9.5%p).
       // 키 = 방향 조합(1일 1회), 지연 통지 가드 동일. F 판정자(08창)·전이 문자는 불변 — 경보 레이어만 추가.
       try {
-        const f9cfg = {
-          offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
-          confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
-          strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
-        };
         const revChecks = [
-          { sym: "hx", symKo: "하닉", bState: hxB2, reg: hxReg.length >= 20 ? hxReg : null, hist: complete.slice(-120) },
-          { sym: "ss", symKo: "삼전", bState: ssB, reg: ssRegBars, hist: ssHistBars },
+          { sym: "hx", symKo: "하닉", bState: hxB2, reg: hxReg.length >= 20 ? hxReg : null, hist: complete.slice(-120), sb: PREDICT_CONFIG.earlyStrongBreakRatio },
+          { sym: "ss", symKo: "삼전", bState: ssB, reg: ssRegBars, hist: ssHistBars, sb: PREDICT_CONFIG.ssStrongBreakRatio },
         ] as const;
         for (const rc of revChecks) {
           if (rc.bState === "none" || !rc.reg || rc.hist.length < 11) continue;
           const f9 = runFisher(
             { date: today, dailyHistory: rc.hist, openPx: rc.reg[0].open, morning: rc.reg, prevDayMinutes: null },
-            f9cfg,
+            { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: rc.sb },
           );
           if (f9.verdict === "none" || f9.verdict === rc.bState) continue;
           const confT9 = f9.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;

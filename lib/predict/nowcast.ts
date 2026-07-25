@@ -73,20 +73,23 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
   let B: ReturnType<typeof runFisher> | null = null;
   let bonNote = "09:00 정규장창·강돌파 포함";
   if (bars08.length >= 16) {
+    // 강돌파: 하닉 0.1 / 삼전 0.075 (사용자 승인 2026-07-25 종목 분리 — config.ssStrongBreakRatio)
+    const sb = isHx ? PREDICT_CONFIG.earlyStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
+    const sbLate = isHx ? PREDICT_CONFIG.lateStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
     const input08 = { date: today, dailyHistory: hist, openPx: pre?.[0]?.open ?? bars08[0].open, morning: bars08, prevDayMinutes: null };
     F = runFisher(input08, {
       offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
       confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
-      strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
+      strongBreakRatio: sb,
     });
     M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8 });
     if (krx && krx.length >= 20) {
       B = runFisher(
         { date: today, dailyHistory: hist, openPx: krx[0].open, morning: krx, prevDayMinutes: null },
-        { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
+        { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
       );
     } else {
-      B = runFisher(input08, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+      B = runFisher(input08, { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
       bonNote = "정규장 창 형성 전 — 08시창 참고";
     }
   }
