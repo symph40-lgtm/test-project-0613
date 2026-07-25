@@ -2,6 +2,8 @@
 // ⚠ 자동 게이트 아님: 10.5년 실측(scripts/daily-swing-flow.ts)에서 현물·선물 게이트 전부
 //   2종목×2구간 일관 개선 실패 (수익 훼손 큼, MDD만 개선 — 스펙 6장). 재론 시 새 데이터 필요.
 
+import { fetchKisInvestorFlow, fetchKisProgramNet } from "@/lib/market/kis";
+
 export type FlowDay = { date: string; frgn: number; inst: number }; // 순매매량(주)
 
 export async function fetchRecentFlow(code: string): Promise<FlowDay[]> {
@@ -89,4 +91,27 @@ export function kospiLine(k: KospiFlow | null | undefined): string {
   if (!k) return "";
   const s = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString()}`;
   return ` 코스피외인 ${k.date.slice(5)} ${s(k.cash)}억·3일 ${s(k.cash3)}억/선물 ${s(k.fut)}·3일 ${s(k.fut3)}계약.`;
+}
+
+// 당일 장중 잠정 수급 (이월 지시 2026-07-25 ③번 → 07-26 적용): KIS 투자자동향 스냅샷 —
+// 코스피 외인 현물(억)·K200 선물(계약)·프로그램(억). 위 확정치 라인이 D-1이라 방향이 뒤집힌
+// 날 오해 유발(7/24 삼전 사례) — 당일 잠정치를 병기해 해소. 표시 전용, 게이트·판정 불변.
+// 일봉 문자는 마감 후(15:05~16:00 KST) 발송이라 스냅샷 = 당일 마감 누적 잠정치.
+export async function intradayFlowLine(): Promise<string> {
+  try {
+    const [cash, fut, prgm] = await Promise.all([
+      fetchKisInvestorFlow("kospi"),
+      fetchKisInvestorFlow("k200fut"),
+      fetchKisProgramNet(),
+    ]);
+    if (!cash && !fut && prgm === null) return "";
+    const s = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v).toLocaleString()}`;
+    const parts: string[] = [];
+    if (cash) parts.push(`현물 ${s(cash.frgnNetAmt)}억`);
+    if (fut) parts.push(fut.frgnNetQty !== null ? `선물 ${s(fut.frgnNetQty)}계약` : `선물 ${s(fut.frgnNetAmt)}억`);
+    if (prgm !== null) parts.push(`프로그램 ${s(prgm)}억`);
+    return ` 오늘외인(잠정) ${parts.join("·")}.`;
+  } catch {
+    return "";
+  }
 }

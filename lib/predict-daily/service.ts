@@ -6,7 +6,7 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { fetchAfterPrice } from "./after";
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
 import { fetchDaily, kstNowDaily } from "./data";
-import { fetchKospiFlow, fetchRecentFlow, flowLine, kospiLine, type FlowDay } from "./flow";
+import { fetchKospiFlow, fetchRecentFlow, flowLine, intradayFlowLine, kospiLine, type FlowDay } from "./flow";
 import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
 import { MODELS } from "./models";
@@ -53,12 +53,12 @@ function macroLine(m: MacroSnap | null): string {
 }
 
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
-function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number, mw?: MwStats): string {
+function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number, mw?: MwStats, intra = ""): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}${intra}`;
 }
 
-function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[], mw?: MwStats): string {
+function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[], mw?: MwStats, intra = ""): string {
   const label = actionLabel(j.stance, j.exposure);
   const head = prevLabel && prevLabel !== label ? `${prevLabel} → ${label}` : label;
   const why: string[] = [];
@@ -68,7 +68,7 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   else why.push("하락 추세(역정렬)");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}${intra} 무응답=현행 유지`;
 }
 
 // 미너비니·와인스타인 판정 병기 + 누적 실측 적중 (사용자 지시 2026-07-22 — 매일의 판정·실제 결과를 누적 평가해 표기)
@@ -270,10 +270,13 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       const changed = changedVsPrev || changedVsToday;
       const prevLabel = prevRow ? actionLabel(prevRow.stance, prevRow.exposure) : null;
       const key = `pdaily_${sym.code}_${now.date}_${jg.stance}_${Math.round(jg.exposure * 100)}`;
+      // 당일 장중 잠정 수급 동봉 (이월 지시 2026-07-25 ③번): 확정치 라인이 D-1이라 방향이
+      // 뒤집힌 날 오해 유발(7/24 삼전 사례) — KIS 잠정치(현물·선물·프로그램) 병기. 실패 시 생략.
+      const intraFlow = await intradayFlowLine();
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats, intraFlow) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats, intraFlow),
         smsSubject: "일봉 판정",
       });
     }
