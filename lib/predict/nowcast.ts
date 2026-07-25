@@ -83,10 +83,10 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
     if (krx && krx.length >= 20) {
       B = runFisher(
         { date: today, dailyHistory: hist, openPx: krx[0].open, morning: krx, prevDayMinutes: null },
-        { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio },
+        { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
       );
     } else {
-      B = runFisher(input08, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio });
+      B = runFisher(input08, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
       bonNote = "정규장 창 형성 전 — 08시창 참고";
     }
   }

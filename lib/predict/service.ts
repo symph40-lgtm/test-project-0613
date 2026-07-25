@@ -136,7 +136,8 @@ async function checkpointStream(
       if (i >= 0) outputs[i] = early;
     } else if (cutHHMM > PREDICT_CONFIG.earlyOffsetUntil) {
       // 본판정 구간도 강돌파 즉시확인 (2026-07-22, 스트림 전용) — 스파이크형 급변 시 8봉 대기 생략
-      const late = runFisher(input, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio });
+      // + C반전 3봉 (사용자 승인 2026-07-25, 스트림 전용 — config.streamReversalMinutes 근거 참조)
+      const late = runFisher(input, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = late;
     }
@@ -232,7 +233,7 @@ async function checkpointStream(
         const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes });
         const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
         const b = ssReg.length >= 20
-          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio })
+          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes })
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
@@ -373,7 +374,7 @@ async function checkpointStream(
       if (hxReg.length >= 20) {
         hxBo = runFisher(
           { date: today, dailyHistory: complete.slice(-120), openPx: hxReg[0].open, morning: hxReg, prevDayMinutes: null },
-          { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio },
+          { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
         );
       }
       const hxF2: Verdict = hxFo?.verdict ?? "none";
