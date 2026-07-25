@@ -492,10 +492,13 @@ async function checkpointStream(
       // 피셔F(0.05·4봉·강돌파)가 반대 방향을 확인하면 경보. 08창 F는 프리장 급등락이 OR에 들어간 날
       // 반전을 못 잡음 (실측 커버 7/25 → 09창 25/25, 리드 중앙 하닉 11분·삼전 2분, 순효과 하닉 +9.5%p).
       // 키 = 방향 조합(1일 1회), 지연 통지 가드 동일. F 판정자(08창)·전이 문자는 불변 — 경보 레이어만 추가.
+      // 확정(14:00) 이후 가이드 분기 (2026-07-26 — 스펙 2.17, scripts/f-rejudge-sweep.ts 224일 실측):
+      // 확정 후 F9 '신규' 반대 확인은 F 단독으론 손실(M 미재확인 5건 합 -4.6%p), 피셔M(0.10·08창)
+      // 동방향 재확인 동반 시에만 전건 이득(4/4, +3.1%p) — 소표본이라 가이드 문구만 분기, 판정 불변.
       try {
         const revChecks = [
-          { sym: "hx", symKo: "하닉", bState: hxB2, reg: hxReg.length >= 20 ? hxReg : null, hist: complete.slice(-120), sb: PREDICT_CONFIG.earlyStrongBreakRatio },
-          { sym: "ss", symKo: "삼전", bState: ssB, reg: ssRegBars, hist: ssHistBars, sb: PREDICT_CONFIG.ssStrongBreakRatio },
+          { sym: "hx", symKo: "하닉", bState: hxB2, mState: hxM2, reg: hxReg.length >= 20 ? hxReg : null, hist: complete.slice(-120), sb: PREDICT_CONFIG.earlyStrongBreakRatio },
+          { sym: "ss", symKo: "삼전", bState: ssB, mState: ssM, reg: ssRegBars, hist: ssHistBars, sb: PREDICT_CONFIG.ssStrongBreakRatio },
         ] as const;
         for (const rc of revChecks) {
           if (rc.bState === "none" || !rc.reg || rc.hist.length < 11) continue;
@@ -507,13 +510,19 @@ async function checkpointStream(
           const confT9 = f9.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
           const lag9 = confT9 ? minuteOfDay - hhmmToMin(confT9) : 0;
           const stale9 = confT9 !== null && lag9 >= 30;
+          const postFinal9 = minuteOfDay > hhmmToMin("14:00");
+          const mSame9 = rc.mState === f9.verdict;
           const guide9 = stale9
             ? `⚠지연 통지(확인 ${confT9}, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
-            : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (실측: 반전일 25/25 선행·리드 2~11분).`;
+            : postFinal9
+              ? mSame9
+                ? `▶청산·전환 검토 — 피셔M 동방향 재확인 동반 (확정 후 실측 4/4 이득 +3.1%p·소표본).`
+                : `▶관망 — 확정 후 F 단독 반대는 실측 손실(M 미재확인 5건 -4.6%p). 피셔M 재확인 문자 대기.`
+              : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (실측: 반전일 25/25 선행·리드 2~11분).`;
           await dispatchToChannels("signal", today, {
             key: `predict_rev9_${rc.sym}_${rc.bState}_${f9.verdict}`,
             severity: "high",
-            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}. ${guide9} 무응답=현행 유지${bothLines}`,
+            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지${bothLines}`,
             smsSubject: "예측 반전경보",
           });
         }
