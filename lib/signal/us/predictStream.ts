@@ -8,6 +8,8 @@
 // 판정 지수 SOXX — 상방 = SOXL(3x) · 하방 = SOXS(-3x). 상수 근거는 config.usPredict 주석.
 // 채점: 정규장 라벨(±0.9% SOXX 스케일) + 확정 판정 부호 적중 + 첫 방향 체크포인트 진입 손익.
 // 저장: us_predict_days (마이그레이션 029). 트리거: /api/signal/us/state (cron-job.org).
+// 방향 통지 (2026-07-26): ②b 통합 피셔 전이 모니터(F/M/본 전이를 08:25~15:55 ET 전 시간대)가
+// 전담 — 체크포인트 스트림 문자는 STREAM_SMS=false로 폐기 (국장 2026-07-23 일원화 관례 이식).
 
 import YahooFinance from "yahoo-finance2";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -23,6 +25,11 @@ import {
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const UP = US_SIGNAL_CONFIG.usPredict;
 const SY = UP.symbols;
+
+// 방향 통지는 ②b SOXX 통합 피셔 전이 모니터가 전담 (이월 지시 2026-07-25 → 07-26 적용 —
+// 국장 2026-07-23 "하닉 기존 문자 방식 폐기" 관례의 미국판). 체크포인트 스트림 문자는 폐기,
+// 판정 기록·채점·회복·애프터 문자는 유지. 스트림 문자를 되살리려면 true로.
+const STREAM_SMS = false;
 
 const V_KO: Record<Verdict, string> = {
   leverage: `레버리지(${SY.leverage} ${SY.leverageX}x)`,
@@ -289,11 +296,9 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     console.error("[uspredict] 애프터장 판정 실패:", e);
   }
 
-  // ② 라이브 스트림 — 첫 체크포인트+1분 ~ 확정+3분 (08:31~14:33 ET = KST 21:31~03:33 서머타임)
-  if (minuteOfDay < hhmmToMin(ALL_CPS[0]) + 1 || minuteOfDay > hhmmToMin(UP.finalCp) + 3) return result;
-  const prior = await loadRow(today);
-  if (prior && prior.stage === "final") return result;
-
+  // ── 공용 분봉·일봉 (②b 전이 모니터 + ② 스트림) — 모니터 창 08:25~15:55 ET 밖이면 종료.
+  // 15:55 = 정규장 마감 5분 전 (국장 08:25~15:25 관례의 미국판 — 확정 14:30 이후에도 전이 계속 통지).
+  if (minuteOfDay < hhmmToMin("08:25") || minuteOfDay > 15 * 60 + 55) return result;
   const [byDay, daily] = await Promise.all([fetchJudge5m(3), fetchJudgeDaily(80)]);
   const bars = byDay.get(today) ?? [];
   const pre = bars.filter((b) => b.etMin >= ET_PRE_START && b.etMin < ET_OPEN);
@@ -405,8 +410,153 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     : orWidthPct >= OB.wideMinPct ? OB.hit.wide : orWidthPct >= OB.calmBelowPct ? OB.hit.mid : OB.hit.calm;
   const wideOr = orWidthPct !== null && orWidthPct >= OB.wideMinPct;
 
+  // ②b SOXX 통합 피셔 전이 모니터 완전판 (이월 지시 2026-07-25 ①번 — 국장 ②b의 미국판).
+  // F·M = 07:00 연속창(프리장 포함) / 본 = 09:30 정규장창 — 조기창 판정자·국장 창 관례와 동일.
+  // 문자: 등장·전환·소멸 모든 전이 통지 (전이 키 — 같은 전이 1일 1회, dedup 16h), 취침 SMS 억제.
+  // 41일 실측 (scripts/us-transition-monitor-sweep.ts, 2026-07-25):
+  //   · 문자량 — 전이 키 적용 평균 4.0/일·최대 7 (F 1.7·M 1.4·본 1.0). 소멸은 구조상 0 (피셔는
+  //     확인 후 C반전 외 none 복귀 없음 — 소멸 통지는 데이터 결손 방어용으로만 존재).
+  //   · 14:30 이후 본피셔 '등장' 3건 잔여 -3.61/-2.39/+0.04% → 막판 등장은 진입 금지 문구.
+  //     '전환' 2건 +0.34/-0.69%p 혼재(소표본) — 청산 검토 문구 유지 (국장 15:25 연장과 동일 취지).
+  //   · 추세일 F/M 선행 리드 중앙 90분(21일) — 조기 통지 실익.
+  if (UP.sms.enabled) {
+    try {
+      const contW = [...pre, ...reg].filter((b) => b.etMin + 5 <= minuteOfDay);
+      const regW = reg.filter((b) => b.etMin + 5 <= minuteOfDay);
+      const F = UP.fisherF, M = UP.fisherM;
+      const fO = contW.length >= 5 ? runUsFisher(contW, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio }) : null;
+      const mO = contW.length >= 5 ? runUsFisher(contW, hist, M.offsetRangeRatio, { confirmBars: M.confirmBars }) : null;
+      const bO = regW.length >= 6 ? runUsFisher(regW, hist, UP.offsetRangeRatio, { strongBreakRatio: 0.1 }) : null;
+      const curF: Verdict = fO?.verdict ?? "none";
+      const curM: Verdict = mO?.verdict ?? "none";
+      const curB: Verdict = bO?.verdict ?? "none";
+      const lab = (v: Verdict) => (v === "leverage" ? "레버" : v === "inverse" ? "인버" : "없음");
+      const px = regW.length ? regW[regW.length - 1].close : contW.length ? contW[contW.length - 1].close : null;
+      const stateLine = `\nSOXX: F${lab(curF)}·M${lab(curM)}·본${lab(curB)}${px !== null ? ` ${px.toFixed(2)}$` : ""}`;
+      const nowHHMM = minToHHMM(minuteOfDay);
+      const statCore = `이시각 실측적중 ${slotHitPct(nowHHMM) ?? "?"}%${minuteOfDay >= ET_OPEN && similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
+      const postFinal = minuteOfDay > hhmmToMin(UP.finalCp);
+      const orWarn = wideOr ? `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭(90분위 초과) — 유사일 표본 부족, 비중 축소 권장.` : "";
+
+      type UsTrState = { date: string; F: Verdict; M: Verdict; B: Verdict };
+      const { data: stRow } = await admin.from("ops_settings").select("value").eq("key", "uspredict_tr_state").maybeSingle();
+      const prevSt = (stRow?.value ?? null) as UsTrState | null;
+      const sameDay = prevSt !== null && prevSt.date === today;
+      type Trig = { tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; strength: number };
+      const conf = (o: { confidence: number } | null): number => Math.round((o?.confidence ?? 0.5) * 100);
+      const trigs: Trig[] = [
+        { tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevSt!.F : "none", cur: curF, reason: fO?.reason ?? "", strength: conf(fO) },
+        { tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevSt!.M : "none", cur: curM, reason: mO?.reason ?? "", strength: conf(mO) },
+        { tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevSt!.B : "none", cur: curB, reason: bO?.reason ?? "", strength: conf(bO) },
+      ];
+      const guideOf = (t: Trig): string => {
+        if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
+        if (t.prev !== "none" && t.prev !== t.cur) {
+          return postFinal
+            ? "▶막판 반전 — 기보유 청산 검토. 신규 전환 진입은 잔여 시간 부족(실측 2건 혼재·소표본) — 비권장."
+            : "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
+        }
+        if (postFinal) return `⚠확정(${UP.finalCp} ET) 이후 막판 확인 — 실측 3건 잔여 -3.6~+0.0% — 신규 진입 금지, 상태 파악용.`;
+        if (t.tier === "F") return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기.`;
+        if (t.tier === "M") {
+          const warn = curF !== "none" && t.cur !== curF ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
+          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%.${warn}`;
+        }
+        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}% 고정·16:00 ET 당일청산.`;
+      };
+      let anyChange = false;
+      for (const t of trigs) {
+        if (t.cur === t.prev) continue;
+        anyChange = true;
+        const label = t.prev === "none" ? `${V_KO[t.cur]} 확인` : t.cur === "none" ? `${V_KO[t.prev]} 소멸` : `${V_KO[t.prev]}→${V_KO[t.cur]} 전환`;
+        // 지연 통지 가드 (국장 2026-07-23 실사고 이식): 확인 시각과 발송 시각이 30분+ 차이면 진입 지침 대신 경고
+        const confT = t.cur !== "none" ? (t.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null) : null;
+        const lagMin = confT ? minuteOfDay - hhmmToMin(confT) : 0;
+        const stale = confT !== null && lagMin >= 30;
+        // 소진 확인 가드 (SOXX 자체 실측 2026-07-25: 기진행 ≥2.5% 확인 16일 잔여 -0.68%·적중 31%)
+        let exhaustPct: number | null = null;
+        if (!stale && !postFinal && t.tier === "B" && t.cur !== "none" && regW.length >= 6) {
+          const closes = regW.map((b) => b.close);
+          const lastC = closes[closes.length - 1];
+          const ext = t.cur === "inverse" ? Math.max(...closes) : Math.min(...closes);
+          const prog = Math.abs(((lastC - ext) / ext) * 100);
+          if (prog >= 2.5) exhaustPct = prog;
+        }
+        const guide = stale
+          ? `⚠지연 통지(확인 ${confT} ET, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
+          : exhaustPct !== null
+            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권 — SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`
+            : guideOf(t);
+        const stopLine = !stale && exhaustPct === null && !postFinal && t.cur !== "none" ? await etfStopLine(t.cur) : "";
+        try {
+          await dispatchToChannels("signal", today, {
+            key: `uspredict_tr_${t.tier}_${t.prev}_${t.cur}`,
+            severity: t.tier === "B" ? "high" : "medium",
+            text: `[미국예측·SOXX ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? orWarn : ""}${stopLine}${stateLine}`,
+            smsSubject: "미국 예측",
+            suppressSms: quiet,
+          }, undefined, undefined, { dedupHours: 16 });
+        } catch { /* 발송 실패 무시 */ }
+      }
+
+      // 09:30창 F 반전경보 (국장 rev9 이식): 본피셔 방향 유지 중 정규장창 피셔F(0.05·1봉·강돌파)가
+      // 반대 방향을 확인하면 경보. 07창 F는 프리장 급등락이 OR에 들어간 날 반전을 못 잡음 (국장 근거).
+      // SOXX 41일 실측: 발생 3건 — 3건 전부 본피셔 전환을 선행(리드 평균 12분)·선청산 이득 +1.46%p.
+      try {
+        if (curB !== "none" && regW.length >= 6) {
+          const f9 = runUsFisher(regW, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
+          if (f9.verdict !== "none" && f9.verdict !== curB) {
+            const confT9 = f9.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+            const lag9 = confT9 ? minuteOfDay - hhmmToMin(confT9) : 0;
+            const stale9 = confT9 !== null && lag9 >= 30;
+            const guide9 = stale9
+              ? `⚠지연 통지(확인 ${confT9} ET, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
+              : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (SOXX 실측: 3/3건 본피셔 전환 선행·리드 12분·선청산 +1.46%p).`;
+            await dispatchToChannels("signal", today, {
+              key: `uspredict_rev9_${curB}_${f9.verdict}`,
+              severity: "high",
+              text: `[미국예측·SOXX 반전경보] 본피셔 ${V_KO[curB]} 유지 중 — 정규장창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9} ET)` : ""}. ${guide9} 무응답=현행 유지${stateLine}`,
+              smsSubject: "미국 반전경보",
+              suppressSms: quiet,
+            }, undefined, undefined, { dedupHours: 16 });
+          }
+        }
+      } catch { /* 경보 실패는 모니터를 막지 않는다 */ }
+
+      // 무추세 확인 문자 (국장 2026-07-25 관례 이식): 방향이 없을 때도 프리장·정규장 각 1회 가동 확인.
+      // 모든 단계 없음 + 오늘 방향 이력도 없음일 때만 — 등장·소멸은 전이 문자 전담. 데이터 확보 시에만.
+      const allNone = [curF, curM, curB].every((v) => v === "none");
+      const prevAllNone = !sameDay || (["F", "M", "B"] as const).every((k) => prevSt![k] === "none");
+      if (allNone && prevAllNone) {
+        const preWindow = minuteOfDay >= hhmmToMin("08:30") && minuteOfDay < hhmmToMin("09:05") && contW.length >= 5;
+        const regWindow = minuteOfDay >= hhmmToMin("10:00") && regW.length >= 5;
+        if (preWindow || regWindow) {
+          try {
+            await dispatchToChannels("signal", today, {
+              key: preWindow ? "uspredict_flat_pre" : "uspredict_flat_reg",
+              severity: "low",
+              text: preWindow
+                ? `[미국예측] 프리장 방향 없음 (가동 확인) — SOXX 피셔F 미확인. 방향 확인 시 즉시 문자.${stateLine}`
+                : `[미국예측] 정규장 방향 없음 (10:00 ET 확인) — SOXX F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${stateLine}`,
+              smsSubject: "미국 예측",
+              suppressSms: quiet,
+            }, undefined, undefined, { dedupHours: 16 });
+          } catch { /* 발송 실패 무시 */ }
+        }
+      }
+      if (anyChange || !sameDay) {
+        await admin.from("ops_settings").upsert(
+          { key: "uspredict_tr_state", value: { date: today, F: curF, M: curM, B: curB } satisfies UsTrState },
+          { onConflict: "key" },
+        );
+      }
+    } catch (e) {
+      console.error("[uspredict] 전이 모니터 실패 (스트림 기록·채점은 계속):", e);
+    }
+  }
+
   const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number; judge: Judge }, kind: "change" | "hold", sinceCp?: string) => {
-    if (!UP.sms.enabled) return;
+    if (!STREAM_SMS || !UP.sms.enabled) return;
     const judgeKo = v.judge === "fisherF" ? "피셔F" : v.judge === "user" ? "사용자모델" : "피셔";
     const hitPct = v.verdict !== "none" ? slotHitPct(whenLabel) : null;
     // 유사장 적중은 정규장 컷에만 — 표본 있는 버킷만 표기 (한국과 동일 위치)
@@ -472,6 +622,11 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       }, undefined, undefined, { dedupHours: 16 });
     } catch { /* 발송 실패는 판정 기록을 막지 않는다 */ }
   };
+
+  // ② 라이브 스트림 (기록·채점 — 문자는 STREAM_SMS=false로 ②b 전담) — 첫 체크포인트+1분 ~ 확정+3분
+  if (minuteOfDay < hhmmToMin(ALL_CPS[0]) + 1 || minuteOfDay > hhmmToMin(UP.finalCp) + 3) return result;
+  const prior = await loadRow(today);
+  if (prior && prior.stage === "final") return result;
 
   let revs: Rev[] = prior?.revisions ?? [];
   let changed = false;
@@ -542,69 +697,9 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     }
   } catch { /* 회복 문자 실패는 스트림을 막지 않는다 */ }
 
-  // 피셔F 반전 조기 경보 + 피셔M 중간확인 (한국 2026-07-22 3단계의 미국판 — 창은 정규장 09:30 시작).
-  // 시작 11:05 → 10:00 ET 확장 (사용자 지적 2026-07-25: 조기창에서 F 확인 후 M 중간확인·본피셔
-  // 문자가 없어 2·3단계 통지 공백 — 스탑컷 실사고). 본 판정과 다른 방향을 F가 확인하면 1단계(50%)
-  // 임시 판정, M(0.10·2봉)이 동방향 재확인하면 2단계(+30%p 누적 80%), 반대면 신뢰 하락 경고.
-  // 본 피셔가 확정하면 스트림 판정 변경 문자가 3단계(+20%p 누적 100%)를 안내. 키는 방향별 1일 1회.
-  if (minuteOfDay >= hhmmToMin("10:00") && minuteOfDay <= hhmmToMin(UP.finalCp) && revs.length > 0 && UP.sms.enabled) {
-    const w = reg.filter((b) => b.etMin + 5 <= minuteOfDay);
-    if (w.length >= 6) {
-      const F = UP.fisherF, M = UP.fisherM;
-      const rf = runUsFisher(w, hist, F.offsetRangeRatio, { confirmBars: F.confirmBars, strongBreakRatio: F.strongBreakRatio });
-      const rm = runUsFisher(w, hist, M.offsetRangeRatio, { confirmBars: M.confirmBars });
-      const rMainNow = runUsFisher(w, hist, UP.offsetRangeRatio, { strongBreakRatio: 0.1 });
-      const curV = revs[revs.length - 1].verdict;
-      // 정확도 동봉 (사용자 지시 2026-07-22 밤): 이시각 실측적중(슬롯 실측 — 라이브 20회↑ 우선,
-      // 미달 시 백테스트 사전값) + 유사장 적중(시초레인지 폭 유사형태 버킷) — 판정 문자와 동일 눈금
-      const nowH = minToHHMM(minuteOfDay);
-      const slotPct = slotHitPct(nowH);
-      const statTail = `(이시각 실측적중 ${slotPct ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
-      // 비중 사다리 2단계 (2026-07-22 사용자 지적 — 동방향 M 확인도 통지): 현 판정이 조기창
-      // 피셔F 단계(본피셔 미확인)일 때 M이 같은 방향을 확인하면 +30%p 확대 신호. 반전 케이스와
-      // 같은 키(방향별 1일 1회) — 본피셔가 이미 확인한 뒤에는 3단계라 불필요.
-      if (rm.verdict !== "none" && rm.verdict === curV && rMainNow.verdict === "none") {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `uspredict_fm_${rm.verdict}`,
-            severity: "medium",
-            text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 현 판정(피셔F) 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
-            smsSubject: "미국 조기경보", suppressSms: quiet,
-          }, undefined, undefined, { dedupHours: 16 });
-        } catch { /* 발송 실패 무시 */ }
-      }
-      if (rf.verdict !== "none" && rf.verdict !== curV) {
-        try {
-          await dispatchToChannels("signal", today, {
-            key: `uspredict_ff_${rf.verdict}`, // 방향별 하루 1회 — 키에 분 금지 (2026-07-20 폭주 사고 원칙)
-            severity: "medium",
-            text: `[미국예측·피셔F 임시판정] 조기 반전 감지: ${V_KO[rf.verdict]} — ${rf.reason.split(" — ")[0]} ${statTail}. 본 판정(피셔)은 아직 ${V_KO[curV]} — 임시(저문턱)라 오발 잦음. ▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기. 무응답=현행 유지${await etfStopLine(rf.verdict)}`,
-            smsSubject: "미국 조기경보", suppressSms: quiet,
-          }, undefined, undefined, { dedupHours: 16 });
-        } catch { /* 발송 실패 무시 */ }
-        if (rm.verdict !== "none" && rm.verdict !== curV && rm.verdict === rf.verdict) {
-          try {
-            await dispatchToChannels("signal", today, {
-              key: `uspredict_fm_${rm.verdict}`,
-              severity: "medium",
-              text: `[미국예측·피셔M 중간확인] ${V_KO[rm.verdict]} 재확인 — ${rm.reason.split(" — ")[0]} ${statTail}. 피셔F 신뢰↑(SOXX 실측: M확인 시 F 적중 97%·미확인 50%). ▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 확정(3단계 +20%p)은 본 피셔. 무응답=현행 유지${await etfStopLine(rm.verdict)}`,
-              smsSubject: "미국 조기경보", suppressSms: quiet,
-            }, undefined, undefined, { dedupHours: 16 });
-          } catch { /* 발송 실패 무시 */ }
-        }
-        if (rm.verdict !== "none" && rm.verdict !== rf.verdict) {
-          try {
-            await dispatchToChannels("signal", today, {
-              key: `uspredict_fmopp_${rm.verdict}`,
-              severity: "medium",
-              text: `[미국예측·피셔M 경고] 피셔F(${V_KO[rf.verdict]})와 반대 방향 ${V_KO[rm.verdict]} 확인 — 피셔F 신뢰 하락 ${statTail}. ▶F 선진입분 30%p 축소(잔여 20%)·잔여분 스탑 ETF -${stopEtfPct.toFixed(1)}% 유지, 본 피셔 확정 대기(M과 같은 반대 확정 시 잔여도 청산). 무응답=현행 유지`,
-              smsSubject: "미국 조기경보", suppressSms: quiet,
-            }, undefined, undefined, { dedupHours: 16 });
-          } catch { /* 발송 실패 무시 */ }
-        }
-      }
-    }
-  }
+  // (구 조기경보 — 피셔F 반전·피셔M 중간확인 uspredict_ff/fm/fmopp — 는 2026-07-26 ②b 전이
+  // 모니터로 대체 폐기: F·M 전이는 모니터가 전 시간대(08:25~15:55) 통지하고, 반전경보는
+  // 정규장창 rev9가 전담한다. 국장 2026-07-23 일원화 관례와 동일.)
 
   if (!changed || revs.length === 0) return result;
   const isFinal = revs.some((r) => r.checkpoint === UP.finalCp);
