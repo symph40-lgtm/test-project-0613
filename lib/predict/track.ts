@@ -99,6 +99,7 @@ export async function runTrackService(): Promise<{ judged: string[]; scored: str
             offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
             confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
             strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, // 삼전 분리 상수 (2026-07-25) — 라이브 재현 감시용
+            reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, // 라이브 F와 동일 (2026-07-25 2차)
           },
         );
         await upsertJudge(d, "pre", "fisherf", out, pre[pre.length - 1].close, isToday);

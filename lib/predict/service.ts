@@ -131,6 +131,7 @@ async function checkpointStream(
         offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
         confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
         strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, // 강돌파 즉시확인 (2026-07-22)
+        reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, // F·M도 반전 3봉 (사용자 승인 2026-07-25 2차)
       });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;
@@ -153,6 +154,7 @@ async function checkpointStream(
         offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
         confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
         strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
+        reversalMinutes: PREDICT_CONFIG.streamReversalMinutes,
       });
       if (fb.verdict !== "none") return { verdict: fb.verdict, strength: Number((fb.confidence * 100).toFixed(0)) };
     }
@@ -233,8 +235,8 @@ async function checkpointStream(
       if (ssCont.length >= 20 && ssHist.length >= 11) {
         const inCont = { date: today, dailyHistory: ssHist, openPx: ssCont[0].open, morning: ssCont, prevDayMinutes: null };
         // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
-        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio });
-        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
+        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
         const b = ssReg.length >= 20
           ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes })
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
@@ -375,8 +377,8 @@ async function checkpointStream(
         const inC = { date: today, dailyHistory: complete.slice(-120), openPx: hxCont[0].open, morning: hxCont, prevDayMinutes: null };
         // 강돌파 동봉 (2026-07-25 정합 수정): 판정 스트림·실시간 조회의 F는 강돌파 포함인데
         // 모니터 F에만 빠져 있었음 — 스펙(F 0.05·4봉+강돌파)대로 통일. 하닉 0.1.
-        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio });
-        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8 });
+        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
       }
       if (hxReg.length >= 20) {
         hxBo = runFisher(
@@ -448,7 +450,7 @@ async function checkpointStream(
           if (rc.bState === "none" || !rc.reg || rc.hist.length < 11) continue;
           const f9 = runFisher(
             { date: today, dailyHistory: rc.hist, openPx: rc.reg[0].open, morning: rc.reg, prevDayMinutes: null },
-            { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: rc.sb },
+            { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: rc.sb, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
           );
           if (f9.verdict === "none" || f9.verdict === rc.bState) continue;
           const confT9 = f9.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
