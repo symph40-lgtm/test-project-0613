@@ -76,15 +76,15 @@ export default async function OpsPage() {
         <div className="flex flex-wrap gap-2">
           <form action={queryFisherNow}>
             <input type="hidden" name="market" value="hx" />
-            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">하닉 판정 문의</button>
+            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">하닉</button>
           </form>
           <form action={queryFisherNow}>
             <input type="hidden" name="market" value="ss" />
-            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">삼전 판정 문의</button>
+            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">삼전</button>
           </form>
           <form action={queryFisherNow}>
             <input type="hidden" name="market" value="us" />
-            <button type="submit" className="rounded-[8px] border border-hairline px-4 py-1.5 text-[13px] font-semibold hover:bg-pearl">미장 판정 문의</button>
+            <button type="submit" className="rounded-[8px] border border-hairline px-4 py-1.5 text-[13px] font-semibold hover:bg-pearl">SOXX</button>
           </form>
         </div>
         {fisherLast ? (
