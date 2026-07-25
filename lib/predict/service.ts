@@ -21,7 +21,7 @@ import {
   loadSsState, saveJudgment, saveSsState, scoreDay, upsertCheckpointDay, type Revision,
 } from "./store";
 import { MODEL_LABELS } from "./types";
-import type { PredictDailyBar, Verdict } from "./types";
+import type { MinuteBar, PredictDailyBar, Verdict } from "./types";
 
 const STREAM_MIN = 8 * 60 + 31; // 08:31부터 체크포인트 스트림 (첫 판정 08:30 완성봉 기준)
 const JUDGE_MIN = 14 * 60 + 1; // 14:01 확정 — 모델별 스냅샷(대조군 채점) 기록 (v1.4: 창 09:00~13:59)
@@ -219,6 +219,8 @@ async function checkpointStream(
   let ssTail = ""; // "\n삼전: F레버·M없음·본없음 270,250원"
   let ssF: Verdict = "none", ssM: Verdict = "none", ssB: Verdict = "none";
   let ssFReason = "", ssMReason = "", ssBReason = "";
+  let ssRegBars: MinuteBar[] | null = null; // 09창 반전 경보용 (2026-07-25)
+  let ssHistBars: PredictDailyBar[] = [];
   try {
     if (minuteOfDay >= hhmmToMin("08:25")) {
       const nowHHMMs = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
@@ -237,6 +239,8 @@ async function checkpointStream(
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
+        ssRegBars = ssReg.length >= 20 ? ssReg : null;
+        ssHistBars = ssHist;
         const ssPxBar = ssReg.length ? ssReg[ssReg.length - 1] : ssCont[ssCont.length - 1];
         ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssPxBar.close.toLocaleString()}원`;
       }
@@ -428,6 +432,42 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+      // 09창 F 반전 경보 (사용자 승인 2026-07-25 — 스펙 2.12): 본피셔 방향 유지 중 09시창
+      // 피셔F(0.05·4봉·강돌파)가 반대 방향을 확인하면 경보. 08창 F는 프리장 급등락이 OR에 들어간 날
+      // 반전을 못 잡음 (실측 커버 7/25 → 09창 25/25, 리드 중앙 하닉 11분·삼전 2분, 순효과 하닉 +9.5%p).
+      // 키 = 방향 조합(1일 1회), 지연 통지 가드 동일. F 판정자(08창)·전이 문자는 불변 — 경보 레이어만 추가.
+      try {
+        const f9cfg = {
+          offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
+          confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+          strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
+        };
+        const revChecks = [
+          { sym: "hx", symKo: "하닉", bState: hxB2, reg: hxReg.length >= 20 ? hxReg : null, hist: complete.slice(-120) },
+          { sym: "ss", symKo: "삼전", bState: ssB, reg: ssRegBars, hist: ssHistBars },
+        ] as const;
+        for (const rc of revChecks) {
+          if (rc.bState === "none" || !rc.reg || rc.hist.length < 11) continue;
+          const f9 = runFisher(
+            { date: today, dailyHistory: rc.hist, openPx: rc.reg[0].open, morning: rc.reg, prevDayMinutes: null },
+            f9cfg,
+          );
+          if (f9.verdict === "none" || f9.verdict === rc.bState) continue;
+          const confT9 = f9.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+          const lag9 = confT9 ? minuteOfDay - hhmmToMin(confT9) : 0;
+          const stale9 = confT9 !== null && lag9 >= 30;
+          const guide9 = stale9
+            ? `⚠지연 통지(확인 ${confT9}, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
+            : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (실측: 반전일 25/25 선행·리드 2~11분).`;
+          await dispatchToChannels("signal", today, {
+            key: `predict_rev9_${rc.sym}_${rc.bState}_${f9.verdict}`,
+            severity: "high",
+            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}. ${guide9} 무응답=현행 유지${bothLines}`,
+            smsSubject: "예측 반전경보",
+          });
+        }
+      } catch { /* 경보 실패는 모니터를 막지 않는다 */ }
+
       // 무추세 확인 문자 (사용자 지시 2026-07-25): 방향이 없을 때도 ①프리장 ②정규장 각 1회
       // "아직 방향 없음" 통지 — 시스템 가동 확인 겸 (사용자: "추세가 없다는 것을 확인하기 위함").
       // 모든 단계(하닉·삼전 F/M/본)가 없음 + 오늘 방향 이력도 없음일 때만 — 등장·소멸은 전이 문자 전담.
