@@ -206,6 +206,89 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     console.error("[uspredict] 피셔W 섀도 트래킹 실패 (마이그레이션 031 미적용?):", e);
   }
 
+  // ①c SOXX 애프터장 판정 (사용자 지시 2026-07-25) — 16:00~20:00 ET (KST 05~09시).
+  // 피셔 단독·오프셋 = 세션 시가 0.4% (한국 애프터 이식 — config.usPredict.after 근거 참조).
+  // 문자: 방향 등장·전환 시 + 19:30 확정 (상태 키 — 세션당 각 1회, dedupHours 16h).
+  // 취침(01~07 KST = 16~18 ET)은 dispatch suppressSms로 SMS 억제·이메일만. 기록: predict_track_days.
+  try {
+    const AH = UP.after;
+    if (minuteOfDay >= 16 * 60 + 20 && minuteOfDay <= 20 * 60 + 10) {
+      const kstA = new Date(Date.now() + 9 * 3600e3);
+      const kstMinA = kstA.getUTCHours() * 60 + kstA.getUTCMinutes();
+      const QA = US_SIGNAL_CONFIG.quietSms;
+      const quietA = kstMinA >= QA.fromKstMin && kstMinA < QA.toKstMin;
+      const byDayA = await fetchJudge5m(5);
+      const postOf = (d: string) => (byDayA.get(d) ?? []).filter((b) => b.etMin >= 16 * 60 && b.etMin < 20 * 60);
+      // (a) 과거 미채점 애프터 행 라벨링 (야후 5분봉 보존 내 백필)
+      try {
+        const { data: unl } = await admin
+          .from("predict_track_days").select("date, verdict, entry_px")
+          .eq("symbol", SY.judge).eq("session", "after").eq("model", "fisher")
+          .is("labeled_at", null).lt("date", today).limit(4);
+        for (const r of unl ?? []) {
+          const bars = postOf(String(r.date));
+          if (bars.length < 30) continue;
+          const { label, rOC } = labelUsDay(bars, AH.label.trendMinPct, AH.label.posUp, AH.label.posDown);
+          const v = r.verdict as Verdict;
+          const entry = Number(r.entry_px) || null;
+          const ret = v !== "none" && entry
+            ? Number((((bars[bars.length - 1].close - entry) / entry) * 100 * (v === "leverage" ? 1 : -1)).toFixed(2))
+            : null;
+          await admin.from("predict_track_days")
+            .update({ label, r_oc: rOC, ret_pct: ret, labeled_at: new Date().toISOString() })
+            .eq("date", String(r.date)).eq("symbol", SY.judge).eq("session", "after").eq("model", "fisher");
+        }
+      } catch { /* 채점 백필 실패는 판정을 막지 않는다 */ }
+      // (b) 당일 라이브 판정·문자
+      const barsA = postOf(today).filter((b) => b.etMin + 5 <= minuteOfDay);
+      const dailyA = await fetchJudgeDaily(80);
+      const histA = dailyA.filter((b) => b.date < today).slice(-120);
+      const range10A = avgRange(histA, 10);
+      if (barsA.length >= AH.orBars + AH.confirmBars && histA.length >= 30 && range10A !== null) {
+        const offsetRatio = ((AH.offsetPct / 100) * barsA[0].open) / range10A;
+        const out = runUsFisher(barsA, histA, offsetRatio, { confirmBars: AH.confirmBars, orBars: AH.orBars });
+        if (out.verdict !== "none") {
+          const confT = out.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+          const lagA = confT ? minuteOfDay - hhmmToMin(confT) : 0;
+          const staleA = confT !== null && lagA >= 30;
+          const isFinal = minuteOfDay >= hhmmToMin(AH.finalCp) + 1;
+          const head = isFinal ? `애프터 확정(${AH.finalCp} ET)` : "애프터";
+          const guideA = staleA
+            ? `⚠지연 통지(확인 ${confT} ET, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
+            : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET 종료 전 청산.`;
+          try {
+            await dispatchToChannels("signal", today, {
+              key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
+              severity: "medium",
+              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} — ${out.reason.split(" — ")[0]} (16~20시 ET). ${guideA} 무응답=현행 유지`,
+              smsSubject: "미국 애프터",
+              suppressSms: quietA,
+            }, undefined, undefined, { dedupHours: 16 });
+          } catch { /* 발송 실패 무시 */ }
+        }
+        // 확정 이후 1회 기록 (라벨은 세션 종료 후 (a)에서)
+        if (minuteOfDay >= hhmmToMin(AH.finalCp) + 5) {
+          const wCut = barsA.filter((b) => b.etMin + 5 <= hhmmToMin(AH.finalCp));
+          if (wCut.length >= AH.orBars + AH.confirmBars) {
+            const fin = runUsFisher(wCut, histA, offsetRatio, { confirmBars: AH.confirmBars, orBars: AH.orBars });
+            const { data: ex } = await admin
+              .from("predict_track_days").select("date")
+              .eq("date", today).eq("symbol", SY.judge).eq("session", "after").eq("model", "fisher").maybeSingle();
+            if (!ex) {
+              await admin.from("predict_track_days").upsert({
+                date: today, symbol: SY.judge, session: "after", model: "fisher",
+                verdict: fin.verdict, strength: Math.round(fin.confidence * 100),
+                entry_px: wCut[wCut.length - 1].close, source: "live",
+              }, { onConflict: "date,symbol,session,model" });
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[uspredict] 애프터장 판정 실패:", e);
+  }
+
   // ② 라이브 스트림 — 첫 체크포인트+1분 ~ 확정+3분 (08:31~14:33 ET = KST 21:31~03:33 서머타임)
   if (minuteOfDay < hhmmToMin(ALL_CPS[0]) + 1 || minuteOfDay > hhmmToMin(UP.finalCp) + 3) return result;
   const prior = await loadRow(today);
