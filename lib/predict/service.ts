@@ -14,6 +14,7 @@ import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { loadMacroHistory } from "./macro";
 import { runAfterService } from "./after";
 import { runSectorService } from "./sector";
+import { loadTrackPerf, runTrackService } from "./track";
 import {
   countAlertKey, hasJudgment, hasModelRows, lastAlertDateLike, listUnscoredDates, loadAccuracyStats,
   loadAfterPerf, loadDayRow, loadLiveModelPerf, loadRecentDays, loadRescueStats, loadSectorPerf,
@@ -577,6 +578,18 @@ export async function runPredictService(): Promise<PredictRunResult> {
         if (after && after.t > 0) extra.push(`애프터 ${Math.round((after.c / after.t) * 100)}%(${after.t})`);
         if (sector && sector.t > 0) extra.push(`섹터 ${Math.round((sector.c / sector.t) * 100)}%(${sector.t})`);
         if (extra.length) lines.push(extra.join("·"));
+        // 삼전 트래킹 방향적중 (2026-07-25 신설 — 피셔W 라이브 재현 감시)
+        try {
+          const tp = await loadTrackPerf();
+          if (tp) {
+            const f = (k: string, name: string) => {
+              const s = tp[k];
+              return s && s.t > 0 ? `${name} ${Math.round((s.c / s.t) * 100)}%(${s.t})` : null;
+            };
+            const parts = [f("reg/fisher", "본"), f("reg/fisherw", "W"), f("pre/fisherf", "프리F"), f("after/fisher", "애프터")].filter(Boolean);
+            if (parts.length) lines.push(`삼전: ${parts.join("·")}`);
+          }
+        } catch { /* 트래킹 통계 실패 무시 */ }
         lines.push(`조기창 0.05·4봉 적용중(7/22~) — 09:30~10:30 슬롯이 실측`);
         await dispatchToChannels("signal", today, {
           key: `predict_perf_${today}`,
@@ -603,6 +616,14 @@ export async function runPredictService(): Promise<PredictRunResult> {
     result.scored.push(...sec.scored.map((s) => `${s}(섹터)`));
   } catch (e) {
     console.error("[predict] 섹터 트래킹 실패 (마이그레이션 028 미적용?):", e);
+  }
+
+  // ⑧ 삼전 다세션 트래킹 (ops 지시 2026-07-25 — 프리장F·정규장 본/W·애프터, 문자 없음)
+  try {
+    const tr = await runTrackService();
+    result.scored.push(...tr.scored.map((s) => `${s}(트래킹)`));
+  } catch (e) {
+    console.error("[predict] 삼전 트래킹 실패 (마이그레이션 031 미적용?):", e);
   }
 
   return result;

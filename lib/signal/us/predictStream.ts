@@ -151,6 +151,61 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     }
   }
 
+  // ①b SOXX 피셔W(0.25) 섀도 트래킹 (ops 지시 2026-07-25) — 기록·채점 전용, 문자 없음.
+  // 근거: 39일 스윕에서 0.25가 확정 컷 적중 100%(25회) vs 본피셔 0.15 94%(32회) — 소표본이라
+  // 라이브 재현 검증. 컷 14:30(확정과 동일), 라벨·채점은 본 스트림과 같은 눈금.
+  // 실행 창: 확정 컷+1분 이후 (첫 호출 1회 — 오늘 행 존재 여부로 중복 차단), 과거 결손일도 함께 백필.
+  try {
+    if (minuteOfDay >= hhmmToMin(UP.finalCp) + 1) {
+      const { data: trkRows, error: trkErr } = await admin
+        .from("predict_track_days")
+        .select("date, labeled_at")
+        .eq("symbol", SY.judge).eq("session", "reg").eq("model", "fisherw")
+        .order("date", { ascending: false }).limit(1);
+      const trkLast = trkRows?.[0] as { date: string; labeled_at: string | null } | undefined;
+      const needNew = !trkErr && String(trkLast?.date ?? "") < today; // 오늘 판정 미기록 (+과거 결손 백필)
+      const needScore = !trkErr && !!trkLast && !trkLast.labeled_at
+        && (String(trkLast.date) < today || minuteOfDay >= ET_CLOSE + 5); // 미채점 잔여
+      if (needNew || needScore) {
+        const byDayW = await fetchJudge5m(14);
+        const dailyW = await fetchJudgeDaily(80);
+        for (const [d, bars] of byDayW) {
+          if (d > today) continue;
+          const reg = bars.filter((b) => b.etMin >= ET_OPEN && b.etMin < ET_CLOSE);
+          const w = reg.filter((b) => b.etMin + 5 <= hhmmToMin(UP.finalCp));
+          const histW = dailyW.filter((b) => b.date < d).slice(-120);
+          if (w.length < 30 || histW.length < 30) continue;
+          const { data: ex } = await admin
+            .from("predict_track_days").select("date, labeled_at")
+            .eq("date", d).eq("symbol", SY.judge).eq("session", "reg").eq("model", "fisherw").maybeSingle();
+          if (ex && ex.labeled_at) continue;
+          const out = runUsFisher(w, histW, 0.25, {});
+          const entry = w[w.length - 1].close;
+          const row: Record<string, unknown> = {
+            date: d, symbol: SY.judge, session: "reg", model: "fisherw",
+            verdict: out.verdict, strength: Math.round(out.confidence * 100), entry_px: entry,
+            source: d === today ? "live" : "backfill",
+          };
+          // 세션 완결 시(과거일 또는 오늘 마감+5분) 라벨·손익까지 한 번에
+          if (d < today || minuteOfDay >= ET_CLOSE + 5) {
+            if (reg.length >= 60) {
+              const { label, rOC } = labelUsDay(reg, UP.label.trendMinPct, UP.label.posUp, UP.label.posDown);
+              row.label = label;
+              row.r_oc = rOC;
+              row.ret_pct = out.verdict !== "none"
+                ? Number((((reg[reg.length - 1].close - entry) / entry) * 100 * (out.verdict === "leverage" ? 1 : -1)).toFixed(2))
+                : null;
+              row.labeled_at = new Date().toISOString();
+            }
+          }
+          await admin.from("predict_track_days").upsert(row, { onConflict: "date,symbol,session,model" });
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[uspredict] 피셔W 섀도 트래킹 실패 (마이그레이션 031 미적용?):", e);
+  }
+
   // ② 라이브 스트림 — 첫 체크포인트+1분 ~ 확정+3분 (08:31~14:33 ET = KST 21:31~03:33 서머타임)
   if (minuteOfDay < hhmmToMin(ALL_CPS[0]) + 1 || minuteOfDay > hhmmToMin(UP.finalCp) + 3) return result;
   const prior = await loadRow(today);
