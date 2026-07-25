@@ -147,7 +147,15 @@ export const PREDICT_CONFIG = {
     reversalMinutes: 5, // C 철회
     earlyConfirmBy: "09:45",
     strongBreakRatio: 0, // 강돌파 즉시확인 — 기본 비활성 (조기창만 earlyStrongBreakRatio로 활성)
+    trailRangeRatio: 0, // 트레일 반전 — 기본 비활성 (하닉 고변동일 스트림만 hxTrail로 활성)
+    trailConfirmMinutes: 5,
   },
+  // 하닉 고변동일 트레일 반전 (사용자 승인 2026-07-25 — 스트림 전용): 당일 vol10(10일 평균폭/전일
+  // 종가)이 과거 60거래일 추적 66.7분위 이상인 날, 본피셔 반전에 '극값-0.5×평균폭 되돌림 5봉' 경로
+  // 병행. 근거(scripts/trail-conditional-verify.ts, 스탑 결합·추적 경계): 하닉 4/4 개선 — 전체
+  // +46.0→+54.7·고변동만 +11.6→+20.3%p. 삼전은 전반 악화로 갈림 → 하닉 전용 (2.13절).
+  // ⚠비용: 고변동일 전환 문자 증가 (실측 12→67회/114일). 열화 시 이 블록만 끄면 원복.
+  hxTrail: { rangeRatio: 0.5, confirmMinutes: 5 },
   dalton: {
     vaBinWon: 500, // 하닉 호가 단위
     vaPct: 0.7, // 가치영역 70%

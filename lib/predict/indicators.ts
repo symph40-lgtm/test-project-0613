@@ -28,6 +28,23 @@ export function avgRange(bars: PredictDailyBar[], n = 10): number | null {
   return s.reduce((a, b) => a + (b.high - b.low), 0) / n;
 }
 
+// 고변동일 판별 (2026-07-25, 하닉 트레일 반전 전용): 오늘 진입 시점의 vol10(10일 평균폭 / 전일
+// 종가 %)이 과거 60거래일 vol10의 추적 66.7분위 이상인가. 경계 선견 없음 — 완결 일봉만 사용.
+export function isHighVolDay(complete: PredictDailyBar[]): boolean {
+  if (complete.length < 75) return false;
+  const vols: number[] = [];
+  for (let j = complete.length - 60; j < complete.length; j++) {
+    const r = avgRange(complete.slice(0, j), 10);
+    const prev = complete[j - 1];
+    if (r !== null && prev) vols.push((r / prev.close) * 100);
+  }
+  const rToday = avgRange(complete, 10);
+  const last = complete[complete.length - 1];
+  if (vols.length < 40 || rToday === null || !last) return false;
+  const sorted = [...vols].sort((a, b) => a - b);
+  return (rToday / last.close) * 100 >= sorted[Math.floor((2 * sorted.length) / 3)];
+}
+
 // NR(n): 전일 레인지가 직전 n일 중 최소인가 (ext-modules 1.2와 동일 정의)
 export function isNR(bars: PredictDailyBar[], n: number): boolean {
   if (bars.length < n) return false;

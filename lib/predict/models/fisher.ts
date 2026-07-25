@@ -15,6 +15,11 @@ export type FisherCfg = {
   // 강돌파 즉시확인 (2026-07-22 사용자 제안): A선을 이 비율×10일평균폭 이상 크게 돌파한 종가는
   // 확인봉을 즉시 충족 처리. 0 = 비활성. 검증: 0.10에서 220일 +74.8→+84.6%p·최근 구간 중립.
   strongBreakRatio?: number;
+  // 트레일 반전 (2026-07-25 사용자 승인 — 하닉 고변동일 스트림 전용): 방향 확인 후 극값(종가)에서
+  // 이 비율×10일평균폭 되돌림이 trailConfirmMinutes봉 연속 유지되면 반대편 A선(C지점) 없이도 전환.
+  // 고정 OR 앵커의 전환 지연(멀리 갔다 돌아오는 날) 해소 — C반전과 병행, 먼저 오는 쪽. 0 = 비활성.
+  trailRangeRatio?: number;
+  trailConfirmMinutes?: number;
 };
 
 export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
@@ -32,12 +37,16 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   const aUp = orHigh + offset;
   const aDown = orLow - offset;
 
-  // OR 이후 완성봉 순회 — 연속 유지 카운트로 A 확인, 확인 후 반대편(C) 이탈이면 전환
+  // OR 이후 완성봉 순회 — 연속 유지 카운트로 A 확인, 확인 후 반대편(C) 이탈이면 전환.
+  // 트레일 활성 시(고변동일 하닉): 극값 되돌림 유지도 전환 경로 — C와 병행, 먼저 오는 쪽.
   const rest = input.morning.slice(cfg.orMinutes);
+  const trailW = (cfg.trailRangeRatio ?? 0) > 0 ? (cfg.trailRangeRatio ?? 0) * range10 : 0;
+  const trailN = cfg.trailConfirmMinutes ?? 5;
   let state: "none" | "up" | "down" = "none";
-  let upRun = 0, downRun = 0;
+  let upRun = 0, downRun = 0, trailRun = 0, extreme = 0;
   let confirmedAt: string | null = null;
   let reversed = false;
+  let viaTrail = false;
   for (const b of rest) {
     upRun = b.close > aUp ? upRun + 1 : 0;
     downRun = b.close < aDown ? downRun + 1 : 0;
@@ -47,12 +56,26 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       if (b.close < aDown - sm) downRun = Math.max(downRun, cfg.confirmMinutes, cfg.reversalMinutes);
     }
     if (state === "none") {
-      if (upRun >= cfg.confirmMinutes) (state = "up"), (confirmedAt = b.time);
-      else if (downRun >= cfg.confirmMinutes) (state = "down"), (confirmedAt = b.time);
-    } else if (state === "up" && downRun >= cfg.reversalMinutes) {
-      state = "down"; confirmedAt = b.time; reversed = true;
-    } else if (state === "down" && upRun >= cfg.reversalMinutes) {
-      state = "up"; confirmedAt = b.time; reversed = true;
+      if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
+      else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
+    } else if (state === "up") {
+      if (trailW > 0) {
+        extreme = Math.max(extreme, b.close);
+        trailRun = b.close < extreme - trailW ? trailRun + 1 : 0;
+      }
+      if (downRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN)) {
+        viaTrail = downRun < cfg.reversalMinutes;
+        state = "down"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
+      }
+    } else {
+      if (trailW > 0) {
+        extreme = Math.min(extreme, b.close);
+        trailRun = b.close > extreme + trailW ? trailRun + 1 : 0;
+      }
+      if (upRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN)) {
+        viaTrail = upRun < cfg.reversalMinutes;
+        state = "up"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
+      }
     }
   }
 
@@ -61,10 +84,13 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     return { model, verdict: "none", confidence: 0.5, reason: `A지점 미확인 — ${lv}` };
   }
   const conf = reversed ? 0.6 : confirmedAt !== null && confirmedAt < cfg.earlyConfirmBy ? 0.8 : 0.7;
+  const head = reversed && viaTrail
+    ? `${confirmedAt} 트레일 반전 확인 (극값 ${Math.round(trailW)}원 되돌림·고변동일)`
+    : `${confirmedAt} A${state === "up" ? "상" : "하"} 확인${reversed ? " (C지점 반전 후)" : ""}`;
   return {
     model,
     verdict: state === "up" ? "leverage" : "inverse",
     confidence: conf,
-    reason: `${confirmedAt} A${state === "up" ? "상" : "하"} 확인${reversed ? " (C지점 반전 후)" : ""} — ${lv}`,
+    reason: `${head} — ${lv}`,
   };
 }

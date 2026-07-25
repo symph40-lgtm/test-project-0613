@@ -9,7 +9,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PREDICT_CONFIG } from "./config";
 import { fetchDailyPredict } from "./data";
-import { avgRange } from "./indicators";
+import { avgRange, isHighVolDay } from "./indicators";
 import { fetchDayMinutes, fetchNxtAfterMarket, fetchNxtPremarket, fetchTodayMinutes } from "./kisMinute";
 import { runFisher } from "./models/fisher";
 import { loadDayRow } from "./store";
@@ -76,6 +76,10 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
     // 강돌파: 하닉 0.1 / 삼전 0.075 (사용자 승인 2026-07-25 종목 분리 — config.ssStrongBreakRatio)
     const sb = isHx ? PREDICT_CONFIG.earlyStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
     const sbLate = isHx ? PREDICT_CONFIG.lateStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
+    // 하닉 고변동일 트레일 반전 (2026-07-25) — 스트림과 동일 조건으로 미러 (조회 일치)
+    const trailOpts = isHx && isHighVolDay(hist)
+      ? { trailRangeRatio: PREDICT_CONFIG.hxTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.hxTrail.confirmMinutes }
+      : {};
     const input08 = { date: today, dailyHistory: hist, openPx: pre?.[0]?.open ?? bars08[0].open, morning: bars08, prevDayMinutes: null };
     F = runFisher(input08, {
       offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
@@ -87,10 +91,10 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
     if (krx && krx.length >= 20) {
       B = runFisher(
         { date: today, dailyHistory: hist, openPx: krx[0].open, morning: krx, prevDayMinutes: null },
-        { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes },
+        { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...trailOpts },
       );
     } else {
-      B = runFisher(input08, { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+      B = runFisher(input08, { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...trailOpts });
       bonNote = "정규장 창 형성 전 — 08시창 참고";
     }
   }
