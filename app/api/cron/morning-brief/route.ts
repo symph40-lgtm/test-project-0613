@@ -42,7 +42,25 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: brief.sms2 ? 2 : 1 });
+    // ③레짐 브리핑 — 별도 문자 (사용자 지시 2026-07-25: 유사 레짐일 실측 + 비중 결론 동봉)
+    let regimeSent = false;
+    try {
+      const { buildRegimeSms } = await import("@/lib/predict/regime");
+      const regimeSms = await buildRegimeSms();
+      if (regimeSms) {
+        sent += await dispatchToChannels(
+          "intraday_summary",
+          date,
+          { key: "morning_regime", severity: "medium", text: regimeSms, smsSubject: "레짐 브리핑" },
+          `레짐 브리핑 (${date})`,
+        );
+        regimeSent = true;
+      }
+    } catch (e) {
+      console.error("[cron/morning-brief] 레짐 브리핑 실패 (본 브리핑은 발송됨):", e);
+    }
+
+    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: (brief.sms2 ? 2 : 1) + (regimeSent ? 1 : 0) });
   } catch (e) {
     console.error("[cron/morning-brief] error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
