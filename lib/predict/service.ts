@@ -428,6 +428,29 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+      // 무추세 확인 문자 (사용자 지시 2026-07-25): 방향이 없을 때도 ①프리장 ②정규장 각 1회
+      // "아직 방향 없음" 통지 — 시스템 가동 확인 겸 (사용자: "추세가 없다는 것을 확인하기 위함").
+      // 모든 단계(하닉·삼전 F/M/본)가 없음 + 오늘 방향 이력도 없음일 때만 — 등장·소멸은 전이 문자 전담.
+      // 데이터 가드: 분봉 확보 시에만 (휴장·결손일 오발송 방지). 키 predict_flat_* — 하루 1회.
+      const allNone = [hxF2, hxM2, hxB2, ssF, ssM, ssB].every((v) => v === "none");
+      const prevAllNone = !sameDay
+        || (["F", "M", "B"] as const).every((t) => prevState!.hx[t] === "none" && prevState!.ss[t] === "none");
+      if (allNone && prevAllNone) {
+        const preWindow = minuteOfDay >= hhmmToMin("08:30") && minuteOfDay < hhmmToMin("09:05") && hxCont.length >= 20;
+        const regWindow = minuteOfDay >= hhmmToMin("10:00") && hxReg.length >= 20;
+        if (preWindow || regWindow) {
+          try {
+            await dispatchToChannels("signal", today, {
+              key: preWindow ? "predict_flat_pre" : "predict_flat_reg",
+              severity: "low",
+              text: preWindow
+                ? `[예측] 프리장 방향 없음 (가동 확인) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
+                : `[예측] 정규장 방향 없음 (10시 확인) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${bothLines}`,
+              smsSubject: "예측 상태",
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+      }
       if (anyChange || !sameDay) await saveSsState({ date: today, ss: { F: ssF, M: ssM, B: ssB }, hx: { F: hxF2, M: hxM2, B: hxB2 } });
     } catch { /* 모니터 실패는 스트림(기록·채점)을 막지 않는다 */ }
   }
