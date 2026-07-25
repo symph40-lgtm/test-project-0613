@@ -370,7 +370,10 @@ async function checkpointStream(
   // 상수는 하닉 220일+224일 실측 검증분 — 오프셋이 각 종목 10일 평균폭에 비례라 변동폭은 종목별 자동 적응.
   // 문자: 등장·전환·소멸 모든 전이 통지(전이 키 — 같은 전이 1일 1회), 어느 트리거든 두 종목 상태 병기.
   // 판정 기록·채점·성능/청산/애프터 문자는 기존 스트림 유지 — 방향 통지 층만 이 모니터로 일원화.
-  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("08:25") && minuteOfDay <= hhmmToMin(lastCp)) {
+  // 모니터 창 연장 14:00 → 15:25 (사용자 지시 2026-07-25: 확정 후에도 상황이 바뀌면 —
+  // 인버스→추세없음→레버리지 — 계속 판정·통지. 7/24 삼전 13:05 반등 인버스 유지 실사고).
+  // 애프터장(15:30~20:00)은 하닉 애프터 스트림이 전담, 삼전 애프터 문자는 트래킹 검증 후 승격.
+  if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("08:25") && minuteOfDay <= 15 * 60 + 25) {
     try {
       const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)

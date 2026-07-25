@@ -15,7 +15,7 @@ import { fetchJudge5m, fetchJudgeDaily } from "./predictStream";
 const UP = US_SIGNAL_CONFIG.usPredict;
 const SY = UP.symbols;
 const V_KO: Record<Verdict, string> = { leverage: "레버리지", inverse: "인버스", none: "추세없음" };
-const V_SHORT: Record<Verdict, string> = { leverage: "레버", inverse: "인버", none: "없음" };
+const V_SHORT: Record<Verdict, string> = { leverage: "레버", inverse: "인버", none: "추세없음" };
 const confirmOf = (reason: string): string | null => reason.match(/^(\d{2}:\d{2}) A[상하] 확인/)?.[1] ?? null;
 
 export async function fisherNowUs(): Promise<FisherNow> {
@@ -75,10 +75,17 @@ export async function fisherNowUs(): Promise<FisherNow> {
     const admin = createAdminClient();
     const { data } = await admin
       .from("us_predict_days")
-      .select("final_verdict, strength, stage")
+      .select("final_verdict, strength, stage, revisions")
       .eq("date", sessionDate)
       .maybeSingle();
-    if (data) base.official = `${V_KO[data.final_verdict as Verdict]} (강도 ${data.strength}%${data.stage === "final" ? "·확정" : ""})`;
+    if (data) {
+      // 판정자 표기 (사용자 지적 2026-07-25: 공식 인버스인데 본피셔 추세없음 — 모순처럼 보임.
+      // 공식은 '판정자'의 스트림 판정: 조기창은 피셔F가 판정자라 본피셔와 다를 수 있음을 명시)
+      const revsArr = (data.revisions ?? []) as { judge?: string }[];
+      const lastJudge = revsArr.length ? revsArr[revsArr.length - 1]?.judge : undefined;
+      const judgeKo = lastJudge === "fisherF" ? "판정자 피셔F·" : lastJudge === "fisher" ? "판정자 본피셔·" : "";
+      base.official = `${V_KO[data.final_verdict as Verdict]} (${judgeKo}강도 ${data.strength}%${data.stage === "final" ? "·확정" : ""})`;
+    }
   } catch { /* 마이그레이션 029 미적용·기록 없음 — 계산값만 */ }
 
   // 스탑 — 방향의 3x ETF 최근 5분봉 종가 기준 (SOXX 스탑 2.0% × 3배 = ETF -6%)

@@ -32,7 +32,7 @@ export type FisherNow = {
 export type KrStock = "hx" | "ss"; // 하닉 000660 · 삼전 005930
 
 const V_KO: Record<Verdict, string> = { leverage: "레버리지", inverse: "인버스", none: "추세없음" };
-const V_SHORT: Record<Verdict, string> = { leverage: "레버", inverse: "인버", none: "없음" };
+const V_SHORT: Record<Verdict, string> = { leverage: "레버", inverse: "인버", none: "추세없음" };
 // 애프터장은 본주 전용(ETF 미운영) — 방향 라벨을 애프터 스트림(after.ts)과 통일
 const V_AH: Record<Verdict, string> = { leverage: "상방(본주 매수)", inverse: "하방(관망·청산)", none: "추세없음" };
 const V_AH_SHORT: Record<Verdict, string> = { leverage: "상방", inverse: "하방", none: "없음" };

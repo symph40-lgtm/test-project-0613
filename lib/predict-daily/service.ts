@@ -32,6 +32,14 @@ function actionLabel(stance: Stance, exposure: number): string {
 // 유지 스트릭 비교용 단계 (게이트 전 기본 사다리 기준 — 게이트로 인한 일시 감산은 스트릭을 끊지 않음)
 const tierOf = (e: number) => (e >= 0.9 ? 4 : e >= 0.6 ? 3 : e >= 0.35 ? 2 : e >= 0.1 ? 1 : 0);
 
+// 내일갭 대비 진입 결론 (사용자 지시 2026-07-25 — 7/23 현금화 약 50% 다음날 갭하락 실사고):
+// 보수 기준 — 풀보유(≥90%) + 게이트 없음일 때만 '보유·진입 가능', 현금화 약(50%) 이하는 전부 비권장.
+// 예상 정확도는 함께 표기되는 미너비니·와인 r3(3거래일) 누적 적중이 기준.
+const gapAdvice = (j: DailyJudgment): string =>
+  j.exposure >= 0.9 && j.gates.length === 0
+    ? " ▶내일갭 대비: 보유·진입 가능(풀보유 신호)"
+    : " ▶내일갭 대비: 신규 진입 비권장(보수 — 현금화 단계·게이트)";
+
 function macroLine(m: MacroSnap | null): string {
   if (!m) return "";
   const parts: string[] = [];
@@ -47,7 +55,7 @@ function macroLine(m: MacroSnap | null): string {
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
 function holdText(name: string, j: DailyJudgment, macro: MacroSnap | null, flow: FlowDay[], since: string, days: number, mw?: MwStats): string {
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}`;
+  return `[일봉] ${name} ${actionLabel(j.stance, j.exposure)} 유지 — ${since.slice(5).replace("-", "/")}부터 ${days}거래일째. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)}`;
 }
 
 function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, prevLabel: string | null, flow: FlowDay[], mw?: MwStats): string {
@@ -60,11 +68,13 @@ function judgmentText(name: string, j: DailyJudgment, macro: MacroSnap | null, p
   else why.push("하락 추세(역정렬)");
   if (j.gates.length) why.push(`${j.gates.join("·")} 감산`);
   const stop = j.stopPx ? ` 손절 ${fmtPx(j.stopPx)}(-${Math.round(j.stopPct * 100)}%)` : "";
-  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}. ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)} 무응답=현행 유지`;
+  return `[일봉] ${name} ${head} — ${why.join(", ")}. 종가 ${fmtPx(j.closePx)}${stop}.${gapAdvice(j)} ${regimeLine(j)}${mwLine(j, mw)}${macroLine(macro)}${flowLine(flow)}${kospiLine(macro?.kospiFlow)} 무응답=현행 유지`;
 }
 
 // 미너비니·와인스타인 판정 병기 + 누적 실측 적중 (사용자 지시 2026-07-22 — 매일의 판정·실제 결과를 누적 평가해 표기)
-const stanceKo = (s: Stance) => (s === "long" ? "매수" : s === "short" ? "매도" : "중립");
+// flat 표기 "중립" → "이탈(중립)" (사용자 지적 2026-07-25: 앞의 사유 '추세 이탈(미너비니)'와
+// 뒤의 '미너비니 중립'이 다른 말처럼 보임 — 같은 상태임을 표기로 통일)
+const stanceKo = (s: Stance) => (s === "long" ? "매수" : s === "short" ? "매도" : "이탈(중립)");
 type MwStat = { acc: number; n: number } | null;
 type MwStats = { m: MwStat; w: MwStat };
 
@@ -311,7 +321,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
             await dispatchToChannels("signal", now.date, {
               key: `pdaily_aftersum_${sym.code}_${now.date}`,
               severity: "low",
-              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}`,
+              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${gapAdvice(jgAfter)}${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}`,
               smsSubject: "일봉 애프터",
             });
           }

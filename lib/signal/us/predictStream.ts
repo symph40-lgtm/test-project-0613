@@ -412,9 +412,27 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     // 유사장 적중은 정규장 컷에만 — 표본 있는 버킷만 표기 (한국과 동일 위치)
     const similar = v.verdict !== "none" && whenLabel >= "09:30" && similarHit !== null ? `·유사장 적중 ${similarHit}%` : "";
     const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
+    // 소진 확인 가드 (2026-07-25 — 한국 이식 + SOXX 자체 실측: 기진행 ≥2.5% 확인 16일
+    // 잔여 평균 -0.68%·적중 31% vs 그 미만 -0.25%·50%): 방향 확인이 당일 극값 대비 이미 크게
+    // 진행된 지점이면 진입 지침 대신 추격 금지 경고.
+    let exhaustPct: number | null = null;
+    if (kind === "change" && v.verdict !== "none") {
+      const closes = reg.filter((b) => b.etMin + 5 <= minuteOfDay).map((b) => b.close);
+      if (closes.length >= 6) {
+        const lastC = closes[closes.length - 1];
+        const ext = v.verdict === "inverse" ? Math.max(...closes) : Math.min(...closes);
+        const prog = Math.abs(((lastC - ext) / ext) * 100);
+        if (prog >= 2.5) exhaustPct = prog;
+      }
+    }
     let text: string;
     if (kind === "hold") {
       text = `[미국예측·${judgeKo}] ${whenLabel} ET 판정 유지 확인: ${V_KO[v.verdict]} (${sinceCp}부터 유지 · 강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""})`;
+    } else if (exhaustPct !== null) {
+      text = (prev === null
+        ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
+        : `[미국예측·${judgeKo}] ${whenLabel} ET 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} ${tail}`)
+        + ` ⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권 — SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`;
     } else {
       text = prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
@@ -495,11 +513,41 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     }
   }
 
-  // 피셔F 반전 조기 경보 + 피셔M 중간확인 (한국 2026-07-22 3단계의 미국판 — 본판정 구간
-  // 11:05~14:30 ET, 창은 정규장 09:30 시작). 본 판정과 다른 방향을 F가 확인하면 1단계(50%) 임시
-  // 판정, M(0.10·2봉)이 동방향 재확인하면 2단계(+30%p 누적 80%), 반대면 신뢰 하락 경고(30%p 축소).
+  // 노이즈컷 회복 문자 (2026-07-25 한국 이식 — predict_recut의 미국판): 판정 방향 유지 중
+  // 스탑라인(SOXX -2%) 터치 후 원판정가 종가 회복 시 재진입 검토 1회. 한국 실측 승률 ~50%·
+  // 소폭 순익(하닉 +3.5·삼전 +7.2%p) — 미국은 라이브로 보정. 키 = 방향별, dedupHours 16h.
+  try {
+    const lastV = revs.length ? revs[revs.length - 1].verdict : "none";
+    if (lastV !== "none" && UP.sms.enabled) {
+      let start = revs.length - 1;
+      while (start > 0 && revs[start - 1].verdict === lastV) start--;
+      const cutMin = firstDirCutMin(revs.slice(start));
+      const entryBar = cutMin !== null ? reg.filter((b) => b.etMin + 5 <= cutMin).pop() : undefined;
+      if (entryBar) {
+        const entry = entryBar.close;
+        const isUp = lastV === "leverage";
+        const after = reg.filter((b) => b.etMin > entryBar.etMin && b.etMin + 5 <= minuteOfDay);
+        const cutIdx = after.findIndex((b) => (isUp ? b.low <= entry * (1 - UP.stopPct / 100) : b.high >= entry * (1 + UP.stopPct / 100)));
+        const rec = cutIdx >= 0 ? after.slice(cutIdx + 1).find((b) => (isUp ? b.close > entry : b.close < entry)) : undefined;
+        if (rec) {
+          await dispatchToChannels("signal", today, {
+            key: `uspredict_recut_${lastV}`,
+            severity: "medium",
+            text: `[미국예측·회복] 스탑컷 후 원판정가 회복 — ${V_KO[lastV]} 판정 유지 중 (판정가 ${entry.toFixed(2)}$ · 컷 후 ${rec.time} ET 회복). ▶재진입 검토: 새 진입가 스탑 ETF -${stopEtfPct.toFixed(1)}% 재설정 · 한국 실측 승률 ~50% 이식 — 소액만. 무응답=미진입`,
+            smsSubject: "미국 회복",
+            suppressSms: quiet,
+          }, undefined, undefined, { dedupHours: 16 });
+        }
+      }
+    }
+  } catch { /* 회복 문자 실패는 스트림을 막지 않는다 */ }
+
+  // 피셔F 반전 조기 경보 + 피셔M 중간확인 (한국 2026-07-22 3단계의 미국판 — 창은 정규장 09:30 시작).
+  // 시작 11:05 → 10:00 ET 확장 (사용자 지적 2026-07-25: 조기창에서 F 확인 후 M 중간확인·본피셔
+  // 문자가 없어 2·3단계 통지 공백 — 스탑컷 실사고). 본 판정과 다른 방향을 F가 확인하면 1단계(50%)
+  // 임시 판정, M(0.10·2봉)이 동방향 재확인하면 2단계(+30%p 누적 80%), 반대면 신뢰 하락 경고.
   // 본 피셔가 확정하면 스트림 판정 변경 문자가 3단계(+20%p 누적 100%)를 안내. 키는 방향별 1일 1회.
-  if (minuteOfDay >= hhmmToMin("11:05") && minuteOfDay <= hhmmToMin(UP.finalCp) && revs.length > 0 && UP.sms.enabled) {
+  if (minuteOfDay >= hhmmToMin("10:00") && minuteOfDay <= hhmmToMin(UP.finalCp) && revs.length > 0 && UP.sms.enabled) {
     const w = reg.filter((b) => b.etMin + 5 <= minuteOfDay);
     if (w.length >= 6) {
       const F = UP.fisherF, M = UP.fisherM;
