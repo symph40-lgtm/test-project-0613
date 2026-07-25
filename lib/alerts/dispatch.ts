@@ -109,6 +109,11 @@ export async function dispatchToChannels(
     byUser.set(ch.user_id, entry);
   }
 
+  // 발신 시각 일괄 부착 (사용자 지시 2026-07-25 "모든 문자 내에 시간을 적어줘") — 공통 경로라
+  // 전 알림 계열에 빠짐없이 적용. 확인 시각(문자 본문 내 개별 표기)과 별개로, 수신 지연 판별용.
+  const kstHHMM = new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16);
+  const textWithTime = `${alert.text}\n(발신 ${kstHHMM})`;
+
   let sent = 0;
   for (const [userId, ch] of byUser) {
     if (alreadyByUser.has(userId)) continue;
@@ -116,7 +121,7 @@ export async function dispatchToChannels(
     if (ch.sms && alert.suppressSms) {
       results.push("sms:quiet"); // 조용 시간 — 문자 억제 (이메일은 발송)
     } else if (ch.sms) {
-      const r = await sendSms({ to: ch.sms, text: alert.text, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
+      const r = await sendSms({ to: ch.sms, text: textWithTime, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`sms:${r.ok ? "ok" : "fail"}`);
       if (r.ok) sent++;
     }
@@ -130,7 +135,7 @@ export async function dispatchToChannels(
       const r = await sendEmail({
         to: ch.email,
         subject: emailSubject ?? alert.text.split("\n")[0],
-        text: `${alert.text}\n\n대시보드: https://test-project-0613.vercel.app/signal\n(판단 보조 알림입니다 — 최종 결정과 책임은 본인에게 있습니다)`,
+        text: `${textWithTime}\n\n대시보드: https://test-project-0613.vercel.app/signal\n(판단 보조 알림입니다 — 최종 결정과 책임은 본인에게 있습니다)`,
       }).catch(() => ({ ok: false as const, error: "예외" }));
       results.push(`email:${r.ok ? "ok" : "fail"}`);
       if (r.ok) sent++;
