@@ -20,7 +20,7 @@ const BACKFILL_DAYS = 7; // 미기록·미채점 소급 범위 (KIS 과거 분�
 const AH = PREDICT_CONFIG.after;
 
 type TrackRow = {
-  date: string; session: "pre" | "reg" | "after"; model: "fisherf" | "fisher" | "fisherw";
+  date: string; session: "pre" | "reg" | "after"; model: "fisherf" | "fisher" | "fisherw" | "fisher9";
   verdict: Verdict; entry_px: number | null; label: string | null;
 };
 
@@ -120,6 +120,15 @@ export async function runTrackService(): Promise<{ judged: string[]; scored: str
         if (!have.has(key(d, "reg", "fisherw"))) {
           await upsertJudge(d, "reg", "fisherw", runFisher(input, { offsetRangeRatio: 0.25 }), entry, isToday);
         }
+        // F09 판정자 후보 (2026-07-25 실측: 삼전 멀티레그 +52.4→+68.7%p·양 반쪽 개선 — 라이브 재현 감시)
+        if (!have.has(key(d, "reg", "fisher9"))) {
+          await upsertJudge(d, "reg", "fisher9", runFisher(input, {
+            offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio,
+            confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+            strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio,
+            reversalMinutes: PREDICT_CONFIG.streamReversalMinutes,
+          }), entry, isToday);
+        }
       }
     }
 
@@ -142,7 +151,7 @@ export async function runTrackService(): Promise<{ judged: string[]; scored: str
     // 프리장·정규장 → 당일 일봉 라벨 (±1.2%) — 15:35 이후
     if (bar && (!isToday || minuteOfDay >= 15 * 60 + 35)) {
       const { label, rOC } = labelDay(bar);
-      for (const [session, model] of [["pre", "fisherf"], ["reg", "fisher"], ["reg", "fisherw"]] as const) {
+      for (const [session, model] of [["pre", "fisherf"], ["reg", "fisher"], ["reg", "fisherw"], ["reg", "fisher9"]] as const) {
         const r = have.get(key(d, session, model));
         if (!r || r.label !== null) continue;
         const entry = Number(r.entry_px) || null;

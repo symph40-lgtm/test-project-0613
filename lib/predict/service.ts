@@ -731,7 +731,7 @@ export async function runPredictService(): Promise<PredictRunResult> {
               const s = tp[k];
               return s && s.t > 0 ? `${name} ${Math.round((s.c / s.t) * 100)}%(${s.t})` : null;
             };
-            const parts = [f("reg/fisher", "본"), f("reg/fisherw", "W"), f("pre/fisherf", "프리F"), f("after/fisher", "애프터")].filter(Boolean);
+            const parts = [f("reg/fisher", "본"), f("reg/fisherw", "W"), f("reg/fisher9", "F9"), f("pre/fisherf", "프리F"), f("after/fisher", "애프터")].filter(Boolean);
             if (parts.length) lines.push(`삼전: ${parts.join("·")}`);
           }
         } catch { /* 트래킹 통계 실패 무시 */ }
