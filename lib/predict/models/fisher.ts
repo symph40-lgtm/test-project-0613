@@ -85,7 +85,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   }
   const conf = reversed ? 0.6 : confirmedAt !== null && confirmedAt < cfg.earlyConfirmBy ? 0.8 : 0.7;
   const head = reversed && viaTrail
-    ? `${confirmedAt} 트레일 반전 확인 (극값 ${Math.round(trailW)}원 되돌림·고변동일)`
+    ? `${confirmedAt} 트레일(추세) 반전 확인 (극값 ${Math.round(trailW)}원 되돌림·고변동일)`
     : `${confirmedAt} A${state === "up" ? "상" : "하"} 확인${reversed ? " (C지점 반전 후)" : ""}`;
   return {
     model,
