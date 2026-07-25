@@ -457,7 +457,12 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             : "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
         }
         if (postFinal) return `⚠확정(${UP.finalCp} ET) 이후 막판 확인 — 실측 3건 잔여 -3.6~+0.0% — 신규 진입 금지, 상태 파악용.`;
-        if (t.tier === "F") return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기.`;
+        // F 단독(M 미동반) 경고 (2026-07-26 — 7/24 금 프리장 실사고: 08:10 마진 돌파 $0.4를 레버로
+        // 확인·스탑컷. 실측(config 주석): M 동반 시 F 적중 97% vs 미동반 50% — 미동반이면 상한 명시)
+        if (t.tier === "F") {
+          const mWarn = curM !== t.cur ? ` ⚠피셔M 미확인 — F 단독 적중 50%·M 동반 97%(실측). 50% 초과 금지.` : "";
+          return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기.${mWarn}`;
+        }
         if (t.tier === "M") {
           const warn = curF !== "none" && t.cur !== curF ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
           return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%.${warn}`;

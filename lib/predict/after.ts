@@ -130,13 +130,19 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
             });
           } catch { /* 발송 실패 무시 */ }
         }
-        // 확정(19:30) — 방향일 때 항상 1회 (하닉과 동일: "확정판결이 나오면 정규장처럼")
+        // 확정(19:30) — 방향일 때 항상 1회 (하닉과 동일: "확정판결이 나오면 정규장처럼").
+        // 내일갭 동봉 (사용자 승인 2026-07-26 — scripts/after-gap-sweep.ts, 삼전 224일 시딩):
+        // 상방 확정일 갭+ 67%·평균 +1.7% vs 기준선 57%·+0.5 / 하방 38%·-0.8. 갭 이후 장중은 예측력
+        // 없음. 확정 컷 신규 진입도 실익 없음(하닉 189일 +0.07%/건 관례 준용) — 진입 지침 대신 내일 대비.
         if (isFinalW && cur !== "none") {
+          const ssGapLine = cur === "leverage"
+            ? `\n▶내일갭: 상방 확정일 갭+ 67%·평균 +1.7%(224일 실측) — 인버스 보유 시 내일 시초 정리 검토. 갭 이후 장중 방향은 예측력 없음.`
+            : `\n▶내일갭: 하방 확정일 갭+ 38%·평균 -0.8%(224일 실측) — 레버리지 보유 시 내일 시초 갭 유의.`;
           try {
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ah_final_${cur}`,
               severity: "medium",
-              text: `[예측·삼전 애프터] 확정(${AH.finalCp}): ${V_KO[cur]} (강도 ${strength}%${ssAcc})${ssGuide}`,
+              text: `[예측·삼전 애프터] 확정(${AH.finalCp}): ${V_KO[cur]} (강도 ${strength}%${ssAcc}) — 채점·내일 대비 기준(확정 컷 신규 진입 실익 없음).${ssGapLine}`,
               smsSubject: "예측 애프터",
             });
           } catch { /* 발송 실패 무시 */ }
@@ -186,6 +192,13 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     if (p && p.t > 0) afterAccTail = `·애프터 실측적중 ${Math.round((100 * p.c) / p.t)}%(${p.t})`;
   } catch { /* 통계 실패는 발송을 막지 않는다 */ }
 
+  // 내일갭 동봉 (사용자 승인 2026-07-26 — scripts/after-gap-sweep.ts, 하닉 189일): 애프터 확정
+  // 방향이 다음날 시가 갭을 예측 (상방 확정일 갭+ 66%·평균 +2.2% vs 기준선 50%·+0.5, 하방 43%·-0.8).
+  // 갭 이후 장중(시초30분·시→종)은 예측력 없음 — 갭 대비 지침만. 확정(19:30) 신규 진입은 실익
+  // 없음(스펙 7장 실측 +0.07%/건) — 확정 문자는 진입 지침 대신 채점·내일 대비 기준으로 표기.
+  const hxGapLine = (v: Verdict): string => v === "leverage"
+    ? `\n▶내일갭: 상방 확정일 갭+ 66%·평균 +2.2%(189일 실측) — 인버스 ETF 보유 시 내일 시초 정리 검토. 갭 이후 장중 방향은 예측력 없음.`
+    : `\n▶내일갭: 하방 확정일 갭+ 43%·평균 -0.8%(189일 실측) — 레버리지 ETF 보유 시 내일 시초 갭 유의.`;
   const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number }, isFinal: boolean) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
     const head = isFinal ? `확정(${AH.finalCp})` : whenLabel;
@@ -193,7 +206,9 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
       ? `[예측·하닉 애프터] ${head} 첫 판정: ${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`
       : `[예측·하닉 애프터] ${head} 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`;
     if (v.verdict !== "none") {
-      text += `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 미검증 신호 — 소액만.`;
+      text += isFinal
+        ? `\n▶확정은 채점·내일 대비 기준 — 19:30 신규 진입 실익 없음(실측 +0.07%/건).${hxGapLine(v.verdict)}`
+        : `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 미검증 신호 — 소액만.`;
     }
     try {
       await dispatchToChannels("signal", today, {
