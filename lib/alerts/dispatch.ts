@@ -111,8 +111,8 @@ export async function dispatchToChannels(
 
   // 발신 시각 일괄 부착 (사용자 지시 2026-07-25 "모든 문자 내에 시간을 적어줘") — 공통 경로라
   // 전 알림 계열에 빠짐없이 적용. 확인 시각(문자 본문 내 개별 표기)과 별개로, 수신 지연 판별용.
-  const kstHHMM = new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16);
-  const textWithTime = `${alert.text}\n(발신 ${kstHHMM})`;
+  const kstIso = new Date(Date.now() + 9 * 3600e3).toISOString(); // 날짜 포함 (사용자 지시 2026-07-25 2차)
+  const textWithTime = `${alert.text}\n(발신 ${kstIso.slice(5, 10).replace("-", "/")} ${kstIso.slice(11, 16)})`;
 
   let sent = 0;
   for (const [userId, ch] of byUser) {

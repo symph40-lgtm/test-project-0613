@@ -260,7 +260,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             await dispatchToChannels("signal", today, {
               key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
               severity: "medium",
-              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} — ${out.reason.split(" — ")[0]} (16~20시 ET). ${guideA} 무응답=현행 유지`,
+              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${out.reason.split(" — ")[0]} (16~20시 ET). ${guideA} 무응답=현행 유지`,
               smsSubject: "미국 애프터",
               suppressSms: quietA,
             }, undefined, undefined, { dedupHours: 16 });

@@ -11,6 +11,7 @@ import { fetchDailyPredict, kstNowPredict } from "./data";
 import { fetchNxtAfterMarket } from "./kisMinute";
 import { runFisher } from "./models/fisher";
 import { avgRange } from "./indicators";
+import { loadAfterPerf } from "./store";
 import type { MinuteBar, Verdict } from "./types";
 
 const AH = PREDICT_CONFIG.after;
@@ -105,12 +106,19 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     return { verdict: out.verdict, strength: Number((out.confidence * 100).toFixed(0)) };
   };
 
+  // 애프터 라이브 실측적중 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자에 강도·실측 공통 눈금)
+  let afterAccTail = "";
+  try {
+    const p = await loadAfterPerf();
+    if (p && p.t > 0) afterAccTail = `·애프터 실측적중 ${Math.round((100 * p.c) / p.t)}%(${p.t})`;
+  } catch { /* 통계 실패는 발송을 막지 않는다 */ }
+
   const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number }, isFinal: boolean) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
-    const head = isFinal ? `애프터 확정(${AH.finalCp})` : `애프터 ${whenLabel}`;
+    const head = isFinal ? `확정(${AH.finalCp})` : whenLabel;
     let text = prev === null
-      ? `[예측·피셔] ${head} 첫 판정: ${V_KO[v.verdict]} (강도 ${v.strength}%)`
-      : `[예측·피셔] ${head} 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} (강도 ${v.strength}%)`;
+      ? `[예측·하닉 애프터] ${head} 첫 판정: ${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`
+      : `[예측·하닉 애프터] ${head} 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`;
     if (v.verdict !== "none") {
       text += `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 미검증 신호 — 소액만.`;
     }

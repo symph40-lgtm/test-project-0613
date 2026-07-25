@@ -48,8 +48,9 @@ export async function queryFisherNow(formData: FormData): Promise<void> {
     ? await (await import("@/lib/signal/us/nowcast")).fisherNowUs()
     : await (await import("@/lib/predict/nowcast")).fisherNowKr(market);
   const admin = createAdminClient();
+  // 종목·시장별 저장 (사용자 지시 2026-07-25: "하닉만 나옴" — 마지막 1건 대신 각자 보관해 나란히 표시)
   await admin.from("ops_settings").upsert(
-    { key: "fisher_now_last", value: res, updated_at: new Date().toISOString() },
+    { key: `fisher_now_${market}`, value: res, updated_at: new Date().toISOString() },
     { onConflict: "key" },
   );
   try {
@@ -62,6 +63,7 @@ export async function queryFisherNow(formData: FormData): Promise<void> {
       smsSubject: "피셔 실시간",
     });
   } catch { /* 발송 실패해도 웹 상세는 저장됨 */ }
+  revalidatePath("/fisher");
   revalidatePath("/ops");
 }
 

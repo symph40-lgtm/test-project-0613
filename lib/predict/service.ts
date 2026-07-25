@@ -227,6 +227,7 @@ async function checkpointStream(
   let ssTail = ""; // "\n삼전: F레버·M없음·본없음 270,250원"
   let ssF: Verdict = "none", ssM: Verdict = "none", ssB: Verdict = "none";
   let ssFReason = "", ssMReason = "", ssBReason = "";
+  let ssFc = 50, ssMc = 50, ssBc = 50; // 강도(신뢰도×100) — 전이 문자 동봉용 (2026-07-25)
   let ssRegBars: MinuteBar[] | null = null; // 09창 반전 경보용 (2026-07-25)
   let ssHistBars: PredictDailyBar[] = [];
   try {
@@ -248,6 +249,7 @@ async function checkpointStream(
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
+        ssFc = Math.round(f.confidence * 100); ssMc = Math.round(m.confidence * 100); ssBc = Math.round(b.confidence * 100);
         ssRegBars = ssReg.length >= 20 ? ssReg : null;
         ssHistBars = ssHist;
         const ssPxBar = ssReg.length ? ssReg[ssReg.length - 1] : ssCont[ssCont.length - 1];
@@ -371,7 +373,8 @@ async function checkpointStream(
   if (PREDICT_CONFIG.sms.enabled && minuteOfDay >= hhmmToMin("08:25") && minuteOfDay <= hhmmToMin(lastCp)) {
     try {
       const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
-      const statTail = `(이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""})`;
+      // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)
+      const statCore = `이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
       const ffStop = PREDICT_CONFIG.stops.fisher.etfPct;
       // 하닉 3단계 (F·M 08 연속창 / 본 09 정규장창)
       const hxCont = [...(pre ?? []), ...krx].filter((b) => b.time < nowHHMM2);
@@ -424,14 +427,15 @@ async function checkpointStream(
 
       const prevState = await loadSsState();
       const sameDay = prevState !== null && prevState.date === today;
-      type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict };
+      type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict; strength: number };
+      const conf = (o: { confidence: number } | null): number => Math.round((o?.confidence ?? 0.5) * 100);
       const trigs: Trig[] = [
-        { sym: "hx", symKo: "하닉", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.hx.F : "none", cur: hxF2, reason: hxFo?.reason ?? "", fDir: hxF2 },
-        { sym: "hx", symKo: "하닉", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.hx.M : "none", cur: hxM2, reason: hxMo?.reason ?? "", fDir: hxF2 },
-        { sym: "hx", symKo: "하닉", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.hx.B : "none", cur: hxB2, reason: hxBo?.reason ?? "", fDir: hxF2 },
-        { sym: "ss", symKo: "삼전", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.ss.F : "none", cur: ssF, reason: ssFReason, fDir: ssF },
-        { sym: "ss", symKo: "삼전", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.ss.M : "none", cur: ssM, reason: ssMReason, fDir: ssF },
-        { sym: "ss", symKo: "삼전", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.ss.B : "none", cur: ssB, reason: ssBReason, fDir: ssF },
+        { sym: "hx", symKo: "하닉", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.hx.F : "none", cur: hxF2, reason: hxFo?.reason ?? "", fDir: hxF2, strength: conf(hxFo) },
+        { sym: "hx", symKo: "하닉", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.hx.M : "none", cur: hxM2, reason: hxMo?.reason ?? "", fDir: hxF2, strength: conf(hxMo) },
+        { sym: "hx", symKo: "하닉", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.hx.B : "none", cur: hxB2, reason: hxBo?.reason ?? "", fDir: hxF2, strength: conf(hxBo) },
+        { sym: "ss", symKo: "삼전", tier: "F", tierKo: "피셔F 임시판정", prev: sameDay ? prevState!.ss.F : "none", cur: ssF, reason: ssFReason, fDir: ssF, strength: ssFc },
+        { sym: "ss", symKo: "삼전", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.ss.M : "none", cur: ssM, reason: ssMReason, fDir: ssF, strength: ssMc },
+        { sym: "ss", symKo: "삼전", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.ss.B : "none", cur: ssB, reason: ssBReason, fDir: ssF, strength: ssBc },
       ];
       const guideOf = (t: Trig): string => {
         if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
@@ -476,7 +480,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) : ""}${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) : ""}${stopLine}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -639,7 +643,7 @@ export async function runPredictService(): Promise<PredictRunResult> {
         await dispatchToChannels("signal", today, {
           key: "predict_sell_1510",
           severity: "medium",
-          text: `[예측] 15:10 당일청산 — 보유 ${pos} 매도 시간입니다. 장 마감(15:30) 전 정리. (월~금 고정, 7/21 지시)`,
+          text: `[예측·하닉] 15:10 당일청산 — 보유 하닉 ${pos} 매도 시간입니다. 장 마감(15:30) 전 정리. (월~금 고정, 7/21 지시)`,
           smsSubject: "예측 당일청산",
         });
       }
