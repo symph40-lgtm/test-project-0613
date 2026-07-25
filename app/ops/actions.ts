@@ -38,12 +38,15 @@ export async function clearSmsPause(): Promise<void> {
 // 피셔 판정 실시간 알림 (사용자 지시 2026-07-23) — 버튼 문의 시 현재 F/M/본 상태를 계산해
 // ①ops_settings(fisher_now_last)에 저장(웹 상세 표시) ②핵심 요약을 문자로 즉시 발송.
 // 키에 분(minute) 포함 = 사용자 명시 요청 1회당 1문자 (자동 반복 아님 — 분당 1회 자연 스로틀).
+// 개정 (ops 지시 2026-07-23 저녁): 국장은 하닉·삼전 별도 버튼 — market = "hx" | "ss" | "us".
+// 15:30 이후 국장 문의는 nowcast가 NXT 애프터장 실시간 판정으로 응답.
 export async function queryFisherNow(formData: FormData): Promise<void> {
   await requireUser();
-  const market = String(formData.get("market")) === "us" ? "us" : "kr";
+  const raw = String(formData.get("market"));
+  const market = raw === "us" ? "us" : raw === "ss" ? "ss" : "hx"; // 구값 "kr"은 하닉으로
   const res = market === "us"
     ? await (await import("@/lib/signal/us/nowcast")).fisherNowUs()
-    : await (await import("@/lib/predict/nowcast")).fisherNowKr();
+    : await (await import("@/lib/predict/nowcast")).fisherNowKr(market);
   const admin = createAdminClient();
   await admin.from("ops_settings").upsert(
     { key: "fisher_now_last", value: res, updated_at: new Date().toISOString() },

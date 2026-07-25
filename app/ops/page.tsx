@@ -70,12 +70,17 @@ export default async function OpsPage() {
         <p className="mb-1 text-[14px] font-semibold">피셔 판정 실시간 알림</p>
         <p className="mb-3 text-[12px] text-ink-48">
           지금 시점의 피셔F → 피셔M → 본피셔 판정을 즉시 계산해 아래에 상세를 표시하고,
-          핵심 요약을 <b>문자로 바로</b> 보냅니다. (국장 = 하닉 본주 기준 · 미장 = SOXX 기준)
+          핵심 요약을 <b>문자로 바로</b> 보냅니다. 국장(하닉·삼전 각각)은 15:30 이후 문의 시
+          NXT <b>애프터장 실시간 판정</b>으로 응답합니다. (미장 = SOXX 기준)
         </p>
         <div className="flex flex-wrap gap-2">
           <form action={queryFisherNow}>
-            <input type="hidden" name="market" value="kr" />
-            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">국장 판정 문의</button>
+            <input type="hidden" name="market" value="hx" />
+            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">하닉 판정 문의</button>
+          </form>
+          <form action={queryFisherNow}>
+            <input type="hidden" name="market" value="ss" />
+            <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">삼전 판정 문의</button>
           </form>
           <form action={queryFisherNow}>
             <input type="hidden" name="market" value="us" />
