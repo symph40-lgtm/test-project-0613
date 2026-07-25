@@ -411,6 +411,16 @@ async function checkpointStream(
         if (g === null || Math.abs(g) < GW.minAbsPct) return "";
         return `\n⚠갭 ${g >= 0 ? "+" : ""}${g.toFixed(1)}% ${g >= 0 ? "급등" : "급락"}일 — ${GW[sym][g >= 0 ? "up" : "down"]}. 비중 축소 권장.`;
       };
+      // 광폭 시초레인지 경고 복원 (2026-07-25 — 체크포인트 문자 폐기 때 함께 사라졌던 명시줄.
+      // 실측: OR ≥4% 날 피셔 적중 43% vs 평소 62~68%, 하닉 220일. 삼전은 하닉 버킷 이식)
+      const orWarnLine = (sym: "hx" | "ss"): string => {
+        const bars = sym === "hx" ? hxReg : ssRegBars ?? [];
+        if (bars.length < 15) return "";
+        const or15 = bars.slice(0, 15);
+        const w = ((Math.max(...or15.map((b) => b.high)) - Math.min(...or15.map((b) => b.low))) / bars[0].open) * 100;
+        if (w < PREDICT_CONFIG.orBuckets.wideMinPct) return "";
+        return `\n⚠시초레인지 ${w.toFixed(1)}% 광폭 — 유사일 피셔 적중 ${PREDICT_CONFIG.orBuckets.hit.wide}%(평소 ${PREDICT_CONFIG.orBuckets.hit.calm}~${PREDICT_CONFIG.orBuckets.hit.mid}%). 비중 축소.`;
+      };
 
       const prevState = await loadSsState();
       const sameDay = prevState !== null && prevState.date === today;
@@ -466,7 +476,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) : ""}${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} ${statTail}. ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) : ""}${stopLine}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
