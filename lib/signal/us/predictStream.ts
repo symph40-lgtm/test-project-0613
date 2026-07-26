@@ -125,6 +125,14 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const admin = createAdminClient();
   const result = { judged: false, scored: [] as string[] };
 
+  // ET 시각 한국시간 병기 (사용자 지시 2026-07-26 "미국장 문자는 한국시간 같이 표시") —
+  // 현재 KST-ET 오프셋 실계산이라 서머타임(EDT 13h/EST 14h) 자동 반영
+  const kstNow = new Date(Date.now() + 9 * 3600e3);
+  const etToKst = ((kstNow.getUTCHours() * 60 + kstNow.getUTCMinutes() - minuteOfDay) % 1440 + 1440) % 1440;
+  const kstOf = (hhmm: string) => minToHHMM((hhmmToMin(hhmm) + etToKst) % 1440);
+  const etk = (hhmm: string) => `${hhmm} ET(한국 ${kstOf(hhmm)})`;
+  const headKst = (head: string) => head.replace(/^(\d{2}:\d{2})/, (m) => `${m} ET(한국 ${kstOf(m)})`);
+
   // ① 미채점 백필 (정규장 마감 후 소급 — 야후 5분봉 60일 보존)
   const { data: unscored } = await admin
     .from("us_predict_days")
@@ -259,15 +267,15 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           const lagA = confT ? minuteOfDay - hhmmToMin(confT) : 0;
           const staleA = confT !== null && lagA >= 30;
           const isFinal = minuteOfDay >= hhmmToMin(AH.finalCp) + 1;
-          const head = isFinal ? `애프터 확정(${AH.finalCp} ET)` : "애프터";
+          const head = isFinal ? `애프터 확정(${etk(AH.finalCp)})` : "애프터";
           const guideA = staleA
-            ? `⚠지연 통지(확인 ${confT} ET, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
-            : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET 종료 전 청산.`;
+            ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
+            : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET(한국 ${kstOf("20:00")}) 종료 전 청산.`;
           try {
             await dispatchToChannels("signal", today, {
               key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
               severity: "medium",
-              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${out.reason.split(" — ")[0]} (16~20시 ET). ${guideA} 무응답=현행 유지`,
+              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${headKst(out.reason.split(" — ")[0])} (16~20시 ET·한국 05~09시). ${guideA} 무응답=현행 유지`,
               smsSubject: "미국 애프터",
               suppressSms: quietA,
             }, undefined, undefined, { dedupHours: 16 });
@@ -456,7 +464,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             ? "▶막판 반전 — 기보유 청산 검토. 신규 전환 진입은 잔여 시간 부족(실측 2건 혼재·소표본) — 비권장."
             : "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
         }
-        if (postFinal) return `⚠확정(${UP.finalCp} ET) 이후 막판 확인 — 실측 3건 잔여 -3.6~+0.0% — 신규 진입 금지, 상태 파악용.`;
+        if (postFinal) return `⚠확정(${etk(UP.finalCp)}) 이후 막판 확인 — 실측 3건 잔여 -3.6~+0.0% — 신규 진입 금지, 상태 파악용.`;
         // F 단독(M 미동반) 경고 (2026-07-26 — 7/24 금 프리장 실사고: 08:10 마진 돌파 $0.4를 레버로
         // 확인·스탑컷. 실측(config 주석): M 동반 시 F 적중 97% vs 미동반 50% — 미동반이면 상한 명시)
         if (t.tier === "F") {
@@ -467,7 +475,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           const warn = curF !== "none" && t.cur !== curF ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
           return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%.${warn}`;
         }
-        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}% 고정·16:00 ET 당일청산.`;
+        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}% 고정·16:00 ET(한국 ${kstOf("16:00")}) 당일청산.`;
       };
       let anyChange = false;
       for (const t of trigs) {
@@ -488,7 +496,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           if (prog >= 2.5) exhaustPct = prog;
         }
         const guide = stale
-          ? `⚠지연 통지(확인 ${confT} ET, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
+          ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
           : exhaustPct !== null
             ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권 — SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`
             : guideOf(t);
@@ -497,7 +505,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: `uspredict_tr_${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[미국예측·SOXX ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? orWarn : ""}${stopLine}${stateLine}`,
+            text: `[미국예측·SOXX ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${headKst(t.reason.split(" — ")[0])}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? orWarn : ""}${stopLine}${stateLine}`,
             smsSubject: "미국 예측",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });
@@ -515,12 +523,12 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             const lag9 = confT9 ? minuteOfDay - hhmmToMin(confT9) : 0;
             const stale9 = confT9 !== null && lag9 >= 30;
             const guide9 = stale9
-              ? `⚠지연 통지(확인 ${confT9} ET, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
+              ? `⚠지연 통지(확인 ${etk(confT9!)}, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
               : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (SOXX 실측: 3/3건 본피셔 전환 선행·리드 12분·선청산 +1.46%p).`;
             await dispatchToChannels("signal", today, {
               key: `uspredict_rev9_${curB}_${f9.verdict}`,
               severity: "high",
-              text: `[미국예측·SOXX 반전경보] 본피셔 ${V_KO[curB]} 유지 중 — 정규장창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9} ET)` : ""}. ${guide9} 무응답=현행 유지${stateLine}`,
+              text: `[미국예측·SOXX 반전경보] 본피셔 ${V_KO[curB]} 유지 중 — 정규장창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${etk(confT9)})` : ""}. ${guide9} 무응답=현행 유지${stateLine}`,
               smsSubject: "미국 반전경보",
               suppressSms: quiet,
             }, undefined, undefined, { dedupHours: 16 });
@@ -542,7 +550,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
               severity: "low",
               text: preWindow
                 ? `[미국예측] 프리장 방향 없음 (가동 확인) — SOXX 피셔F 미확인. 방향 확인 시 즉시 문자.${stateLine}`
-                : `[미국예측] 정규장 방향 없음 (10:00 ET 확인) — SOXX F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${stateLine}`,
+                : `[미국예측] 정규장 방향 없음 (${etk("10:00")} 확인) — SOXX F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${stateLine}`,
               smsSubject: "미국 예측",
               suppressSms: quiet,
             }, undefined, undefined, { dedupHours: 16 });
@@ -693,7 +701,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: `uspredict_recut_${lastV}`,
             severity: "medium",
-            text: `[미국예측·회복] 스탑컷 후 원판정가 회복 — ${V_KO[lastV]} 판정 유지 중 (판정가 ${entry.toFixed(2)}$ · 컷 후 ${rec.time} ET 회복). ▶재진입 검토: 새 진입가 스탑 ETF -${stopEtfPct.toFixed(1)}% 재설정 · 한국 실측 승률 ~50% 이식 — 소액만. 무응답=미진입`,
+            text: `[미국예측·회복] 스탑컷 후 원판정가 회복 — ${V_KO[lastV]} 판정 유지 중 (판정가 ${entry.toFixed(2)}$ · 컷 후 ${etk(rec.time)} 회복). ▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 스탑 ETF -${stopEtfPct.toFixed(1)}% 재설정 · 한국 실측 승률 ~50% 이식 — 소액만. 무응답=미진입`,
             smsSubject: "미국 회복",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });

@@ -554,7 +554,7 @@ async function checkpointStream(
           const staleR = lagR >= 30;
           const guideR = staleR
             ? `⚠지연 통지(회복 ${rec.time}, ${lagR}분 경과) — 추격 진입 금지, 현재가와 다음 문자 기준 판단.`
-            : `▶재진입 검토: 새 진입가 기준 스탑 ETF -${PREDICT_CONFIG.stops.fisher.etfPct}% 재설정 · 실측 승률 ~50%·소폭 순익 — 소액 권장.`;
+            : `▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 기준 스탑 ETF -${PREDICT_CONFIG.stops.fisher.etfPct}% 재설정 · 실측 승률 ~50%·소폭 순익 — 소액 권장.`;
           const stopLineR = !staleR && rc.sym === "hx" ? await etfStopLine(rc.bState, PREDICT_CONFIG.stops.fisher.etfPct) : "";
           await dispatchToChannels("signal", today, {
             key: `predict_recut_${rc.sym}_${rc.bState}`,

@@ -95,15 +95,46 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
       const ssBars = await fetchNxtAfterMarket(SS, today.replace(/-/g, ""), "193000");
       if (ssRange10 !== null && ssHist.length >= 30 && ssBars && ssBars.length >= 20) {
         const offR = ((AH.offsetPct / 100) * ssBars[0].open) / ssRange10;
-        const out = runFisher(
-          { date: today, dailyHistory: ssHist, openPx: ssBars[0].open, morning: ssBars, prevDayMinutes: null },
-          { offsetRangeRatio: offR, earlyConfirmBy: "17:00" },
-        );
+        const ssInput = { date: today, dailyHistory: ssHist, openPx: ssBars[0].open, morning: ssBars, prevDayMinutes: null };
+        const out = runFisher(ssInput, { offsetRangeRatio: offR, earlyConfirmBy: "17:00" });
+        // 애프터 3단계 사다리 F/M (사용자 승인 2026-07-26 — config.after.ladder 근거 참조.
+        // 삼전 224일: F 레그 +4.7→+16.5%p·본확인 24분 선행 / M 동반 잔여+ 56%·+30.4%p vs 미동반 3%)
+        const L = AH.ladder;
+        const fT = runFisher(ssInput, { offsetRangeRatio: ((L.fOffPct / 100) * ssBars[0].open) / ssRange10, confirmMinutes: L.fConfirm, earlyConfirmBy: "17:00" });
+        const mT = runFisher(ssInput, { offsetRangeRatio: ((L.mOffPct / 100) * ssBars[0].open) / ssRange10, confirmMinutes: L.mConfirm, earlyConfirmBy: "17:00" });
         const cur = out.verdict;
         const strength = Number((out.confidence * 100).toFixed(0));
         const { data: stRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ss_after_state").maybeSingle();
-        const prevSt = (stRow?.value ?? null) as { date: string; verdict: Verdict } | null;
+        const prevSt = (stRow?.value ?? null) as { date: string; verdict: Verdict; F?: Verdict; M?: Verdict } | null;
         const prev: Verdict = prevSt && prevSt.date === today ? prevSt.verdict : "none";
+        const pF: Verdict = prevSt && prevSt.date === today ? prevSt.F ?? "none" : "none";
+        const pM: Verdict = prevSt && prevSt.date === today ? prevSt.M ?? "none" : "none";
+        if (fT.verdict !== pF && !(pF === "none" && fT.verdict === "none")) {
+          const lb = pF === "none" ? `${V_KO[fT.verdict]} 확인` : fT.verdict === "none" ? `${V_KO[pF]} 소멸` : `${V_KO[pF]}→${V_KO[fT.verdict]} 전환`;
+          const g = fT.verdict === "none" ? "▶선진입분 청산 검토."
+            : pF !== "none" ? "▶전환 — 선진입분 청산 후 반대 방향 소액부터."
+            : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 24분 선행·M 동반 잔여+ 56% vs 미동반 3% — M 확인 전 소액 유지).";
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `predict_ss_ahF_${pF}_${fT.verdict}`, severity: "medium",
+              text: `[예측·삼전 애프터 피셔F] ${lb}${fT.verdict !== "none" ? ` — ${fT.reason.split(" — ")[0]}` : ""} (1단계). ${g} 본주 전용·스탑 -1.5%·20:00 전 청산.`,
+              smsSubject: "예측 애프터",
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
+        if (mT.verdict !== pM && !(pM === "none" && mT.verdict === "none")) {
+          const lb = pM === "none" ? `${V_KO[mT.verdict]} 재확인` : mT.verdict === "none" ? `${V_KO[pM]} 소멸` : `${V_KO[pM]}→${V_KO[mT.verdict]} 전환`;
+          const warn = mT.verdict !== "none" && fT.verdict !== "none" && mT.verdict !== fT.verdict ? " ⚠피셔F와 반대 — F 선진입분 축소." : "";
+          const g = mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
+            : `▶2단계 확대 검토 — M 동반 실측 잔여+ 56%·누적 +30.4%p(224일) vs 미동반 손실.${warn}`;
+          try {
+            await dispatchToChannels("signal", today, {
+              key: `predict_ss_ahM_${pM}_${mT.verdict}`, severity: "medium",
+              text: `[예측·삼전 애프터 피셔M] ${lb}${mT.verdict !== "none" ? ` — ${mT.reason.split(" — ")[0]}` : ""} (2단계). ${g} 확정(3단계)은 본피셔 문자.`,
+              smsSubject: "예측 애프터",
+            });
+          } catch { /* 발송 실패 무시 */ }
+        }
         const isFinalW = minuteOfDay >= hhmmToMin(AH.finalCp);
         // 실측적중 동봉 — 트래킹(시딩 포함) 라벨 일치, 하닉 애프터와 동일 눈금
         let ssAcc = "";
@@ -147,9 +178,9 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
             });
           } catch { /* 발송 실패 무시 */ }
         }
-        if (cur !== prev || !prevSt || prevSt.date !== today) {
+        if (cur !== prev || fT.verdict !== pF || mT.verdict !== pM || !prevSt || prevSt.date !== today) {
           await admin.from("ops_settings").upsert(
-            { key: "predict_ss_after_state", value: { date: today, verdict: cur } },
+            { key: "predict_ss_after_state", value: { date: today, verdict: cur, F: fT.verdict, M: mT.verdict } },
             { onConflict: "key" },
           );
         }
@@ -184,6 +215,52 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     );
     return { verdict: out.verdict, strength: Number((out.confidence * 100).toFixed(0)) };
   };
+
+  // ②c 하닉 애프터 3단계 사다리 F/M 전이 문자 (사용자 승인 2026-07-26 — config.after.ladder 근거.
+  // 하닉 189일: F 레그 +11.2→+17.9%p(전·후반 개선)·본확인 19분 선행 / M 동반 잔여+ 63%·+38.0%p
+  // vs 미동반 0%·-14.7%p). 판정·채점(본 19:30 확정)·체크포인트 문자는 불변 — 문자 레이어만.
+  try {
+    const L = AH.ladder;
+    const hxInput = { date: today, dailyHistory: history, openPx: bars[0].open, morning: bars, prevDayMinutes: null };
+    const fT = runFisher(hxInput, { offsetRangeRatio: ((L.fOffPct / 100) * bars[0].open) / range10, confirmMinutes: L.fConfirm, earlyConfirmBy: "17:00" });
+    const mT = runFisher(hxInput, { offsetRangeRatio: ((L.mOffPct / 100) * bars[0].open) / range10, confirmMinutes: L.mConfirm, earlyConfirmBy: "17:00" });
+    const { data: stR } = await admin.from("ops_settings").select("value").eq("key", "predict_ah_hx_tier").maybeSingle();
+    const pv = (stR?.value ?? null) as { date: string; F: Verdict; M: Verdict } | null;
+    const pF: Verdict = pv && pv.date === today ? pv.F : "none";
+    const pM: Verdict = pv && pv.date === today ? pv.M : "none";
+    if (fT.verdict !== pF && !(pF === "none" && fT.verdict === "none")) {
+      const lb = pF === "none" ? `${V_KO[fT.verdict]} 확인` : fT.verdict === "none" ? `${V_KO[pF]} 소멸` : `${V_KO[pF]}→${V_KO[fT.verdict]} 전환`;
+      const g = fT.verdict === "none" ? "▶선진입분 청산 검토."
+        : pF !== "none" ? "▶전환 — 선진입분 청산 후 반대 방향 소액부터."
+        : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 19분 선행·M 동반 잔여+ 63% vs 미동반 0% — M 확인 전 소액 유지).";
+      try {
+        await dispatchToChannels("signal", today, {
+          key: `predict_ah_hxF_${pF}_${fT.verdict}`, severity: "medium",
+          text: `[예측·하닉 애프터 피셔F] ${lb}${fT.verdict !== "none" ? ` — ${fT.reason.split(" — ")[0]}` : ""} (1단계). ${g} 본주 전용·스탑 -1.5%·20:00 전 청산.`,
+          smsSubject: "예측 애프터",
+        });
+      } catch { /* 발송 실패 무시 */ }
+    }
+    if (mT.verdict !== pM && !(pM === "none" && mT.verdict === "none")) {
+      const lb = pM === "none" ? `${V_KO[mT.verdict]} 재확인` : mT.verdict === "none" ? `${V_KO[pM]} 소멸` : `${V_KO[pM]}→${V_KO[mT.verdict]} 전환`;
+      const warn = mT.verdict !== "none" && fT.verdict !== "none" && mT.verdict !== fT.verdict ? " ⚠피셔F와 반대 — F 선진입분 축소." : "";
+      const g = mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
+        : `▶2단계 확대 검토 — M 동반 실측 잔여+ 63%·누적 +38.0%p(189일) vs 미동반 손실.${warn}`;
+      try {
+        await dispatchToChannels("signal", today, {
+          key: `predict_ah_hxM_${pM}_${mT.verdict}`, severity: "medium",
+          text: `[예측·하닉 애프터 피셔M] ${lb}${mT.verdict !== "none" ? ` — ${mT.reason.split(" — ")[0]}` : ""} (2단계). ${g} 확정(3단계)은 본피셔 문자.`,
+          smsSubject: "예측 애프터",
+        });
+      } catch { /* 발송 실패 무시 */ }
+    }
+    if (fT.verdict !== pF || mT.verdict !== pM || !pv || pv.date !== today) {
+      await admin.from("ops_settings").upsert(
+        { key: "predict_ah_hx_tier", value: { date: today, F: fT.verdict, M: mT.verdict } },
+        { onConflict: "key" },
+      );
+    }
+  } catch { /* 사다리 문자 실패는 본 스트림을 막지 않는다 */ }
 
   // 애프터 라이브 실측적중 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자에 강도·실측 공통 눈금)
   let afterAccTail = "";
