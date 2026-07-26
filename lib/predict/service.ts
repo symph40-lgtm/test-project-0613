@@ -229,6 +229,7 @@ async function checkpointStream(
   let ssFReason = "", ssMReason = "", ssBReason = "";
   let ssFc = 50, ssMc = 50, ssBc = 50; // 강도(신뢰도×100) — 전이 문자 동봉용 (2026-07-25)
   let ssRegBars: MinuteBar[] | null = null; // 09창 반전 경보용 (2026-07-25)
+  let ssContBars: MinuteBar[] | null = null; // 08 연속창 — 효율 소진 경고용 (2026-07-26)
   let ssHistBars: PredictDailyBar[] = [];
   try {
     if (minuteOfDay >= hhmmToMin("08:25")) {
@@ -251,6 +252,7 @@ async function checkpointStream(
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
         ssFc = Math.round(f.confidence * 100); ssMc = Math.round(m.confidence * 100); ssBc = Math.round(b.confidence * 100);
         ssRegBars = ssReg.length >= 20 ? ssReg : null;
+        ssContBars = ssCont;
         ssHistBars = ssHist;
         const ssPxBar = ssReg.length ? ssReg[ssReg.length - 1] : ssCont[ssCont.length - 1];
         ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssPxBar.close.toLocaleString()}원`;
@@ -428,6 +430,26 @@ async function checkpointStream(
         return `\n⚠시초레인지 ${w.toFixed(1)}% 광폭 — 유사일 피셔 적중 ${PREDICT_CONFIG.orBuckets.hit.wide}%(평소 ${PREDICT_CONFIG.orBuckets.hit.calm}~${PREDICT_CONFIG.orBuckets.hit.mid}%). 비중 축소.`;
       };
 
+      // 효율 소진 경고 (사용자 요청 2026-07-26 — 스펙 2.20 실측): 전일 추세일(레짐 Q1·Q3)에
+      // 확인 시점 60분 DC2(순이동/총이동) ≥ 0.35면 유사조건 실측 열위 — 승률 38~44%·누적 ~0
+      // (저효율 확인 53~63%·전건 양수 대비), 두 종목·전후반 4/4 일관. 판정 불변 — 정보 레이어.
+      // 무추세일 게이트(3/4)·DC1 소진(혼재)은 기준 미달로 미적용 (스펙 2.20).
+      const hxPrevTrend = complete.length > 0 && labelDay(complete[complete.length - 1]).label !== "none";
+      const ssPrevTrend = ssHistBars.length > 0 && labelDay(ssHistBars[ssHistBars.length - 1]).label !== "none";
+      const dc2Warn = (sym: "hx" | "ss", tier: "F" | "M" | "B", confT: string | null): string => {
+        if (!confT) return "";
+        if (!(sym === "hx" ? hxPrevTrend : ssPrevTrend)) return "";
+        const bars = tier === "B" ? (sym === "hx" ? hxReg : ssRegBars ?? []) : (sym === "hx" ? hxCont : ssContBars ?? []);
+        const idx = bars.findIndex((b) => b.time === confT);
+        if (idx < 59) return "";
+        const w = bars.slice(idx - 59, idx + 1);
+        let path = 0;
+        for (let i = 0; i + 5 <= w.length; i += 5) path += Math.abs(w[i + 4].close - w[i].open);
+        const dc2 = path > 0 ? Math.abs(w[w.length - 1].close - w[0].open) / path : null;
+        if (dc2 === null || dc2 < 0.35) return "";
+        return `\n⚠고효율 소진권 확인(60분 DC2 ${dc2.toFixed(2)}) — 전일추세일 고효율 확인 실측 승률 38~44%·본전 (저효율 확인 53~63% 대비 열위). 비중 축소 권장.`;
+      };
+
       const prevState = await loadSsState();
       const sameDay = prevState !== null && prevState.date === today;
       type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict; strength: number };
@@ -483,7 +505,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) : ""}${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) + dc2Warn(t.sym, t.tier, confT) : ""}${stopLine}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
