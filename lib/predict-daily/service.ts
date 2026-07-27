@@ -63,20 +63,22 @@ function envSummary(m: MacroSnap | null, j: DailyJudgment, todayKst: string): { 
   let score = 0;
   // 점수는 괄호 표기 (사용자 지시 2026-07-28): "SOX-4.5% 반등성향(+1)·D-1 FOMC(-1)"
   const add = (p: number, label: string) => { score += p; parts.push(`${label}(${p > 0 ? "+" : ""}${p})`); };
-  // 크기 단계 가중 (사용자 제안 2026-07-27 → scripts/env-axis-grading.ts 10.5년 버킷 실측 근거):
-  //   10Y ≥+0.15%p = 극단 악재(익일 -0.7~-0.9%·상승 21~29%) → -3, +0.08~0.15 → -2.
-  //   SOX 중간 구간은 노이즈(시가 선반영) — 극단만 역방향: ≥+3% 익일 되돌림 → -1, ≤-3% 반등 성향 → +1.
-  //   환율 +0.5~1.5%는 익일 양수(+0.4~1.0, 원화약세=수출 호재) → +1, ≥+1.5%만 위기(상승 30%) → -1,
-  //   원화 급강세(≤-1%)도 악재(-0.4~-0.5%) → -1. WTI는 전 구간 비단조 → 점수 제거(표시만).
+  // 크기 단계 가중 + 축간 밸런스 보정 (사용자 지시 2026-07-28 "실제 영향도 비례 최적화"):
+  //   통일 규칙 — 점수 = 양 종목 중 보수적 익일 편차 ÷ 0.3%p 반올림, 표본<30일 1점 감액,
+  //   클램프 ±3, 게이트 채택 축 최소 ±1. 근거 실측: env-axis-grading(10Y·SOX·환율·WTI),
+  //   flow-bucket-grading(수급), zone-day-effect(위기구간 307일 -0.19/-0.26%p).
+  //   결과: 10Y 일반 -1·극단 -2 / DXY -1 / 위기구간 -1 / SOX +3%↑ -2·-3%↓ +1 /
+  //   환율 수출호재 +1·급등 -1·급강세 -2 / 외인 2조 +2·1조 +1·3일누적2조 +2 / 이벤트 -1(방향 아닌
+  //   불확실성 — 실측 방향 무). WTI 무점수(비단조). 뉴스위험은 미실측 축 — 60일 채점 후 보정.
   if (m) {
-    if (m.y10Chg != null && m.y10Chg >= CFG.macroGate.y10SpikePp) add(m.y10Chg >= 0.15 ? -3 : -2, m.y10Chg >= 0.15 ? "10Y급등 극단" : "10Y급등");
-    if (m.dxyChg != null && m.dxyChg >= CFG.macroGate.dxySpikePct) add(-2, "달러급등");
-    if (m.zoneFx || m.zoneDxy) add(-2, `위기구간 ${[m.zoneFx ? "환율" : "", m.zoneDxy ? "달러" : ""].filter(Boolean).join("·")}52주신고`);
-    if (m.sox != null && Math.abs(m.sox) >= 3) add(m.sox > 0 ? -1 : 1, `SOX${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}% ${m.sox > 0 ? "되돌림성향" : "반등성향"}`);
+    if (m.y10Chg != null && m.y10Chg >= CFG.macroGate.y10SpikePp) add(m.y10Chg >= 0.15 ? -2 : -1, m.y10Chg >= 0.15 ? "10Y급등 극단" : "10Y급등");
+    if (m.dxyChg != null && m.dxyChg >= CFG.macroGate.dxySpikePct) add(-1, "달러급등");
+    if (m.zoneFx || m.zoneDxy) add(-1, `위기구간 ${[m.zoneFx ? "환율" : "", m.zoneDxy ? "달러" : ""].filter(Boolean).join("·")}52주신고`);
+    if (m.sox != null && Math.abs(m.sox) >= 3) add(m.sox > 0 ? -2 : 1, `SOX${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}% ${m.sox > 0 ? "되돌림성향" : "반등성향"}`);
     if (m.fxChg != null) {
       if (m.fxChg >= 1.5) add(-1, `환율+${m.fxChg.toFixed(1)}% 급등`);
       else if (m.fxChg >= 0.5) add(1, `환율+${m.fxChg.toFixed(1)}% 수출호재`);
-      else if (m.fxChg <= -1) add(-1, `환율${m.fxChg.toFixed(1)}% 급강세`);
+      else if (m.fxChg <= -1) add(-2, `환율${m.fxChg.toFixed(1)}% 급강세`);
     }
     if (m.newsRisk != null && m.newsRisk >= 5) add(m.newsRisk >= 7 ? -2 : -1, `뉴스${m.newsRisk}/10`);
     // 외인 수급 크기 버킷 (flow-bucket-grading.ts 10.5년 실측): 당일 ≥+2조 익일 +2.65/+2.66%·
@@ -86,11 +88,12 @@ function envSummary(m: MacroSnap | null, j: DailyJudgment, todayKst: string): { 
       const c = m.kospiFlow.cash, c3 = m.kospiFlow.cash3;
       if (c >= 20000) add(2, "외인대량매수≥2조");
       else if (c >= 10000) add(1, "외인매수1조+");
-      if (c3 >= 20000) add(1, "외인3일누적2조+");
+      if (c3 >= 20000) add(2, "외인3일누적2조+");
     }
   }
+  // 이벤트 당일(실적·NFP)은 방향 실측 무 — 불확실성 경고로 -1 (밸런스 보정 2026-07-28)
   const evGate = j.gates.find((g) => g.startsWith("이벤트"));
-  if (evGate) add(-2, evGate.replace("이벤트:", ""));
+  if (evGate) add(-1, evGate.replace("이벤트:", ""));
   for (const e of upcomingEvents(todayKst, 3).slice(0, 3)) {
     if (e.dDay <= 1) add(-1, `D-${e.dDay} ${e.kind}`);
     else parts.push(`D-${e.dDay} ${e.kind}`);
