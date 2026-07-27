@@ -68,7 +68,7 @@ async function run(code: string, name: string): Promise<void> {
   const known = rows.filter((r) => r.dcEnd !== null);
   const x = known.map((r) => (r.prevTrend ? 1 : 0));
   const y = known.map((r) => r.dcEnd!);
-  const mx = x.reduce((s, v) => s + v, 0) / x.length;
+  const mx = x.reduce((s: number, v) => s + v, 0) / x.length;
   const my = y.reduce((s, v) => s + v, 0) / y.length;
   let cov = 0, vx = 0, vy = 0;
   for (let i = 0; i < x.length; i++) { cov += (x[i] - mx) * (y[i] - my); vx += (x[i] - mx) ** 2; vy += (y[i] - my) ** 2; }
