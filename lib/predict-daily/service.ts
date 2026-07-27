@@ -61,21 +61,22 @@ function macroLine(m: MacroSnap | null): string {
 function envSummary(m: MacroSnap | null, j: DailyJudgment, todayKst: string): { score: number; parts: string; line: string } {
   const parts: string[] = [];
   let score = 0;
-  const add = (p: number, label: string) => { score += p; parts.push(`${label} ${p > 0 ? "+" : ""}${p}`); };
+  // 점수는 괄호 표기 (사용자 지시 2026-07-28): "SOX-4.5% 반등성향(+1)·D-1 FOMC(-1)"
+  const add = (p: number, label: string) => { score += p; parts.push(`${label}(${p > 0 ? "+" : ""}${p})`); };
   // 크기 단계 가중 (사용자 제안 2026-07-27 → scripts/env-axis-grading.ts 10.5년 버킷 실측 근거):
   //   10Y ≥+0.15%p = 극단 악재(익일 -0.7~-0.9%·상승 21~29%) → -3, +0.08~0.15 → -2.
   //   SOX 중간 구간은 노이즈(시가 선반영) — 극단만 역방향: ≥+3% 익일 되돌림 → -1, ≤-3% 반등 성향 → +1.
   //   환율 +0.5~1.5%는 익일 양수(+0.4~1.0, 원화약세=수출 호재) → +1, ≥+1.5%만 위기(상승 30%) → -1,
   //   원화 급강세(≤-1%)도 악재(-0.4~-0.5%) → -1. WTI는 전 구간 비단조 → 점수 제거(표시만).
   if (m) {
-    if (m.y10Chg != null && m.y10Chg >= CFG.macroGate.y10SpikePp) add(m.y10Chg >= 0.15 ? -3 : -2, m.y10Chg >= 0.15 ? "10Y급등(극단)" : "10Y급등");
+    if (m.y10Chg != null && m.y10Chg >= CFG.macroGate.y10SpikePp) add(m.y10Chg >= 0.15 ? -3 : -2, m.y10Chg >= 0.15 ? "10Y급등 극단" : "10Y급등");
     if (m.dxyChg != null && m.dxyChg >= CFG.macroGate.dxySpikePct) add(-2, "달러급등");
-    if (m.zoneFx || m.zoneDxy) add(-2, `위기구간(${[m.zoneFx ? "환율" : "", m.zoneDxy ? "달러" : ""].filter(Boolean).join("·")}52주신고)`);
-    if (m.sox != null && Math.abs(m.sox) >= 3) add(m.sox > 0 ? -1 : 1, `SOX${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}%${m.sox > 0 ? "(되돌림성향)" : "(반등성향)"}`);
+    if (m.zoneFx || m.zoneDxy) add(-2, `위기구간 ${[m.zoneFx ? "환율" : "", m.zoneDxy ? "달러" : ""].filter(Boolean).join("·")}52주신고`);
+    if (m.sox != null && Math.abs(m.sox) >= 3) add(m.sox > 0 ? -1 : 1, `SOX${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}% ${m.sox > 0 ? "되돌림성향" : "반등성향"}`);
     if (m.fxChg != null) {
-      if (m.fxChg >= 1.5) add(-1, `환율+${m.fxChg.toFixed(1)}%(급등)`);
-      else if (m.fxChg >= 0.5) add(1, `환율+${m.fxChg.toFixed(1)}%(수출호재)`);
-      else if (m.fxChg <= -1) add(-1, `환율${m.fxChg.toFixed(1)}%(급강세)`);
+      if (m.fxChg >= 1.5) add(-1, `환율+${m.fxChg.toFixed(1)}% 급등`);
+      else if (m.fxChg >= 0.5) add(1, `환율+${m.fxChg.toFixed(1)}% 수출호재`);
+      else if (m.fxChg <= -1) add(-1, `환율${m.fxChg.toFixed(1)}% 급강세`);
     }
     if (m.newsRisk != null && m.newsRisk >= 5) add(m.newsRisk >= 7 ? -2 : -1, `뉴스${m.newsRisk}/10`);
     // 외인 수급 크기 버킷 (flow-bucket-grading.ts 10.5년 실측): 당일 ≥+2조 익일 +2.65/+2.66%·
