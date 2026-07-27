@@ -78,7 +78,15 @@ function envSummary(m: MacroSnap | null, j: DailyJudgment, todayKst: string): { 
       else if (m.fxChg <= -1) add(-1, `환율${m.fxChg.toFixed(1)}%(급강세)`);
     }
     if (m.newsRisk != null && m.newsRisk >= 5) add(m.newsRisk >= 7 ? -2 : -1, `뉴스${m.newsRisk}/10`);
-    if (m.kospiFlow && Math.abs(m.kospiFlow.cash) >= 1000) add(m.kospiFlow.cash > 0 ? 1 : -1, `외인${m.kospiFlow.cash > 0 ? "매수" : "매도"}`);
+    // 외인 수급 크기 버킷 (flow-bucket-grading.ts 10.5년 실측): 당일 ≥+2조 익일 +2.65/+2.66%·
+    // 상승 78/67% → +2, +1~2조 → +1, 3일 누적 ≥+2조 익일 +0.73/+1.55%·상승 58~63% → +1.
+    // 매도는 어떤 크기(-2조 이하 포함)에서도 익일 악재 신호 없음(전 버킷 익일 양수) → 무점수.
+    if (m.kospiFlow) {
+      const c = m.kospiFlow.cash, c3 = m.kospiFlow.cash3;
+      if (c >= 20000) add(2, "외인대량매수≥2조");
+      else if (c >= 10000) add(1, "외인매수1조+");
+      if (c3 >= 20000) add(1, "외인3일누적2조+");
+    }
   }
   const evGate = j.gates.find((g) => g.startsWith("이벤트"));
   if (evGate) add(-2, evGate.replace("이벤트:", ""));
