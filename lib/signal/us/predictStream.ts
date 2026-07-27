@@ -304,9 +304,12 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     console.error("[uspredict] 애프터장 판정 실패:", e);
   }
 
-  // ── 공용 분봉·일봉 (②b 전이 모니터 + ② 스트림) — 모니터 창 08:25~15:55 ET 밖이면 종료.
-  // 15:55 = 정규장 마감 5분 전 (국장 08:25~15:25 관례의 미국판 — 확정 14:30 이후에도 전이 계속 통지).
-  if (minuteOfDay < hhmmToMin("08:25") || minuteOfDay > 15 * 60 + 55) return result;
+  // ── 공용 분봉·일봉 (②b 전이 모니터 + ② 스트림) — 모니터 창 07:25~15:55 ET 밖이면 종료.
+  // 07:25 = 프리장 관찰 시작(07:00)+25분 = 피셔F 최초 확인 가능 시각 (OR 07:00~07:15 + 확인 1봉).
+  // ⚠2026-07-27 실사고: 국장 관례 "08:25"를 시각 그대로 이식해 07:25 F 확인이 08:25에야 버스트
+  // 통지(60분 지연 태그) — 국장 08:25는 프리장 시작(08:00)+25분이므로 미국 환산은 07:25가 맞다.
+  // 15:55 = 정규장 마감 5분 전 (확정 14:30 이후에도 전이 계속 통지).
+  if (minuteOfDay < hhmmToMin("07:25") || minuteOfDay > 15 * 60 + 55) return result;
   const [byDay, daily] = await Promise.all([fetchJudge5m(3), fetchJudgeDaily(80)]);
   const bars = byDay.get(today) ?? [];
   const pre = bars.filter((b) => b.etMin >= ET_PRE_START && b.etMin < ET_OPEN);
