@@ -96,18 +96,27 @@ async function checkpointStream(
   if (prior && prior.stage === "final") return false;
   const code = PREDICT_CONFIG.symbol;
   const ymd = today.replace(/-/g, "");
+  // 분봉은 15:30까지 (2026-07-27 실사고: judgeHour(14:00) 캡 때문에 7/25 승인된 모니터 창 연장
+  // (14:00→15:25)이 동작 불능 — 14:00 이후 새 분봉이 없어 하닉 14:17 트레일 반전이 침묵했다).
   const [pre, krxRaw] = await Promise.all([
     fetchNxtPremarket(code, ymd),
-    fetchDayMinutes(code, ymd, PREDICT_CONFIG.judgeHour).then(
-      (bars) => bars ?? fetchTodayMinutes(code, PREDICT_CONFIG.judgeHour),
+    fetchDayMinutes(code, ymd, "153000").then(
+      (bars) => bars ?? fetchTodayMinutes(code, "153000"),
     ),
   ]);
   const krx = krxRaw ?? [];
   // 데이터 커버리지 가드 (2026-07-20 실측: 장중 분봉 응답이 호출마다 들쭉날쭉 → 피셔 상태기계가
   // 불가능한 전이(레버리지→없음)로 진동). 정규장 예상 분봉의 80% 미만이면 이번 호출은 판정 생략.
-  const expectKrx = Math.min(minuteOfDay, hhmmToMin("14:00") + 1) - 9 * 60 - 1;
+  const expectKrx = Math.min(minuteOfDay, hhmmToMin("15:30")) - 9 * 60 - 1;
   if (expectKrx > 10 && krx.length < expectKrx * 0.8) {
     console.error(`[predict] 분봉 커버리지 부족 (${krx.length}/${expectKrx}) — 이번 호출 판정 생략`);
+    return false;
+  }
+  // NXT 프리장 커버리지 가드 (2026-07-27 실사고: 10:14 호출만 프리장 응답 결손 → 08연속창 F·M이
+  // 09창 앵커로 재계산돼 '인버스 소멸' 오발송, 직후 재확인은 1일 1회 키에 막혀 침묵). 정규장
+  // 진입 후엔 프리장(08:00~08:50, 평시 ~50봉)이 과거 데이터라 결손 = 조회 장애 — 이번 호출 생략.
+  if (minuteOfDay >= 9 * 60 + 5 && krx.length > 10 && (pre?.length ?? 0) < 40) {
+    console.error(`[predict] NXT 프리장 커버리지 부족 (${pre?.length ?? 0}봉) — 이번 호출 판정 생략`);
     return false;
   }
   const acc = await loadAccuracyStats();
@@ -225,6 +234,7 @@ async function checkpointStream(
   // 삼전도 동일 규칙(F 0.05·4 / M 0.10·8 / 본 0.15·8+강돌파, 09:00 정규장창)으로 판정. 실패 시 병기 생략.
   const ssLab = (v: Verdict) => (v === "leverage" ? "레버" : v === "inverse" ? "인버" : "없음");
   let ssTail = ""; // "\n삼전: F레버·M없음·본없음 270,250원"
+  let ssPxStr = ""; // 병기 가격 부분 — 소멸 불변식 가드 후 ssTail 재조립용 (2026-07-27)
   let ssF: Verdict = "none", ssM: Verdict = "none", ssB: Verdict = "none";
   let ssFReason = "", ssMReason = "", ssBReason = "";
   let ssFc = 50, ssMc = 50, ssBc = 50; // 강도(신뢰도×100) — 전이 문자 동봉용 (2026-07-25)
@@ -237,7 +247,7 @@ async function checkpointStream(
       const ssDaily = await fetchDailyPredict("005930", 140);
       const ssHist = ssDaily.filter((b) => b.date < today);
       const ssPre = await fetchNxtPremarket("005930", ymd); // 프리장부터 (하닉과 동일 창 규칙)
-      const ssMin = (await fetchDayMinutes("005930", ymd, PREDICT_CONFIG.judgeHour)) ?? (await fetchTodayMinutes("005930", PREDICT_CONFIG.judgeHour));
+      const ssMin = (await fetchDayMinutes("005930", ymd, "153000")) ?? (await fetchTodayMinutes("005930", "153000")); // 15:30 캡 — 하닉과 동일 (2026-07-27)
       const ssReg = (ssMin ?? []).filter((b) => b.time < nowHHMMs);
       const ssCont = [...(ssPre ?? []), ...ssReg]; // F·M = 08:00 연속창, 본 = 09:00 정규장창
       if (ssCont.length >= 20 && ssHist.length >= 11) {
@@ -255,7 +265,8 @@ async function checkpointStream(
         ssContBars = ssCont;
         ssHistBars = ssHist;
         const ssPxBar = ssReg.length ? ssReg[ssReg.length - 1] : ssCont[ssCont.length - 1];
-        ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)} ${ssPxBar.close.toLocaleString()}원`;
+        ssPxStr = ` ${ssPxBar.close.toLocaleString()}원`;
+        ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)}${ssPxStr}`;
       }
     }
   } catch { /* 삼전 스냅샷 실패 — 병기 생략 */ }
@@ -379,7 +390,8 @@ async function checkpointStream(
     try {
       const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)
-      const statCore = `이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
+      // + 측정 시각 (사용자 지시 2026-07-27: 소멸 등 확인시각 없는 문자도 시각을 다 붙일 것)
+      const statCore = `측정 ${nowHHMM2}·이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
       const ffStop = PREDICT_CONFIG.stops.fisher.etfPct;
       // 하닉 3단계 (F·M 08 연속창 / 본 09 정규장창)
       const hxCont = [...(pre ?? []), ...krx].filter((b) => b.time < nowHHMM2);
@@ -400,9 +412,27 @@ async function checkpointStream(
           { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...hxTrailOpts },
         );
       }
-      const hxF2: Verdict = hxFo?.verdict ?? "none";
-      const hxM2: Verdict = hxMo?.verdict ?? "none";
-      const hxB2: Verdict = hxBo?.verdict ?? "none";
+      let hxF2: Verdict = hxFo?.verdict ?? "none";
+      let hxM2: Verdict = hxMo?.verdict ?? "none";
+      let hxB2: Verdict = hxBo?.verdict ?? "none";
+      const prevState = await loadSsState();
+      const sameDay = prevState !== null && prevState.date === today;
+      // 소멸 불변식 가드 (2026-07-27 실사고): 피셔 상태기계는 확인 후 up↔down 전환만 가능 —
+      // 같은 날 '방향→none'은 판정이 아니라 분봉 결손 아티팩트다 (10:14 프리장 결손 → F·M
+      // '인버스 소멸' 오발송, 재확인은 1일 1회 키에 막혀 침묵). 직전 상태 유지 + 로그 —
+      // 프리장 가드가 못 잡는 결손 모드까지 최종 차단.
+      const keepDir = (prev: Verdict, cur: Verdict, tag: string): Verdict => {
+        if (prev !== "none" && cur === "none") {
+          console.error(`[predict] ${tag} ${prev}→none 차단 (확인 후 none 복귀 불가 — 데이터 결손 의심)`);
+          return prev;
+        }
+        return cur;
+      };
+      if (sameDay) {
+        hxF2 = keepDir(prevState!.hx.F, hxF2, "하닉F"); hxM2 = keepDir(prevState!.hx.M, hxM2, "하닉M"); hxB2 = keepDir(prevState!.hx.B, hxB2, "하닉본");
+        ssF = keepDir(prevState!.ss.F, ssF, "삼전F"); ssM = keepDir(prevState!.ss.M, ssM, "삼전M"); ssB = keepDir(prevState!.ss.B, ssB, "삼전본");
+        if (ssTail) ssTail = `\n삼전: F${ssLab(ssF)}·M${ssLab(ssM)}·본${ssLab(ssB)}${ssPxStr}`;
+      }
       const hxPx = hxReg.length ? hxReg[hxReg.length - 1].close : hxCont.length ? hxCont[hxCont.length - 1].close : null;
       const hxLine = `\n하닉: F${ssLab(hxF2)}·M${ssLab(hxM2)}·본${ssLab(hxB2)}${hxPx !== null ? ` ${hxPx.toLocaleString()}원` : ""}`;
       const bothLines = `${hxLine}${ssTail || "\n삼전: 스냅샷 없음"}`;
@@ -450,8 +480,6 @@ async function checkpointStream(
         return `\n⚠고효율 소진권 확인(60분 DC2 ${dc2.toFixed(2)}) — 전일추세일 고효율 확인 실측 승률 38~44%·본전 (저효율 확인 53~63% 대비 열위). 비중 축소 권장.`;
       };
 
-      const prevState = await loadSsState();
-      const sameDay = prevState !== null && prevState.date === today;
       type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict; strength: number };
       const conf = (o: { confidence: number } | null): number => Math.round((o?.confidence ?? 0.5) * 100);
       const trigs: Trig[] = [
@@ -603,8 +631,8 @@ async function checkpointStream(
               key: preWindow ? "predict_flat_pre" : "predict_flat_reg",
               severity: "low",
               text: preWindow
-                ? `[예측] 프리장 방향 없음 (가동 확인) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
-                : `[예측] 정규장 방향 없음 (10시 확인) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${bothLines}`,
+                ? `[예측] 프리장 방향 없음 (가동 확인·측정 ${nowHHMM2}) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
+                : `[예측] 정규장 방향 없음 (측정 ${nowHHMM2}) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${bothLines}`,
               smsSubject: "예측 상태",
             });
           } catch { /* 발송 실패 무시 */ }
