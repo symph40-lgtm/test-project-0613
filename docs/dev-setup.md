@@ -7,7 +7,7 @@
 
 **서비스 운영은 컴퓨터와 무관하다.** 판정·문자·채점·크론은 전부 클라우드에서 돈다:
 - 앱: Vercel (test-project-0613.vercel.app) — git push하면 자동 배포
-- DB: Supabase · 크론: cron-job.org (평일 08~15시 2분 간격) · 문자: Solapi
+- DB: Supabase · 크론: cron-job.org (평일 08~15시 1분 간격 — 2026-07-27 발송 지연 단축으로 2분→1분) · 문자: Solapi
 개발 컴퓨터를 꺼도 실투자 시스템은 계속 동작한다. 옮기는 것은 "개발 환경"뿐이다.
 
 ---
