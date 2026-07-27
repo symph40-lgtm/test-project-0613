@@ -25,14 +25,46 @@ function lastTwoBefore(s: Series, kstDate: string): [number, number] | null {
   return null;
 }
 
+// 52주 신고 돌파 구간 (스펙 9장, 2026-07-27 채택 — daily-swing-event-zone.ts 4/4 실측):
+// 종가가 직전 260일 최고를 돌파한 날부터 5일간 true — 지속 신고면 5일마다 재점화 (백테스트와 동일).
+// kstDate 기준 게이트 값 = 직전 시리즈 날짜가 구간에 속하는가.
+function inYearHighZone(s: Series, kstDate: string, nDays = 5): boolean | null {
+  if (s.length < 280) return null;
+  const fireDays = new Set<string>();
+  let fireLeft = 0;
+  for (let i = 260; i < s.length; i++) {
+    const hi = Math.max(...s.slice(i - 260, i).map((x) => x.close));
+    if (s[i].close > hi && fireLeft === 0) fireLeft = nDays;
+    if (fireLeft > 0) { fireDays.add(s[i].date); fireLeft--; }
+  }
+  for (let i = s.length - 1; i >= 0; i--) if (s[i].date < kstDate) return fireDays.has(s[i].date);
+  return null;
+}
+
+// 52주 범위 내 현재 위치 0~100% (표시 전용 — "절대 레벨의 역사적 맥락")
+function pos52(s: Series, kstDate: string): number | null {
+  const win: number[] = [];
+  let cur: number | null = null;
+  for (const x of s) { if (x.date < kstDate) { win.push(x.close); cur = x.close; } }
+  const w = win.slice(-260);
+  if (w.length < 100 || cur === null) return null;
+  const lo = Math.min(...w), hi = Math.max(...w);
+  return hi > lo ? Math.round(((cur - lo) / (hi - lo)) * 100) : null;
+}
+
 export async function fetchMacroSnap(kstDate: string): Promise<MacroSnap> {
   const [sox, fx, tnx, wti, dxy] = await Promise.all([
-    daySeries("^SOX"), daySeries("KRW=X"), daySeries("^TNX"), daySeries("CL=F"), daySeries("DX-Y.NYB"),
+    daySeries("^SOX"), daySeries("KRW=X", 430), daySeries("^TNX", 430), daySeries("CL=F"), daySeries("DX-Y.NYB", 430),
   ]);
   const norm10y = (v: number) => (v > 20 ? v / 10 : v); // ^TNX 표기 편차 방어
   const s = lastTwoBefore(sox, kstDate), f = lastTwoBefore(fx, kstDate), t = lastTwoBefore(tnx, kstDate);
   const w = lastTwoBefore(wti, kstDate), d = lastTwoBefore(dxy, kstDate);
+  const tnxN = tnx.map((x) => ({ ...x, close: norm10y(x.close) }));
   return {
+    zoneFx: inYearHighZone(fx, kstDate),
+    zoneDxy: inYearHighZone(dxy, kstDate),
+    fxPos52: pos52(fx, kstDate),
+    y10Pos52: pos52(tnxN, kstDate),
     sox: s ? ((s[0] - s[1]) / s[1]) * 100 : null,
     fxLevel: f ? f[0] : null,
     fxChg: f ? ((f[0] - f[1]) / f[1]) * 100 : null,

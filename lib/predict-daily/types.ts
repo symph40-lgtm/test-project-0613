@@ -23,6 +23,12 @@ export type MacroSnap = {
   wtiChg: number | null; // 간밤 WTI %
   dxy: number | null; // 달러인덱스 레벨
   dxyChg: number | null; // 간밤 DXY % (게이트: ≥+0.8% 급등 시 감산)
+  zoneFx?: boolean | null; // 환율 52주신고 돌파 후 5일 구간 (게이트 — 스펙 9장 4/4 채택 2026-07-27)
+  zoneDxy?: boolean | null; // DXY 52주신고 돌파 후 5일 구간 (게이트 — 위와 결합 단일 ×0.5)
+  fxPos52?: number | null; // 환율 52주 범위 내 위치 0~100% (표시 전용 — 절대 레벨 맥락)
+  y10Pos52?: number | null; // 10Y 52주 범위 내 위치 0~100% (표시 전용)
+  envScore?: number | null; // 환경 점수판 합산 (표시·기록 — 60일 라이브 채점 후 승격 검토, 스펙 9장)
+  envParts?: string | null; // 점수 구성 문자열 (기록용)
   newsRisk?: number | null; // 뉴스 위험도 0~10 (AI, 표시·라이브 채점 전용 — 게이트 아님)
   newsNote?: string | null; // 핵심 위험 요인 한 줄
   newsDetail?: { t: string; s: number }[] | null; // 개별 뉴스별 삼전 영향도 상위 3건 (기록용)

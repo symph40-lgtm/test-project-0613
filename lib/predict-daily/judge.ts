@@ -83,6 +83,13 @@ export function judgeDaily(bars: DailyBar[], macro: MacroSnap | null, opts?: { s
     exposure *= CFG.macroGate.factor;
     gates.push(`달러급등(+${macro.dxyChg.toFixed(1)}%)`);
   }
+  // 위기구간 게이트 (사용자 가설 2026-07-27 "절대값 구간 진입이 위기" → 스펙 9장 실측 채택):
+  // 환율 또는 DXY가 52주 신고를 돌파한 후 5일 구간 → ×0.5 (단일 감산 — 콤보 실측 4/4:
+  // 삼전 +418→+545%·MDD 26→22, 하닉 +1349→+1537%·MDD 31→27, daily-swing-event-zone.ts)
+  if (exposure > 0 && (macro?.zoneFx || macro?.zoneDxy)) {
+    exposure *= CFG.macroGate.factor;
+    gates.push(`위기구간(${[macro?.zoneFx ? "환율" : "", macro?.zoneDxy ? "달러" : ""].filter(Boolean).join("·")} 52주신고±5일)`);
+  }
   const event = todayEvent(bars[i].date);
   if (exposure > 0 && event) {
     exposure *= CFG.eventFactor;

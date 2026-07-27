@@ -55,26 +55,16 @@ export const PREDICT_DAILY_CONFIG = {
   },
 
   // 이벤트 감산 — NFP(매월 첫 금요일, 자동) 실측: 비용 소액(10.5년 -1~-5%p)·MDD 소폭 개선.
-  // FOMC·CPI는 공식 발표 일정 (2026-07-22 연준·BLS 일정 확인, 2026년 말까지 등록 — CPI는 발표일 21:30 KST라
-  // 해당 날짜 마감 판정에 감산). 캘린더 잔여 30일 미만이면 금요일 성능 문자에 보충 경고 자동 동봉.
+  // ⚠FOMC·CPI 감산 제거 (2026-07-27, daily-swing-event-zone.ts 실일정 백테스트): FOMC ×0.5는
+  // 4/4 손실(삼전 -26~-11%p·하닉 -272~-229%p), CPI ×0.5도 4/4 손실 — 서프라이즈 방향은 예측
+  // 불가하고 감산 비용이 변동성 보험 가치를 초과 (익일 하락률 43~51% = 무방향). 등록은
+  // 실적일(백테스트 불가 — 보험 유지)만. D-n 임박 표기는 eventCalendar.ts가 점수판에 동봉.
   eventFactor: 0.5,
   events: [
-    { date: "2026-07-28", label: "FOMC(7/28~29)" },
-    { date: "2026-07-29", label: "FOMC 결과·하닉 실적" },
+    { date: "2026-07-29", label: "하닉 실적" },
     { date: "2026-07-30", label: "삼전 실적(확정)" },
-    { date: "2026-08-12", label: "미 CPI" },
-    { date: "2026-09-11", label: "미 CPI" },
-    { date: "2026-09-15", label: "FOMC(9/15~16)" },
-    { date: "2026-09-16", label: "FOMC 결과" },
     { date: "2026-10-07", label: "삼전 잠정실적(추정)" },
-    { date: "2026-10-14", label: "미 CPI" },
-    { date: "2026-10-27", label: "FOMC(10/27~28)" },
-    { date: "2026-10-28", label: "FOMC 결과" },
     { date: "2026-10-29", label: "하닉 실적(추정)" },
-    { date: "2026-11-10", label: "미 CPI" },
-    { date: "2026-12-08", label: "FOMC(12/8~9)" },
-    { date: "2026-12-09", label: "FOMC 결과" },
-    { date: "2026-12-10", label: "미 CPI" },
   ] as { date: string; label: string }[],
 
   sms: { enabled: true },

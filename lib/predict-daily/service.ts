@@ -7,6 +7,7 @@ import { fetchAfterPrice } from "./after";
 import { PREDICT_DAILY_CONFIG as CFG } from "./config";
 import { fetchDaily, kstNowDaily } from "./data";
 import { fetchKospiFlow, fetchRecentFlow, flowLine, intradayFlowLine, kospiLine, type FlowDay } from "./flow";
+import { upcomingEvents } from "./eventCalendar";
 import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
 import { MODELS } from "./models";
@@ -43,13 +44,42 @@ const gapAdvice = (j: DailyJudgment): string =>
 function macroLine(m: MacroSnap | null): string {
   if (!m) return "";
   const parts: string[] = [];
-  if (m.y10 != null) parts.push(`10Y ${m.y10.toFixed(2)}${m.y10Chg != null ? `(${m.y10Chg >= 0 ? "+" : ""}${m.y10Chg.toFixed(2)}p)` : ""}`);
+  if (m.y10 != null) parts.push(`10Y ${m.y10.toFixed(2)}${m.y10Chg != null ? `(${m.y10Chg >= 0 ? "+" : ""}${m.y10Chg.toFixed(2)}p)` : ""}${m.y10Pos52 != null ? `·52주${m.y10Pos52}%` : ""}`);
   if (m.sox != null) parts.push(`SOX ${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}%`);
-  if (m.fxLevel != null) parts.push(`환율 ${Math.round(m.fxLevel)}`);
+  if (m.fxLevel != null) parts.push(`환율 ${Math.round(m.fxLevel)}${m.fxPos52 != null ? `(52주${m.fxPos52}%)` : ""}`);
   if (m.dxy != null) parts.push(`DXY ${m.dxy.toFixed(1)}${m.dxyChg != null ? `(${m.dxyChg >= 0 ? "+" : ""}${m.dxyChg.toFixed(1)}%)` : ""}`);
   if (m.wti != null) parts.push(`WTI ${m.wti.toFixed(1)}${m.wtiChg != null ? `(${m.wtiChg >= 0 ? "+" : ""}${m.wtiChg.toFixed(1)}%)` : ""}`);
   if (m.newsRisk != null) parts.push(`뉴스위험 ${m.newsRisk}/10${m.newsRisk >= 3 && m.newsNote ? `(${m.newsNote})` : ""}`);
   return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
+// 환경 점수판 (스펙 9장, 사용자 요청 2026-07-27 — "환경 데이터를 점수화해 일봉 예측과 병행"):
+// 실측 채택 게이트 발동 = 각 -2, 표시 축 = ±1. 합산은 표시·기록 전용 (판정 불변 — 판정은 채택
+// 게이트만). 매일 macro.envScore로 저장 → 60일 라이브 채점(점수 vs label_r1) 후 승격 검토.
+// 임박 이벤트(FOMC·CPI·고용, eventCalendar): D-0~1 = -1, D-2~3 = 표기만 (감산 아님 — FOMC·CPI
+// D-감산은 실일정 백테스트 4/4 손실로 기각, config.events 주석 참조).
+function envSummary(m: MacroSnap | null, j: DailyJudgment, todayKst: string): { score: number; parts: string; line: string } {
+  const parts: string[] = [];
+  let score = 0;
+  const add = (p: number, label: string) => { score += p; parts.push(`${label} ${p > 0 ? "+" : ""}${p}`); };
+  if (m) {
+    if (m.y10Chg != null && m.y10Chg >= CFG.macroGate.y10SpikePp) add(-2, "10Y급등");
+    if (m.dxyChg != null && m.dxyChg >= CFG.macroGate.dxySpikePct) add(-2, "달러급등");
+    if (m.zoneFx || m.zoneDxy) add(-2, `위기구간(${[m.zoneFx ? "환율" : "", m.zoneDxy ? "달러" : ""].filter(Boolean).join("·")}52주신고)`);
+    if (m.sox != null && Math.abs(m.sox) >= 1) add(m.sox > 0 ? 1 : -1, `SOX${m.sox >= 0 ? "+" : ""}${m.sox.toFixed(1)}%`);
+    if (m.fxChg != null && Math.abs(m.fxChg) >= 0.5) add(m.fxChg > 0 ? -1 : 1, `환율${m.fxChg >= 0 ? "+" : ""}${m.fxChg.toFixed(1)}%`);
+    if (m.wtiChg != null && m.wtiChg >= 2) add(-1, "유가급등");
+    if (m.newsRisk != null && m.newsRisk >= 5) add(m.newsRisk >= 7 ? -2 : -1, `뉴스${m.newsRisk}/10`);
+    if (m.kospiFlow && Math.abs(m.kospiFlow.cash) >= 1000) add(m.kospiFlow.cash > 0 ? 1 : -1, `외인${m.kospiFlow.cash > 0 ? "매수" : "매도"}`);
+  }
+  const evGate = j.gates.find((g) => g.startsWith("이벤트"));
+  if (evGate) add(-2, evGate.replace("이벤트:", ""));
+  for (const e of upcomingEvents(todayKst, 3).slice(0, 3)) {
+    if (e.dDay <= 1) add(-1, `D-${e.dDay} ${e.kind}`);
+    else parts.push(`D-${e.dDay} ${e.kind}`);
+  }
+  const line = ` 환경 ${score >= 0 ? "+" : ""}${score}${parts.length ? `(${parts.join("·")})` : ""}.`;
+  return { score, parts: parts.join("·"), line };
 }
 
 // 판정 유지 문자 (매일 발송 — 사용자 지시 2026-07-22 "잊어버릴 수 있으니 매일, 언제부터 동일인지 표기")
@@ -231,6 +261,8 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const macro2 = macro
       ? { ...macro, newsRisk: news?.score ?? null, newsNote: news?.note ?? null, newsDetail: news?.detail ?? null, kospiFlow: kospi }
       : null;
+    const env = envSummary(macro2, jg, now.date); // 환경 점수판 (표시·기록 — 스펙 9장)
+    const macroStore = macro2 ? { ...macro2, envScore: env.score, envParts: env.parts || null } : null;
     const existing = have.get(now.date) && have.get(now.date)!.source !== "backfill" ? have.get(now.date)! : null;
     // 직전 완결 거래일의 스탠스 (변경 감지 기준)
     const prevRow = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1)).pop() ?? null;
@@ -244,7 +276,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     const row: PredictDailyRow & { judged_at: string } = {
       date: now.date, symbol: sym.code,
       stance: jg.stance, exposure: jg.exposure, base_exposure: jg.baseExposure,
-      model_stances: jg.modelStances, macro: macro2, flow: flow.length ? flow.slice(-5) : null, gates: jg.gates.length ? jg.gates : null,
+      model_stances: jg.modelStances, macro: macroStore, flow: flow.length ? flow.slice(-5) : null, gates: jg.gates.length ? jg.gates : null,
       event: jg.gates.find((g) => g.startsWith("이벤트")) ?? null,
       stop_px: jg.stopPx, close_px: jg.closePx,
       revisions: existing
@@ -276,7 +308,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats, intraFlow) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats, intraFlow),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats, intraFlow + env.line) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats, intraFlow + env.line),
         smsSubject: "일봉 판정",
       });
     }
@@ -324,7 +356,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
             await dispatchToChannels("signal", now.date, {
               key: `pdaily_aftersum_${sym.code}_${now.date}`,
               severity: "low",
-              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${gapAdvice(jgAfter)}${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}`,
+              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${gapAdvice(jgAfter)}${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}${envSummary(macro, jgAfter, now.date).line}`,
               smsSubject: "일봉 애프터",
             });
           }
