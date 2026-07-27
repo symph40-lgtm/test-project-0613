@@ -255,8 +255,12 @@ async function checkpointStream(
         // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
         const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
         const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+        // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — config.ssTrail 근거 참조, 문턱 0.3 분리)
+        const ssTrailOpts = isHighVolDay(ssHist)
+          ? { trailRangeRatio: PREDICT_CONFIG.ssTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.ssTrail.confirmMinutes }
+          : {};
         const b = ssReg.length >= 20
-          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes })
+          ? runFisher({ date: today, dailyHistory: ssHist, openPx: ssReg[0].open, morning: ssReg, prevDayMinutes: null }, { strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...ssTrailOpts })
           : { model: "fisher" as const, verdict: "none" as Verdict, confidence: 0.3, reason: "정규장 창 미형성" };
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;

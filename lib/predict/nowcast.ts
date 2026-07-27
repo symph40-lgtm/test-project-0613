@@ -76,9 +76,11 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
     // 강돌파: 하닉 0.1 / 삼전 0.075 (사용자 승인 2026-07-25 종목 분리 — config.ssStrongBreakRatio)
     const sb = isHx ? PREDICT_CONFIG.earlyStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
     const sbLate = isHx ? PREDICT_CONFIG.lateStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
-    // 하닉 고변동일 트레일 반전 (2026-07-25) — 스트림과 동일 조건으로 미러 (조회 일치)
-    const trailOpts = isHx && isHighVolDay(hist)
-      ? { trailRangeRatio: PREDICT_CONFIG.hxTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.hxTrail.confirmMinutes }
+    // 고변동일 트레일 반전 (하닉 2026-07-25 · 삼전 2026-07-27 승인) — 스트림과 동일 조건으로 미러
+    // (조회 일치). 문턱 종목 분리: 하닉 config.hxTrail / 삼전 config.ssTrail.
+    const trailCfg = isHx ? PREDICT_CONFIG.hxTrail : PREDICT_CONFIG.ssTrail;
+    const trailOpts = isHighVolDay(hist)
+      ? { trailRangeRatio: trailCfg.rangeRatio, trailConfirmMinutes: trailCfg.confirmMinutes }
       : {};
     const input08 = { date: today, dailyHistory: hist, openPx: pre?.[0]?.open ?? bars08[0].open, morning: bars08, prevDayMinutes: null };
     F = runFisher(input08, {
