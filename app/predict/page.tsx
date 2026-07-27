@@ -155,7 +155,7 @@ export default async function PredictPage() {
     fetchDailyPredict(PREDICT_CONFIG.symbol, 40).catch(() => []),
     loadRescueStats().catch(() => ({}) as Record<string, { c: number; t: number }>),
   ]);
-  // 오늘의 권장 스탑 (스펙 3.3 — 신호 유형별): 산·골 조기 = ATR 0.7배(클램프), 피셔 = ETF -3%
+  // 오늘의 권장 스탑 (스펙 3.3 — 신호 유형별): 산·골 조기 = ATR 0.7배(클램프), 피셔 = 하닉 ETF -5%·삼전 -3% (2026-07-28 폭 분리)
   const kstTodayStr = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const atr = atrPct(dailyBars.filter((b) => b.date < kstTodayStr), 14); // 오늘의 미완성 봉 제외
   const sw = PREDICT_CONFIG.stops.earlySwing;

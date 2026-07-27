@@ -288,7 +288,7 @@ async function checkpointStream(
       : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
     // 방향 판정이면 자동매도 스탑 금액 동봉 (ruleReminder와 무관 — 실매매 핵심 정보)
     if (next.verdict !== "none") {
-      const pct = judge === "user" ? atrStopEtf : PREDICT_CONFIG.stops.fisher.etfPct;
+      const pct = judge === "user" ? atrStopEtf : PREDICT_CONFIG.stops.fisher.hxEtfPct; // 스트림 = 하닉
       if (pct !== null) text += await etfStopLine(next.verdict, pct);
     }
     // 규칙 환기 (사용자 지정 2026-07-17 "당분간") — 수익은 적중률이 아니라 규칙에서.
@@ -296,10 +296,11 @@ async function checkpointStream(
     if (PREDICT_CONFIG.sms.ruleReminder) {
       if (next.verdict !== "none") {
         // 신호 유형별 지침 — 프리장(≤09:00) 피셔F는 ETF 미개장이라 09:00 시가 1/3 선진입,
-        // 정규장 피셔는 본진입. 스탑은 공히 ETF -3% (v1.13 — 프리장도 피셔 판정자)
+        // 정규장 피셔는 본진입. 스탑은 하닉 ETF 기준 (v1.13 — 프리장도 피셔 판정자, 2026-07-28 폭 분리)
+        const hxSp = PREDICT_CONFIG.stops.fisher.hxEtfPct;
         text += whenLabel <= "09:00"
-          ? `\n▶프리장 피셔 신호: ETF 개장(09:00) 후 시가 부근 1/3 선진입 · 스탑 진입가 ETF -3% · 09:30 판정 유지 확인 후 본진입. 당일청산.`
-          : `\n▶피셔 확인: 본진입 가능(3단계: 추가 +20%p, 누적 100%) · 스탑 ETF -3% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
+          ? `\n▶프리장 피셔 신호: ETF 개장(09:00) 후 시가 부근 1/3 선진입 · 스탑 진입가 ETF -${hxSp}% · 09:30 판정 유지 확인 후 본진입. 당일청산.`
+          : `\n▶피셔 확인: 본진입 가능(3단계: 추가 +20%p, 누적 100%) · 스탑 ETF -${hxSp}% 고정(역행=확인실패, 즉시 컷) · 당일청산.`;
         text += ` 수익은 적중률(${hitPct ?? "?"}%)이 아니라 규칙에서.`;
       } else if (prev !== null) {
         text += `\n▶규칙: 방향 소멸 — 보유 중이면 청산 검토. 확정(14:00) 반대 보유 금지.`;
@@ -396,7 +397,9 @@ async function checkpointStream(
       // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)
       // + 측정 시각 (사용자 지시 2026-07-27: 소멸 등 확인시각 없는 문자도 시각을 다 붙일 것)
       const statCore = `측정 ${nowHHMM2}·이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
-      const ffStop = PREDICT_CONFIG.stops.fisher.etfPct;
+      // 스탑 폭 종목 분리 (2026-07-28 — config.stops.fisher 근거 참조): 하닉 -5% / 삼전 -3%
+      const fisherEtf = (sym: "hx" | "ss") => (sym === "hx" ? PREDICT_CONFIG.stops.fisher.hxEtfPct : PREDICT_CONFIG.stops.fisher.etfPct);
+      const ffStop = fisherEtf("hx");
       // 하닉 3단계 (F·M 08 연속창 / 본 09 정규장창)
       const hxCont = [...(pre ?? []), ...krx].filter((b) => b.time < nowHHMM2);
       const hxReg = krx.filter((b) => b.time < nowHHMM2);
@@ -497,12 +500,13 @@ async function checkpointStream(
       const guideOf = (t: Trig): string => {
         if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
         if (t.prev !== "none" && t.prev !== t.cur) return "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
-        if (t.tier === "F") return "▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -3%. 피셔M 중간확인 대기.";
+        const sp = fisherEtf(t.sym);
+        if (t.tier === "F") return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
         if (t.tier === "M") {
           const warn = t.fDir !== "none" && t.cur !== t.fDir ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
-          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -3%.${warn}`;
+          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${sp}%.${warn}`;
         }
-        return "▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -3% 고정·당일청산.";
+        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${sp}% 고정·당일청산.`;
       };
       let anyChange = false;
       for (const t of trigs) {
@@ -587,13 +591,14 @@ async function checkpointStream(
       // (사용자 지정 — 스탑 실행은 HTS 자동매도 몫, 문자 없음). 트리거는 실측 우월안 '원진입가 회복'
       // (A선 회복은 재컷 왕복 큼 — 실측 승률 49~50%·누적 하닉 +3.5/삼전 +7.2%p). 키 = 종목·방향 1일 1회.
       try {
-        const stopFrac = PREDICT_CONFIG.stops.fisher.etfPct / 2 / 100; // ETF -3% = 본주 -1.5%
+        // 종목별 스탑 폭 (2026-07-28): ETF % ÷2 = 본주 % — 컷·회복 감지도 실매매 스탑과 일치시킴
         const recChecks = [
           { sym: "hx", symKo: "하닉", bState: hxB2, reason: hxBo?.reason ?? "", reg: hxReg },
           { sym: "ss", symKo: "삼전", bState: ssB, reason: ssBReason, reg: ssRegBars ?? [] },
         ] as const;
         for (const rc of recChecks) {
           if (rc.bState === "none" || rc.reg.length < 20) continue;
+          const stopFrac = fisherEtf(rc.sym) / 2 / 100; // ETF % ÷2 = 본주 %
           const confT = rc.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
           const confBar = confT ? rc.reg.find((b) => b.time === confT) : undefined;
           if (!confT || !confBar) continue;
@@ -608,8 +613,8 @@ async function checkpointStream(
           const staleR = lagR >= 30;
           const guideR = staleR
             ? `⚠지연 통지(회복 ${rec.time}, ${lagR}분 경과) — 추격 진입 금지, 현재가와 다음 문자 기준 판단.`
-            : `▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 기준 스탑 ETF -${PREDICT_CONFIG.stops.fisher.etfPct}% 재설정 · 실측 승률 ~50%·소폭 순익 — 소액 권장.`;
-          const stopLineR = !staleR && rc.sym === "hx" ? await etfStopLine(rc.bState, PREDICT_CONFIG.stops.fisher.etfPct) : "";
+            : `▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 기준 스탑 ETF -${fisherEtf(rc.sym)}% 재설정 · 실측 승률 ~50%·소폭 순익 — 소액 권장.`;
+          const stopLineR = !staleR && rc.sym === "hx" ? await etfStopLine(rc.bState, fisherEtf("hx")) : "";
           await dispatchToChannels("signal", today, {
             key: `predict_recut_${rc.sym}_${rc.bState}`,
             severity: "medium",

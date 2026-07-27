@@ -146,7 +146,7 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
         const etf = await fetchDailyPredict(p.code, 2);
         const e = etf[etf.length - 1];
         if (e && e.date === today && e.close > 0) {
-          const stopPct = PREDICT_CONFIG.stops.fisher.etfPct;
+          const stopPct = PREDICT_CONFIG.stops.fisher.hxEtfPct; // 하닉 전용 블록 — 스탑 폭 분리 (2026-07-28)
           const stop = Math.floor((e.close * (1 - stopPct / 100)) / 5) * 5;
           base.stopLine = `${p.name} ${e.close.toLocaleString()}원 → 지금 진입 시 스탑 ${stop.toLocaleString()}원 (-${stopPct}%)`;
         }
