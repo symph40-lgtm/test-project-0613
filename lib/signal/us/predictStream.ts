@@ -268,9 +268,15 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           const staleA = confT !== null && lagA >= 30;
           const isFinal = minuteOfDay >= hhmmToMin(AH.finalCp) + 1;
           const head = isFinal ? `애프터 확정(${etk(AH.finalCp)})` : "애프터";
+          // 종료 임박 확인 가드 (사용자 실손 2026-07-29): 18:50 ET 확인 문자로 SOXS 진입 → 확인가
+          // 483.46이 이미 애프터 하락 소진점, 잔여 70분에 +0.2% 반등 마감 = -3x 실손실. 18:30 ET
+          // 이후 신규 확인은 진입 지침 대신 상태 파악용으로 강등 (정규장 postFinal 가드와 동형).
+          const lateConf = confT !== null && hhmmToMin(confT) >= 18 * 60 + 30;
           const guideA = staleA
             ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
-            : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET(한국 ${kstOf("20:00")}) 종료 전 청산.`;
+            : lateConf
+              ? `⚠종료 임박 확인(${etk(confT!)} — 잔여 ${20 * 60 - hhmmToMin(confT!)}분) — 신규 진입 비권장·상태 파악용. 하락분 소진 후 확인일 가능성, 기보유만 20:00 ET(한국 ${kstOf("20:00")}) 전 청산.`
+              : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET(한국 ${kstOf("20:00")}) 종료 전 청산.`;
           try {
             await dispatchToChannels("signal", today, {
               key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
