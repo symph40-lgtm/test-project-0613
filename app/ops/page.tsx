@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { setSmsPause, clearSmsPause, addDirective } from "./actions";
+import { ConfirmPauseButton } from "./ConfirmPauseButton";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,8 @@ export default async function OpsPage() {
             <input type="checkbox" name="allowStrong" defaultChecked={pause?.allowStrong !== false} />
             판정 확정 문자는 허용
           </label>
-          <button type="submit" className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">이 날짜까지 정지</button>
+          {/* 확인 단계 (사용자 지시 2026-07-28) — 7/28 아침 원탭 오터치로 당일 문자 전체 정지된 사고 후속 */}
+          <ConfirmPauseButton className="rounded-[8px] bg-ink px-4 py-1.5 text-[13px] font-semibold text-white">이 날짜까지 정지</ConfirmPauseButton>
         </form>
         {pauseActive ? (
           <form action={clearSmsPause} className="mt-2">
