@@ -268,24 +268,27 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           const staleA = confT !== null && lagA >= 30;
           const isFinal = minuteOfDay >= hhmmToMin(AH.finalCp) + 1;
           const head = isFinal ? `애프터 확정(${etk(AH.finalCp)})` : "애프터";
-          // 종료 임박 확인 가드 (사용자 실손 2026-07-29): 18:50 ET 확인 문자로 SOXS 진입 → 확인가
-          // 483.46이 이미 애프터 하락 소진점, 잔여 70분에 +0.2% 반등 마감 = -3x 실손실. 18:30 ET
-          // 이후 신규 확인은 진입 지침 대신 상태 파악용으로 강등 (정규장 postFinal 가드와 동형).
+          // 종료 임박 확인 = 발송 생략 (사용자 실손·지시 2026-07-29): 18:50 ET 확인 문자로 SOXS
+          // 진입 → 확인가 483.46이 이미 애프터 하락 소진점, 잔여 70분에 +0.2% 반등 마감 = -3x
+          // 실손실. 행동 불가능한 종료 임박(18:30 ET 이후) 신규 확인은 문자 자체를 보내지 않는다
+          // ("이런 것은 문자에서 빼줘"). 19:30 확정 문자(채점·기록 기준)만 유지, 기록은 별도 블록.
           const lateConf = confT !== null && hhmmToMin(confT) >= 18 * 60 + 30;
-          const guideA = staleA
-            ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
-            : lateConf
-              ? `⚠종료 임박 확인(${etk(confT!)} — 잔여 ${20 * 60 - hhmmToMin(confT!)}분) — 신규 진입 비권장·상태 파악용. 하락분 소진 후 확인일 가능성, 기보유만 20:00 ET(한국 ${kstOf("20:00")}) 전 청산.`
-              : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET(한국 ${kstOf("20:00")}) 종료 전 청산.`;
-          try {
-            await dispatchToChannels("signal", today, {
-              key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
-              severity: "medium",
-              text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${headKst(out.reason.split(" — ")[0])} (16~20시 ET·한국 05~09시). ${guideA} 무응답=현행 유지`,
-              smsSubject: "미국 애프터",
-              suppressSms: quietA,
-            }, undefined, undefined, { dedupHours: 16 });
-          } catch { /* 발송 실패 무시 */ }
+          if (!lateConf || isFinal) {
+            const guideA = staleA
+              ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagA}분 경과) — 추격 진입 금지, 현재가 기준 판단.`
+              : lateConf
+                ? `⚠종료 임박 확인(${etk(confT!)}) — 신규 진입 비권장, 기보유만 20:00 ET(한국 ${kstOf("20:00")}) 전 청산.`
+                : `▶시간외 유동성 낮음·미검증 이식 상수 — 소액만 · 20:00 ET(한국 ${kstOf("20:00")}) 종료 전 청산.`;
+            try {
+              await dispatchToChannels("signal", today, {
+                key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
+                severity: "medium",
+                text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${headKst(out.reason.split(" — ")[0])} (16~20시 ET·한국 05~09시). ${guideA} 무응답=현행 유지`,
+                smsSubject: "미국 애프터",
+                suppressSms: quietA,
+              }, undefined, undefined, { dedupHours: 16 });
+            } catch { /* 발송 실패 무시 */ }
+          }
         }
         // 확정 이후 1회 기록 (라벨은 세션 종료 후 (a)에서)
         if (minuteOfDay >= hhmmToMin(AH.finalCp) + 5) {
