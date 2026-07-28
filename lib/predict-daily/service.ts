@@ -12,6 +12,7 @@ import { judgeAt, judgeDaily } from "./judge";
 import { fetchMacroSnap } from "./macro";
 import { MODELS } from "./models";
 import { assessNewsRisk, type NewsRisk } from "./newsRisk";
+import { scoreCaseDays, similarCaseLine, upsertCaseDay, type CaseFeatures } from "./caseMemory";
 import { loadRecentDays, predictDailyTablesReady, upsertDay, updateLabels } from "./store";
 
 // 삼전 앵커 강등 매핑 (스펙 5-10): 앵커 100%→100 / 50%→25 / 25% 이하→0 — "좋으면 하닉 풀, 나쁘면 하닉부터"
@@ -168,6 +169,8 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
   let anchorJg: DailyJudgment | null = null; // 삼전(앵커) 판정 — symbols 배열에서 삼전이 먼저 처리됨
   let anchorAfterJg: DailyJudgment | null = null;
   const perfTexts: string[] = []; // 주간 성능 문자 (금요일)
+  // 사례 메모리 1단계 (사용자 승인 2026-07-28 — 일봉 한정): 삼전 갭·등락을 하닉 차례에 합쳐 1행 저장
+  let ssCase: { gap: number | null; chg: number | null } | null = null;
 
   for (const sym of CFG.symbols) {
     const bars = await fetchDaily(sym.code, CFG.daysFetch);
@@ -224,6 +227,9 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     }
     summary.scored = (summary.scored as number) + scored;
 
+    // 사례 메모리 익일 채점 (표시 전용 — 실패는 내부에서 삼킴)
+    await scoreCaseDays(sym.code === "005930" ? "ss" : "hx", bars);
+
     // 미너비니·와인스타인 누적 실측 (매일 문자 표기용 — 저장된 채점 행 전체, 사용자 지시 2026-07-22)
     const mwStats = mwAcc([...have.values()]);
 
@@ -271,10 +277,14 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     }
     if (!sym.anchorTo) anchorJg = jg;
     const flow = await fetchRecentFlow(sym.code); // 확정치는 전일까지 — 표시·기록용 (게이트 아님)
+    // 사례 메모리용 당일 갭·등락 (전일 종가 대비) — 표시·기록 전용
+    const prevClose = bars.length >= 2 ? bars[bars.length - 2].close : null;
+    const dayGap = prevClose ? ((todayBar.open - prevClose) / prevClose) * 100 : null;
+    const dayChg = prevClose ? ((todayBar.close - prevClose) / prevClose) * 100 : null;
     if (!newsLoaded) {
       const cached = have.get(now.date)?.macro;
       if (cached?.newsRisk != null) news = { score: cached.newsRisk, note: cached.newsNote ?? "", detail: cached.newsDetail ?? undefined };
-      else news = await assessNewsRisk();
+      else news = await assessNewsRisk(dayChg !== null ? `삼전 ${dayChg >= 0 ? "+" : ""}${dayChg.toFixed(1)}%` : undefined);
       newsLoaded = true;
     }
     const kospi = await fetchKospiFlow(); // 코스피 외인 현물·선물 확정치 (표시 전용 — 동시 상관 0.40 실측)
@@ -283,6 +293,20 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       : null;
     const env = envSummary(macro2, jg, now.date); // 환경 점수판 (표시·기록 — 스펙 9장)
     const macroStore = macro2 ? { ...macro2, envScore: env.score, envParts: env.parts || null } : null;
+    // 사례 메모리: 삼전 차례엔 갭·등락 보관, 하닉 차례에 두 종목 합쳐 당일 1행 저장 (표시 전용)
+    if (sym.code === "005930") ssCase = { gap: dayGap, chg: dayChg };
+    else {
+      await upsertCaseDay(now.date, {
+        ssGap: ssCase?.gap ?? null, ssChg: ssCase?.chg ?? null, hxGap: dayGap, hxChg: dayChg,
+        sox: macro?.sox ?? null, fxChg: macro?.fxChg ?? null, y10pp: macro?.y10Chg ?? null,
+        dxyChg: macro?.dxyChg ?? null, envScore: env.score,
+      } satisfies CaseFeatures, news?.cause ?? null);
+    }
+    // 유사 사례 라인 (top-5, 해당 종목 익일 기준) — 실패 시 빈 문자열
+    const caseLine = await similarCaseLine(sym.code === "005930" ? "ss" : "hx", {
+      date: now.date, gap: dayGap, chg: dayChg,
+      sox: macro?.sox ?? null, fxChg: macro?.fxChg ?? null, y10pp: macro?.y10Chg ?? null,
+    });
     const existing = have.get(now.date) && have.get(now.date)!.source !== "backfill" ? have.get(now.date)! : null;
     // 직전 완결 거래일의 스탠스 (변경 감지 기준)
     const prevRow = [...have.values()].filter((r) => r.date < now.date).sort((a, b) => (a.date < b.date ? -1 : 1)).pop() ?? null;
@@ -328,7 +352,7 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
       await dispatchToChannels("signal", now.date, {
         key,
         severity: changed ? (jg.stance !== prevStance ? "high" : "medium") : "low",
-        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats, intraFlow + env.line) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats, intraFlow + env.line),
+        text: changed ? judgmentText(sym.name, jg, macro2, prevLabel, flow, mwStats, intraFlow + env.line + caseLine) : holdText(sym.name, jg, macro2, flow, since, streak, mwStats, intraFlow + env.line + caseLine),
         smsSubject: "일봉 판정",
       });
     }
@@ -373,10 +397,18 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
             }
           } else {
             // 매일 애프터 요약 (2026-07-22 사용자 지시 — 전환 없어도 내일 전망 발송, 하루 1회 키로 중복 방지)
+            // 유사 사례 라인 동봉 (사례 메모리 1단계 — 애프터가는 등락에 반영, 실패 시 생략)
+            const prevC = bars.length >= 2 ? bars[bars.length - 2].close : null;
+            const caseLineAfter = await similarCaseLine(sym.code === "005930" ? "ss" : "hx", {
+              date: now.date,
+              gap: prevC ? ((todayBar.open - prevC) / prevC) * 100 : null,
+              chg: prevC ? ((after.px - prevC) / prevC) * 100 : null,
+              sox: macro?.sox ?? null, fxChg: macro?.fxChg ?? null, y10pp: macro?.y10Chg ?? null,
+            });
             await dispatchToChannels("signal", now.date, {
               key: `pdaily_aftersum_${sym.code}_${now.date}`,
               severity: "low",
-              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${gapAdvice(jgAfter)}${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}${envSummary(macro, jgAfter, now.date).line}`,
+              text: `[일봉·애프터] ${pxPart} — 내일 전망 ${actionLabel(todayRow.stance, todayRow.exposure)} 유지.${gapAdvice(jgAfter)}${mwLine(jgAfter, mwStats)} ${regimeLine(jgAfter)}${envSummary(macro, jgAfter, now.date).line}${caseLineAfter}`,
               smsSubject: "일봉 애프터",
             });
           }

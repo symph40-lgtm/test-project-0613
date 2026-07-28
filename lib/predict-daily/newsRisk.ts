@@ -10,7 +10,12 @@ export type NewsRisk = {
   score: number;
   note: string;
   detail?: { t: string; s: number }[]; // 개별 뉴스별 삼전 영향도 상위 3건 (기록용 — DB macro.newsDetail)
+  // 당일 등락 원인 요약 (사례 메모리 1단계, 사용자 승인 2026-07-28) — 같은 AI 호출에 통합 (비용 불변)
+  cause?: { text: string; tags: string[] } | null;
 };
+
+// 사례 메모리 정형 태그 (docs/predict-daily-case-memory.md) — 이 목록 밖 태그는 버림
+const CAUSE_TAGS = ["금리", "환율", "실적", "수급", "미국반도체", "지정학", "관세무역", "이벤트경계", "기술적", "기타"];
 
 const QUERIES = [
   "삼성전자 SK하이닉스",
@@ -21,7 +26,7 @@ const QUERIES = [
   "코스피 급락",
 ];
 
-export async function assessNewsRisk(): Promise<NewsRisk | null> {
+export async function assessNewsRisk(marketLine?: string): Promise<NewsRisk | null> {
   if (!hasAiKey()) return null;
   try {
     const batches = await Promise.all(QUERIES.map((q) => fetchNews(q, 5).catch(() => [])));
@@ -45,8 +50,11 @@ export async function assessNewsRisk(): Promise<NewsRisk | null> {
 종합 기준: 0~2 평온 / 3~4 통상 잡음 / 5~6 경계(정책·지정학 불확실성 구체화) / 7~8 위험(전쟁·급격한 정책 충격 임박, 대형 규제 발표) / 9~10 위기(개전·금융 시스템 위기).
 주의: 상투적 공포 표현("폭락 공포" 따위)에 끌려가지 말고 실체적 사건·발언·일정 중심. 이미 시장에 반영된 오래된 이슈는 가중하지 말 것.
 
+추가 임무 (사례 메모리): ${marketLine ? `오늘 시장은 "${marketLine}"였다. ` : ""}헤드라인과 시장 움직임을 근거로
+오늘 등락의 주된 원인을 요약하고, 태그를 다음 목록에서만 골라라: ${CAUSE_TAGS.join(", ")}.
+
 JSON만 출력:
-{"score": 종합 정수, "note": "핵심 악재 한 줄 요약(공백 포함 25자 이내, 잘리지 않는 완결 문구, 없으면 '특이사항 없음')", "top": [{"t": "뉴스 요약(20자 이내)", "s": 삼전 악재영향 0~10}, ...상위 3건]}
+{"score": 종합 정수, "note": "핵심 악재 한 줄 요약(공백 포함 25자 이내, 잘리지 않는 완결 문구, 없으면 '특이사항 없음')", "top": [{"t": "뉴스 요약(20자 이내)", "s": 삼전 악재영향 0~10}, ...상위 3건], "cause": "오늘 등락 원인 요약(60자 이내, 사실 중심)", "tags": ["태그1", "태그2"]}
 
 헤드라인:
 ${titles.join("\n")}`;
@@ -57,13 +65,16 @@ ${titles.join("\n")}`;
       messages: [{ role: "user", content: prompt }],
     });
     const text = res.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
-    const j = parseJsonLoose<{ score?: number; note?: string; top?: { t?: string; s?: number }[] }>(text);
+    const j = parseJsonLoose<{ score?: number; note?: string; top?: { t?: string; s?: number }[]; cause?: string; tags?: string[] }>(text);
     const score = Math.max(0, Math.min(10, Math.round(Number(j.score ?? 0))));
     const note = String(j.note ?? "").slice(0, 28) || "특이사항 없음";
     const detail = Array.isArray(j.top)
       ? j.top.slice(0, 3).map((x) => ({ t: String(x.t ?? "").slice(0, 24), s: Math.max(0, Math.min(10, Math.round(Number(x.s ?? 0)))) }))
       : undefined;
-    return { score, note, detail };
+    const causeText = String(j.cause ?? "").slice(0, 80).trim();
+    const tags = Array.isArray(j.tags) ? j.tags.map(String).filter((t) => CAUSE_TAGS.includes(t)).slice(0, 3) : [];
+    const cause = causeText ? { text: causeText, tags } : null;
+    return { score, note, detail, cause };
   } catch {
     return null; // 실패 시 표기 생략 — 판정에는 영향 없음
   }
