@@ -15,6 +15,8 @@ const MARKETS = [
   { key: "hx", label: "하닉", settings: "fisher_now_hx" },
   { key: "ss", label: "삼전", settings: "fisher_now_ss" },
   { key: "us", label: "SOXX", settings: "fisher_now_us" },
+  // TIGER 반도체TOP10 모니터링 (사용자 승인 2026-07-28 밤 — 판정 396500·체결 488080, 60일 채점 중)
+  { key: "etf", label: "TOP10", settings: "fisher_now_etf" },
 ] as const;
 
 export default async function FisherPage() {

@@ -845,5 +845,13 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 삼전 트래킹 실패 (마이그레이션 031 미적용?):", e);
   }
 
+  // ⑨ TIGER 반도체TOP10 모니터링 스트림 (사용자 승인 2026-07-28 밤 — 1단계 문자·기록 전용)
+  try {
+    const { runEtfTop10Monitor } = await import("./etfTop10");
+    await runEtfTop10Monitor();
+  } catch (e) {
+    console.error("[predict] TOP10 모니터 실패 (기존 스트림 무관):", e);
+  }
+
   return result;
 }

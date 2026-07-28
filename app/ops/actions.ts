@@ -43,10 +43,13 @@ export async function clearSmsPause(): Promise<void> {
 export async function queryFisherNow(formData: FormData): Promise<void> {
   await requireUser();
   const raw = String(formData.get("market"));
-  const market = raw === "us" ? "us" : raw === "ss" ? "ss" : "hx"; // 구값 "kr"은 하닉으로
+  // "etf" = TIGER 반도체TOP10 모니터링 (사용자 승인 2026-07-28 밤) · 구값 "kr"은 하닉으로
+  const market = raw === "us" ? "us" : raw === "ss" ? "ss" : raw === "etf" ? "etf" : "hx";
   const res = market === "us"
     ? await (await import("@/lib/signal/us/nowcast")).fisherNowUs()
-    : await (await import("@/lib/predict/nowcast")).fisherNowKr(market);
+    : market === "etf"
+      ? await (await import("@/lib/predict/etfTop10")).fisherNowEtf()
+      : await (await import("@/lib/predict/nowcast")).fisherNowKr(market);
   const admin = createAdminClient();
   // 종목·시장별 저장 (사용자 지시 2026-07-25: "하닉만 나옴" — 마지막 1건 대신 각자 보관해 나란히 표시)
   await admin.from("ops_settings").upsert(

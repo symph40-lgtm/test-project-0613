@@ -179,6 +179,21 @@ export const PREDICT_CONFIG = {
   // 기각(저변동 개입 유해 재확인). ⚠비용: 왕복 37→90회·전환 132→290회/227일 — 열화 시
   // service.ts hxTrailOpts의 isHighVolDay 게이트 복원.
   hxTrail: { rangeRatio: 0.35, confirmMinutes: 5 },
+  // TIGER 반도체TOP10(396500) 모니터링 스트림 (사용자 승인 2026-07-28 밤 — 국내판 SOXX 1단계):
+  // 판정 396500 · 상방 체결 488080(2x) · 하방은 기존 삼전 인버스2x 채널 (전용 인버스 미상장).
+  // ⚠NXT 프리장 미거래(실측) — 08시창 불성립, 전 단계 09시창(09:00~09:15 OR). 상수는 120일
+  // 전 축 스윕(scripts/etf-param-optimize.ts) 확정: 본 +80.6%p·4분기 전부 양수·이웃 평탄.
+  // ETF 완만성 → 확인봉 짧게(F2·M6·본5봉), 트레일은 넓게(0.5×3 전일). 60일 라이브 채점 후 승격 검토.
+  etfTop10: {
+    code: "396500", name: "TOP10",
+    lev: { code: "488080", name: "TIGER반도체TOP10레버리지" },
+    F: { offsetRatio: 0.05, confirmMinutes: 2 },  // 첫확인 중앙 09:36
+    M: { offsetRatio: 0.08, confirmMinutes: 6 },  // 첫확인 중앙 10:08
+    B: { offsetRatio: 0.15, confirmMinutes: 5 },  // 첫확인 중앙 10:18 (개별주 8봉 → 5봉)
+    strongBreakRatio: 0.075, reversalMinutes: 3,
+    trail: { rangeRatio: 0.5, confirmMinutes: 3 }, // 전일 적용 — 0.4는 -37.5·0.6은 -19.4 열위
+    stopBasePct: 1.5, // 기준 1x 스탑 — 488080(2x) 체결 시 -3% 상당
+  },
   // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — 하닉과 동일 구조·문턱만 분리): 7/27 갭+3%
   // 후 오후 반등(+3.0%)이 하닉 문턱 0.5(≈4.5%)에 미달해 미포착 → 완화 스윕(227일·추적 분위 게이트·
   // 스탑 결합)에서 0.3×3봉이 전체 +52.4→+80.6%p 최고, 7/27형 14:12 포착·왕복 컷 회피. 0.5는 삼전
