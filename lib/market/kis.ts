@@ -10,9 +10,10 @@
 //
 // 토큰은 24h 유효하며 발급 호출에 분당 제한이 있어 메모리 캐시한다.
 
-const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
+// 토큰은 공유 캐시(lib/market/kisToken.ts)로 일원화 (2026-07-28) — 인스턴스별 중복 발급 경합 제거
+import { getKisToken as getToken } from "./kisToken";
 
-let cachedToken: { token: string; exp: number } | null = null;
+const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
 
 export function hasKisKeys(): boolean {
   return Boolean(process.env.KIS_APP_KEY && process.env.KIS_APP_SECRET);
@@ -24,8 +25,8 @@ export function hasKisKeys(): boolean {
 // 만기 = 분기월 둘째 목요일 — 만기일 당일 저녁(야간)부터는 다음 월물이 최근월.
 export function frontMonthNightFutCode(now = new Date()): string {
   const kst = new Date(now.getTime() + 9 * 3600 * 1000);
-  let y = kst.getUTCFullYear();
-  let m = kst.getUTCMonth() + 1;
+  const y = kst.getUTCFullYear();
+  const m = kst.getUTCMonth() + 1;
   // qm은 항상 3/6/9/12 중 하나 — 다음 분기월은 +3 (12월이면 이듬해 3월)
   const nextQuarter = (mm: number): [number, number] => (mm >= 12 ? [qy + 1, 3] : [qy, mm + 3]);
 
@@ -39,29 +40,6 @@ export function frontMonthNightFutCode(now = new Date()): string {
     if (kst.getUTCDate() >= secondThu) [qy, qm] = nextQuarter(qm);
   }
   return `1A01${qy % 10}${String(qm).padStart(2, "0")}`;
-}
-
-async function getToken(): Promise<string | null> {
-  const appkey = process.env.KIS_APP_KEY;
-  const appsecret = process.env.KIS_APP_SECRET;
-  if (!appkey || !appsecret) return null;
-  if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
-  try {
-    const r = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
-      // 토큰은 자주 바뀌지 않음 — 우리 캐시로 관리, fetch 캐시는 끔
-      cache: "no-store",
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { access_token?: string; expires_in?: number };
-    if (!j.access_token) return null;
-    cachedToken = { token: j.access_token, exp: Date.now() + Number(j.expires_in ?? 86400) * 1000 };
-    return j.access_token;
-  } catch {
-    return null;
-  }
 }
 
 // changePercent null = 등락률 필드 파싱 실패 (실측 2026-07-15 아침 브리핑: 야간 마감 후 응답에

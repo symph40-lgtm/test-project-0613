@@ -1,31 +1,11 @@
 // NXT 애프터마켓(15:30~20:00) 현재가 — 일봉 스윙의 애프터장 재판정용 (KIS NX 분봉).
 // lib/predict/kisMinute.ts의 검증된 패턴을 분리 원칙에 따라 축소 복제 (직접 import 금지).
-// ⚠ tokenP는 분당 1회 제한 — 실패 시 null 반환하고 다음 5분 크론에서 재시도 (경합 허용 설계).
+// 토큰만 공유 캐시(lib/market/kisToken.ts) 사용 (2026-07-28) — 판정 로직과 무관한 공용
+// 인프라 층위라 분리 원칙 예외. tokenP 분당 1회 제한의 인스턴스 간 발급 경합 제거.
+
+import { getKisToken as getToken } from "../market/kisToken";
 
 const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
-let cachedToken: { token: string; exp: number } | null = null;
-
-async function getToken(): Promise<string | null> {
-  const appkey = process.env.KIS_APP_KEY;
-  const appsecret = process.env.KIS_APP_SECRET;
-  if (!appkey || !appsecret) return null;
-  if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
-  try {
-    const r = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
-      cache: "no-store",
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { access_token?: string; expires_in?: number };
-    if (!j.access_token) return null;
-    cachedToken = { token: j.access_token, exp: Date.now() + Number(j.expires_in ?? 86400) * 1000 };
-    return j.access_token;
-  } catch {
-    return null;
-  }
-}
 
 // 오늘 애프터마켓의 마지막 체결가 (완성봉 기준). 미거래·실패 시 null.
 export async function fetchAfterPrice(code: string, dateYmd: string, nowHHMMSS: string): Promise<{ px: number; time: string } | null> {

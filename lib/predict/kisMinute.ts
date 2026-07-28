@@ -3,32 +3,12 @@
 // 봉 시각(stck_cntg_hour)은 봉 시작 기준 — "0900xx" 봉은 09:01에 완성.
 // 당일 장중에는 당일분봉조회(FHKST03010200)로 폴백.
 
+import { getKisToken } from "../market/kisToken";
 import type { MinuteBar } from "./types";
 
 const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
-let cachedToken: { token: string; exp: number } | null = null;
-
-async function getToken(): Promise<string | null> {
-  const appkey = process.env.KIS_APP_KEY;
-  const appsecret = process.env.KIS_APP_SECRET;
-  if (!appkey || !appsecret) return null;
-  if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
-  try {
-    const r = await fetch(`${KIS_BASE}/oauth2/tokenP`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
-      cache: "no-store",
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { access_token?: string; expires_in?: number };
-    if (!j.access_token) return null;
-    cachedToken = { token: j.access_token, exp: Date.now() + Number(j.expires_in ?? 86400) * 1000 };
-    return j.access_token;
-  } catch {
-    return null;
-  }
-}
+// 토큰은 공유 캐시(lib/market/kisToken.ts)로 일원화 (2026-07-28) — 인스턴스별 중복 발급 경합 제거
+const getToken = getKisToken;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
