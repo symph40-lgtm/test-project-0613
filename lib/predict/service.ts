@@ -121,11 +121,10 @@ async function checkpointStream(
   }
   const acc = await loadAccuracyStats();
 
-  // 하닉 고변동일 트레일 반전 (사용자 승인 2026-07-25 — config.hxTrail 근거 참조): 고변동일에만
-  // 본피셔 반전에 극값 되돌림 경로 병행. 삼전은 잔여검증 갈림으로 미적용.
-  const hxTrailOpts = isHighVolDay(complete)
-    ? { trailRangeRatio: PREDICT_CONFIG.hxTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.hxTrail.confirmMinutes }
-    : {};
+  // 하닉 트레일 반전 — 전일(全日) 적용 (사용자 승인 2026-07-28 밤, scripts/pullback-sweep.ts 227일:
+  // 고변동일 한정 +88.2 → 전일 +98.9%p·전/후반 모두 개선·최악일 동일. 비용: 전환 132→290회 —
+  // 열화 시 isHighVolDay(complete) 게이트 복원). 삼전은 전일 확대 전 변형 열위로 고변동일 유지.
+  const hxTrailOpts = { trailRangeRatio: PREDICT_CONFIG.hxTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.hxTrail.confirmMinutes };
 
   const judgeAt = (cutHHMM: string): { verdict: Verdict; strength: number } | null => {
     const usePre = cutHHMM < cfg.preWindowBefore;

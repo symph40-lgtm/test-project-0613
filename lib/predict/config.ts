@@ -159,7 +159,7 @@ export const PREDICT_CONFIG = {
     reversalMinutes: 5, // C 철회
     earlyConfirmBy: "09:45",
     strongBreakRatio: 0, // 강돌파 즉시확인 — 기본 비활성 (조기창만 earlyStrongBreakRatio로 활성)
-    trailRangeRatio: 0, // 트레일 반전 — 기본 비활성 (하닉 고변동일 스트림만 hxTrail로 활성)
+    trailRangeRatio: 0, // 트레일 반전 — 기본 비활성 (하닉 전일·삼전 고변동일 스트림만 hxTrail/ssTrail로 활성)
     trailConfirmMinutes: 5,
   },
   // 하닉 고변동일 트레일 반전 (사용자 승인 2026-07-25 — 스트림 전용): 당일 vol10(10일 평균폭/전일
@@ -173,6 +173,11 @@ export const PREDICT_CONFIG = {
   // scripts/ss-trail-threshold-sweep + hx-trail-soften-verify (227일) — 전체 +64.8→+88.2%p,
   // 분기 3/4 개선(Q4 +39.0→+60.4 견인, Q3만 -1.0 소폭)·반전 진성률 38→43%·최악일 -6.0→-5.4.
   // ⚠비용: 왕복(≤15분 재전환) 15→36회·전환 문자 76→125회/227일. 열화 시 0.5×3 복귀.
+  // 전일(全日) 확대 (사용자 승인 2026-07-28 밤 — 되돌림 문제 제기 후속, scripts/pullback-sweep.ts
+  // 227일): 고변동일 한정 +88.2 → 전일 +98.9%p·전/후반 모두 개선·최악일 동일(-5.4). 되돌림일
+  // (편위≥0.8×r10·종가≈시가) 11일이 -10.6%p 훼손하던 것을 흡수. 삼전 전일 확대는 전 변형 열위로
+  // 기각(저변동 개입 유해 재확인). ⚠비용: 왕복 37→90회·전환 132→290회/227일 — 열화 시
+  // service.ts hxTrailOpts의 isHighVolDay 게이트 복원.
   hxTrail: { rangeRatio: 0.35, confirmMinutes: 5 },
   // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — 하닉과 동일 구조·문턱만 분리): 7/27 갭+3%
   // 후 오후 반등(+3.0%)이 하닉 문턱 0.5(≈4.5%)에 미달해 미포착 → 완화 스윕(227일·추적 분위 게이트·
