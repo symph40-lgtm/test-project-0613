@@ -124,7 +124,11 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
 
   // ── 정규장 분기 (기존 동작)
   if (bars08.length < 16) {
-    base.session = "데이터 없음 — 휴장이거나 프리장 시초 레인지(08:00~08:15) 형성 전";
+    // 문구 개정 (2026-07-28 실측): 09:06 개장 중 문의에 KIS 일시 조회 실패로 이 분기를 타며
+    // '휴장' 안내가 나감 — 장중이면 재시도 안내를 함께 표기.
+    base.session = hhmm >= "08:20" && hhmm <= "15:30"
+      ? "데이터 없음 — 일시 조회 실패 가능 (휴장이 아니면 잠시 후 다시 눌러 재시도)"
+      : "데이터 없음 — 휴장이거나 프리장 시초 레인지(08:00~08:15) 형성 전";
     base.summary = `[피셔 실시간·${nameKo} ${hhmm}] 판정 불가 — ${base.session}`;
     base.detail = [base.session];
     return base;

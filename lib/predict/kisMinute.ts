@@ -111,6 +111,19 @@ export async function fetchDayMinutes(code: string, dateYmd: string, upToHour = 
   return bars.length ? bars : null;
 }
 
+// NXT 저유동 프린트 필터 (2026-07-28 실측 사고): 하닉 프리장 08:00~08:04 체결 1·9·99주 봉이
+// 1,272,000·1,759,000원을 찍어 OR을 실거래 범위 대비 ±14% 오염 → A지점 도달 불가로 F/M이
+// 전일 무판정, -6.7% 인버스 장에 무대응. 당일 세션 중앙값 거래량의 1% 미만 봉은 연속 체결
+// 흐름이 아닌 산발 프린트로 보고 제외한다. 조용한 날은 중앙값 자체가 낮아져 전량 보존됨.
+// 회귀 검증: scripts/or-thin-filter-sweep.ts (커밋 메시지에 실측 수치).
+export function dropThinPrints(bars: MinuteBar[]): MinuteBar[] {
+  if (bars.length < 5) return bars;
+  const vols = bars.map((b) => b.volume).sort((a, b) => a - b);
+  const cut = vols[Math.floor(vols.length / 2)] * 0.01;
+  const out = bars.filter((b) => b.volume >= cut);
+  return out.length >= 5 ? out : bars;
+}
+
 // NXT(넥스트레이드) 프리마켓 1분봉 08:00~08:49 — 한 호출로 전부 (시장구분 NX).
 // 실측(2026-07-16): 과거 최소 9개월 제공. NXT 미거래일(휴장·비대상일)은 null.
 export async function fetchNxtPremarket(code: string, dateYmd: string): Promise<MinuteBar[] | null> {
@@ -140,7 +153,7 @@ export async function fetchNxtPremarket(code: string, dateYmd: string): Promise<
       if (bar) bars.push(bar);
     }
     bars.sort((a, b) => (a.time < b.time ? -1 : 1));
-    return bars.length ? bars : null;
+    return bars.length ? dropThinPrints(bars) : null;
   } catch {
     return null;
   }
@@ -189,7 +202,7 @@ export async function fetchNxtAfterMarket(code: string, dateYmd: string, upToHou
     const nowHHMM = `${String(kstNow2.getUTCHours()).padStart(2, "0")}:${String(kstNow2.getUTCMinutes()).padStart(2, "0")}`;
     bars = bars.filter((b) => b.time < nowHHMM);
   }
-  return bars.length ? bars : null;
+  return bars.length ? dropThinPrints(bars) : null;
 }
 
 // 당일 장중 폴백 (FHKST03010200 — 요청 시각에서 과거 30봉씩)
