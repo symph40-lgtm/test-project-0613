@@ -53,6 +53,22 @@ async function issue(appkey: string, appsecret: string): Promise<{ token: string
   }
 }
 
+// 인증 실패 시 캐시 무효화 (2026-07-29 실사고): 어젯밤 발급 토큰이 KIS 쪽에서 먼저 무효가 됐는데
+// 캐시 exp(19:24)까지 '유효'로 믿고 15:36~19:23 모든 KIS 조회가 침묵 — 애프터 판정 문자 6건이
+// 19:24에 일괄 지연 발송. 401/403 응답을 본 호출자가 이 함수를 부르면 다음 호출에서 재발급된다.
+export function invalidateKisToken(): void {
+  mem = null;
+  try {
+    const admin = createAdminClient();
+    void admin.from("ops_settings").delete().eq("key", DB_KEY).then(() => undefined);
+  } catch { /* DB 삭제 실패해도 메모리 무효화로 다음 발급 유도 */ }
+}
+
+// 응답 상태로 인증 실패 감지 — KIS는 토큰 무효 시 401/403 (fetch 헬퍼들이 호출)
+export function checkKisAuth(status: number): void {
+  if (status === 401 || status === 403) invalidateKisToken();
+}
+
 export async function getKisToken(): Promise<string | null> {
   const appkey = process.env.KIS_APP_KEY;
   const appsecret = process.env.KIS_APP_SECRET;

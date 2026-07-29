@@ -3,7 +3,7 @@
 // 토큰만 공유 캐시(lib/market/kisToken.ts) 사용 (2026-07-28) — 판정 로직과 무관한 공용
 // 인프라 층위라 분리 원칙 예외. tokenP 분당 1회 제한의 인스턴스 간 발급 경합 제거.
 
-import { getKisToken as getToken } from "../market/kisToken";
+import { checkKisAuth, getKisToken as getToken } from "../market/kisToken";
 
 const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
 
@@ -25,7 +25,7 @@ export async function fetchAfterPrice(code: string, dateYmd: string, nowHHMMSS: 
       headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
       cache: "no-store",
     });
-    if (!r.ok) return null;
+    if (!r.ok) { checkKisAuth(r.status); return null; }
     const j = (await r.json()) as { rt_cd?: string; output2?: { stck_bsop_date?: string; stck_cntg_hour?: string; stck_prpr?: string }[] };
     if (j.rt_cd !== "0" || !Array.isArray(j.output2)) return null;
     // 미래 시각 가드(2026-07-20 실측): 당일 요청 시 KIS가 직전 거래일 봉을 당일로 라벨할 수 있음

@@ -3,11 +3,12 @@
 // 봉 시각(stck_cntg_hour)은 봉 시작 기준 — "0900xx" 봉은 09:01에 완성.
 // 당일 장중에는 당일분봉조회(FHKST03010200)로 폴백.
 
-import { getKisToken } from "../market/kisToken";
+import { checkKisAuth, getKisToken } from "../market/kisToken";
 import type { MinuteBar } from "./types";
 
 const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
-// 토큰은 공유 캐시(lib/market/kisToken.ts)로 일원화 (2026-07-28) — 인스턴스별 중복 발급 경합 제거
+// 토큰은 공유 캐시(lib/market/kisToken.ts)로 일원화 (2026-07-28) — 인스턴스별 중복 발급 경합 제거.
+// 401/403이면 checkKisAuth가 캐시를 무효화해 다음 분 크론에서 재발급 (2026-07-29 실사고 교정).
 const getToken = getKisToken;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -66,7 +67,7 @@ export async function fetchDayMinutes(code: string, dateYmd: string, upToHour = 
         headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
         cache: "no-store",
       });
-      if (!r.ok) continue;
+      if (!r.ok) { checkKisAuth(r.status); continue; }
       const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
       if (j.rt_cd !== "0" || !Array.isArray(j.output2)) continue;
       for (const row of j.output2) {
@@ -123,7 +124,7 @@ export async function fetchNxtPremarket(code: string, dateYmd: string): Promise<
       headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
       cache: "no-store",
     });
-    if (!r.ok) return null;
+    if (!r.ok) { checkKisAuth(r.status); return null; }
     const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
     if (j.rt_cd !== "0" || !Array.isArray(j.output2)) return null;
     const bars: MinuteBar[] = [];
@@ -162,7 +163,7 @@ export async function fetchNxtAfterMarket(code: string, dateYmd: string, upToHou
         headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010230", custtype: "P" },
         cache: "no-store",
       });
-      if (!r.ok) continue;
+      if (!r.ok) { checkKisAuth(r.status); continue; }
       const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
       if (j.rt_cd !== "0" || !Array.isArray(j.output2)) continue;
       for (const row of j.output2) {
@@ -210,7 +211,7 @@ export async function fetchTodayMinutes(code: string, upToHour: string): Promise
         headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKST03010200", custtype: "P" },
         cache: "no-store",
       });
-      if (!r.ok) continue;
+      if (!r.ok) { checkKisAuth(r.status); continue; }
       const j = (await r.json()) as { rt_cd?: string; output2?: KisMinuteRow[] };
       if (j.rt_cd !== "0" || !Array.isArray(j.output2)) continue;
       for (const row of j.output2) {

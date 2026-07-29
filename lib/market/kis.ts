@@ -11,7 +11,7 @@
 // 토큰은 24h 유효하며 발급 호출에 분당 제한이 있어 메모리 캐시한다.
 
 // 토큰은 공유 캐시(lib/market/kisToken.ts)로 일원화 (2026-07-28) — 인스턴스별 중복 발급 경합 제거
-import { getKisToken as getToken } from "./kisToken";
+import { checkKisAuth, getKisToken as getToken } from "./kisToken";
 
 const KIS_BASE = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
 
@@ -69,7 +69,7 @@ export async function fetchKisNightFutures(): Promise<KisFutures> {
       },
       next: { revalidate: 30 },
     });
-    if (!r.ok) return null;
+    if (!r.ok) { checkKisAuth(r.status); return null; }
     // 실측(2026-07-05): FHMIF10000000 응답은 output이 아니라 output1(선물)/output2·3(업종지수) 구조
     const j = (await r.json()) as { output1?: Record<string, unknown>; output?: Record<string, unknown> };
     const o = j.output1 ?? j.output ?? {};
@@ -116,7 +116,7 @@ export async function fetchKisInvestorFlow(market: "kospi" | "k200fut"): Promise
       headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPTJ04030000", custtype: "P" },
       cache: "no-store",
     });
-    if (!r.ok) return null;
+    if (!r.ok) { checkKisAuth(r.status); return null; }
     const j = (await r.json()) as { rt_cd?: string; output?: Record<string, unknown>[] };
     const o = j.output?.[0];
     if (j.rt_cd !== "0" || !o) return null;
@@ -166,7 +166,7 @@ export async function fetchKisStockEstimates(codes: string[]): Promise<Map<strin
         headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPTJ04400000", custtype: "P" },
         cache: "no-store",
       });
-      if (!r.ok) continue;
+      if (!r.ok) { checkKisAuth(r.status); continue; }
       const j = (await r.json()) as { rt_cd?: string; output?: Record<string, unknown>[] };
       if (j.rt_cd !== "0" || !Array.isArray(j.output)) continue;
       for (const row of j.output) {
@@ -209,7 +209,7 @@ export async function fetchKisProgramNet(): Promise<number | null> {
       headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHPPG04600101", custtype: "P" },
       cache: "no-store",
     });
-    if (!r.ok) return null;
+    if (!r.ok) { checkKisAuth(r.status); return null; }
     const j = (await r.json()) as { rt_cd?: string; output?: { bsop_hour?: string; whol_smtn_ntby_tr_pbmn?: string }[] };
     const rows = j.output;
     if (j.rt_cd !== "0" || !Array.isArray(rows) || rows.length === 0) return null;

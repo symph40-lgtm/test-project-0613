@@ -53,6 +53,16 @@ function labelAfter(bars: MinuteBar[]): { label: Verdict; rOC: number } {
   return { label, rOC: Number(rOC.toFixed(2)) };
 }
 
+// 지연 통지 가드 (2026-07-29 실사고: KIS 토큰 무효로 16시대 확인들이 19:24 일괄 발송 —
+// "1단계 선진입 검토"가 3시간 뒤, 하필 되돌림 시작점에 도착). 확인 후 30분+ 경과면 진입 지침 대체.
+function ahStaleGuard(reason: string): string | null {
+  const confT = reason.match(/^(\d{2}:\d{2})/)?.[1];
+  if (!confT) return null;
+  const kst = new Date(Date.now() + 9 * 3600e3);
+  const lag = kst.getUTCHours() * 60 + kst.getUTCMinutes() - hhmmToMin(confT);
+  return lag >= 30 ? `⚠지연 통지(확인 ${confT}, ${lag}분 경과) — 추격 진입 금지, 현재가 기준 판단.` : null;
+}
+
 // 애프터장 스트림 + 채점 — runPredictService에서 호출 (실패해도 정규장 흐름은 무관)
 export async function runAfterService(): Promise<{ judged: boolean; scored: string[] }> {
   const code = PREDICT_CONFIG.symbol;
@@ -111,9 +121,10 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
         const pM: Verdict = prevSt && prevSt.date === today ? prevSt.M ?? "none" : "none";
         if (fT.verdict !== pF && !(pF === "none" && fT.verdict === "none")) {
           const lb = pF === "none" ? `${V_KO[fT.verdict]} 확인` : fT.verdict === "none" ? `${V_KO[pF]} 소멸` : `${V_KO[pF]}→${V_KO[fT.verdict]} 전환`;
-          const g = fT.verdict === "none" ? "▶선진입분 청산 검토."
+          const g = (fT.verdict !== "none" ? ahStaleGuard(fT.reason) : null)
+            ?? (fT.verdict === "none" ? "▶선진입분 청산 검토."
             : pF !== "none" ? "▶전환 — 선진입분 청산 후 반대 방향 소액부터."
-            : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 24분 선행·M 동반 잔여+ 56% vs 미동반 3% — M 확인 전 소액 유지).";
+            : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 24분 선행·M 동반 잔여+ 56% vs 미동반 3% — M 확인 전 소액 유지).");
           try {
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ahF_${pF}_${fT.verdict}`, severity: "medium",
@@ -125,8 +136,9 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
         if (mT.verdict !== pM && !(pM === "none" && mT.verdict === "none")) {
           const lb = pM === "none" ? `${V_KO[mT.verdict]} 재확인` : mT.verdict === "none" ? `${V_KO[pM]} 소멸` : `${V_KO[pM]}→${V_KO[mT.verdict]} 전환`;
           const warn = mT.verdict !== "none" && fT.verdict !== "none" && mT.verdict !== fT.verdict ? " ⚠피셔F와 반대 — F 선진입분 축소." : "";
-          const g = mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
-            : `▶2단계 확대 검토 — M 동반 실측 잔여+ 56%·누적 +30.4%p(224일) vs 미동반 손실.${warn}`;
+          const g = (mT.verdict !== "none" ? ahStaleGuard(mT.reason) : null)
+            ?? (mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
+            : `▶2단계 확대 검토 — M 동반 실측 잔여+ 56%·누적 +30.4%p(224일) vs 미동반 손실.${warn}`);
           try {
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ahM_${pM}_${mT.verdict}`, severity: "medium",
@@ -230,9 +242,10 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     const pM: Verdict = pv && pv.date === today ? pv.M : "none";
     if (fT.verdict !== pF && !(pF === "none" && fT.verdict === "none")) {
       const lb = pF === "none" ? `${V_KO[fT.verdict]} 확인` : fT.verdict === "none" ? `${V_KO[pF]} 소멸` : `${V_KO[pF]}→${V_KO[fT.verdict]} 전환`;
-      const g = fT.verdict === "none" ? "▶선진입분 청산 검토."
+      const g = (fT.verdict !== "none" ? ahStaleGuard(fT.reason) : null)
+        ?? (fT.verdict === "none" ? "▶선진입분 청산 검토."
         : pF !== "none" ? "▶전환 — 선진입분 청산 후 반대 방향 소액부터."
-        : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 19분 선행·M 동반 잔여+ 63% vs 미동반 0% — M 확인 전 소액 유지).";
+        : "▶1단계 소액 선진입 검토 · 피셔M 확인 대기 (실측: 본확인 19분 선행·M 동반 잔여+ 63% vs 미동반 0% — M 확인 전 소액 유지).");
       try {
         await dispatchToChannels("signal", today, {
           key: `predict_ah_hxF_${pF}_${fT.verdict}`, severity: "medium",
@@ -244,8 +257,9 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     if (mT.verdict !== pM && !(pM === "none" && mT.verdict === "none")) {
       const lb = pM === "none" ? `${V_KO[mT.verdict]} 재확인` : mT.verdict === "none" ? `${V_KO[pM]} 소멸` : `${V_KO[pM]}→${V_KO[mT.verdict]} 전환`;
       const warn = mT.verdict !== "none" && fT.verdict !== "none" && mT.verdict !== fT.verdict ? " ⚠피셔F와 반대 — F 선진입분 축소." : "";
-      const g = mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
-        : `▶2단계 확대 검토 — M 동반 실측 잔여+ 63%·누적 +38.0%p(189일) vs 미동반 손실.${warn}`;
+      const g = (mT.verdict !== "none" ? ahStaleGuard(mT.reason) : null)
+        ?? (mT.verdict === "none" ? "▶2단계분 비중 축소 검토."
+        : `▶2단계 확대 검토 — M 동반 실측 잔여+ 63%·누적 +38.0%p(189일) vs 미동반 손실.${warn}`);
       try {
         await dispatchToChannels("signal", today, {
           key: `predict_ah_hxM_${pM}_${mT.verdict}`, severity: "medium",
