@@ -585,19 +585,20 @@ async function checkpointStream(
           const stale9 = confT9 !== null && lag9 >= 30;
           const postFinal9 = minuteOfDay > hhmmToMin("14:00");
           const mSame9 = rc.mState === f9.verdict;
+          // 문구 쉬운 말로 (사용자 지시 2026-07-29 밤: "좀 쉽게 문자로 보낼 때 적어줘")
           const guide9 = stale9
-            ? `⚠지연 통지(확인 ${confT9}, ${lag9}분 경과) — 추격 대응 금지, 현재가와 다음 문자 기준 판단.`
+            ? `⚠늦게 도착한 알림(확인 ${confT9}, ${lag9}분 지남) — 지금 따라 들어가지 말고 다음 문자 기준으로 판단.`
             : postFinal9
               ? mSame9
-                ? `▶청산·전환 검토 — 피셔M 동방향 재확인 동반 (확정 후 실측 4/4 이득 +3.1%p·소표본).`
-                : `▶관망 — 확정 후 F 단독 반대는 실측 손실(M 미재확인 5건 -4.6%p). 피셔M 재확인 문자 대기.`
-              : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (실측: 반전일 25/25 선행·리드 2~11분).`;
+                ? `▶청산·전환 검토 — 피셔M도 같은 방향 재확인 (과거 4번 모두 이득·표본 적음).`
+                : `▶일단 관망 — F 혼자만 반대인 경우는 과거에 손해였음. 피셔M 재확인 문자를 기다리세요.`
+              : `▶보유 줄이기·청산 검토. 과거 반전한 날은 이 경보가 100% 먼저 왔음(2~11분 전). 단 경보가 떠도 반전 안 하는 날도 있으니, 반대로 갈아타는 건 본피셔 전환 확정 문자까지 기다리세요.`;
           // 상태줄 F·M(08시창)과 경보의 09시창 F 혼동 방지 각주 (사용자 지적·승인 2026-07-29 —
           // 7/29 10:28 실사례: 상태줄 "F레버·M레버"와 본문 "피셔F 인버스 확인"이 모순처럼 읽힘)
           await dispatchToChannels("signal", today, {
             key: `predict_rev9_${rc.sym}_${rc.bState}_${f9.verdict}`,
             severity: "high",
-            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지\n※아래 상태줄의 F·M은 08시창(아침 창) 기준 — 이 경보의 피셔F는 09시 정규장창이라 서로 다를 수 있음${bothLines}`,
+            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중인데, 9시 이후 흐름만 보면 ${V_KO[f9.verdict]} 신호가 떴습니다${confT9 ? `(${confT9} 확인)` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지\n※아래 상태줄 F·M은 아침(08시)창 기준이라 이 경보와 다르게 보일 수 있음${bothLines}`,
             smsSubject: "예측 반전경보",
           });
         }
