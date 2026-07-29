@@ -717,7 +717,13 @@ export async function runPredictService(): Promise<PredictRunResult> {
 
   // ③a 체크포인트 스트림 (08:31~) — 08:30 첫 판정, 30분마다, 14:00 확정. 사이는 모니터링
   const todayBar = daily.find((b) => b.date === today);
-  if (todayBar && minuteOfDay >= STREAM_MIN) {
+  // 프리장 게이트 교정 (사용자 실측 2026-07-29: 08:45 하닉 M 확인 → 09:00 발송 15분 지연):
+  // 네이버 일봉의 '오늘 봉'은 09:00 개장 후에야 생겨 todayBar 게이트가 프리장 확인(08시창 F·M)을
+  // 전부 09:00까지 눌러왔다. 평일 09:05 전엔 todayBar 없이 진입 — checkpointStream 내부 가드
+  // (분봉 커버리지 80%·hxCont≥20봉·판정 최소 봉수)가 휴장일 무데이터를 걸러 오발송 없음.
+  const dowToday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const preSessionOk = dowToday >= 1 && dowToday <= 5 && minuteOfDay < 9 * 60 + 5;
+  if ((todayBar || preSessionOk) && minuteOfDay >= STREAM_MIN) {
     result.earlyToday = await checkpointStream(today, complete, minuteOfDay);
   }
 
