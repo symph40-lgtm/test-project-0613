@@ -60,7 +60,26 @@ export async function GET(req: NextRequest) {
       console.error("[cron/morning-brief] 레짐 브리핑 실패 (본 브리핑은 발송됨):", e);
     }
 
-    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: (brief.sms2 ? 2 : 1) + (regimeSent ? 1 : 0) });
+    // ④전일 이슈 브리핑 (사용자 지시 2026-07-29): 전날 실적·이벤트 영향 + 정책·지정학 변화 중
+    // 비중 큰 것만 AI 선별 — 이슈 없으면 생략 (소음 방지)
+    let issueSent = false;
+    try {
+      const { buildIssueBriefSms } = await import("@/lib/market/issueBrief");
+      const issueSms = await buildIssueBriefSms();
+      if (issueSms) {
+        sent += await dispatchToChannels(
+          "intraday_summary",
+          date,
+          { key: "morning_issues", severity: "medium", text: issueSms, smsSubject: "아침브리핑 이슈" },
+          `전일 이슈 브리핑 (${date})`,
+        );
+        issueSent = true;
+      }
+    } catch (e) {
+      console.error("[cron/morning-brief] 전일 이슈 브리핑 실패 (본 브리핑은 발송됨):", e);
+    }
+
+    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: (brief.sms2 ? 2 : 1) + (regimeSent ? 1 : 0) + (issueSent ? 1 : 0) });
   } catch (e) {
     console.error("[cron/morning-brief] error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
