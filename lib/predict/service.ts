@@ -838,11 +838,12 @@ export async function runPredictService(): Promise<PredictRunResult> {
             slot.set(r.checkpoint, s);
           }
         }
+        // 맞춘 횟수 병기 (사용자 지시 2026-07-29: "슬롯 가로에 맞춘 횟수도 적어줘" — 모델 줄과 동일한 c/t 형식)
         const sf = (cp: string) => {
           const s = slot.get(cp);
-          return s && s.t > 0 ? `${cp} ${Math.round((s.c / s.t) * 100)}%(${s.t})` : `${cp} —`;
+          return s && s.t > 0 ? `${cp} ${Math.round((s.c / s.t) * 100)}%(${s.c}/${s.t})` : `${cp} —`;
         };
-        lines.push(`슬롯: ${["09:30", "10:30", "14:00"].map(sf).join("·")}`);
+        lines.push(`슬롯(판정정확도): ${["09:30", "10:30", "14:00"].map(sf).join("·")}`);
         const [after, sector] = await Promise.all([loadAfterPerf(), loadSectorPerf()]);
         const extra: string[] = [];
         if (after && after.t > 0) extra.push(`애프터 ${Math.round((after.c / after.t) * 100)}%(${after.t})`);
