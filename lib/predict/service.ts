@@ -592,10 +592,12 @@ async function checkpointStream(
                 ? `▶청산·전환 검토 — 피셔M 동방향 재확인 동반 (확정 후 실측 4/4 이득 +3.1%p·소표본).`
                 : `▶관망 — 확정 후 F 단독 반대는 실측 손실(M 미재확인 5건 -4.6%p). 피셔M 재확인 문자 대기.`
               : `▶보유 축소·청산 검토 — 본피셔 전환 확정 시 반대 진입 (실측: 반전일 25/25 선행·리드 2~11분).`;
+          // 상태줄 F·M(08시창)과 경보의 09시창 F 혼동 방지 각주 (사용자 지적·승인 2026-07-29 —
+          // 7/29 10:28 실사례: 상태줄 "F레버·M레버"와 본문 "피셔F 인버스 확인"이 모순처럼 읽힘)
           await dispatchToChannels("signal", today, {
             key: `predict_rev9_${rc.sym}_${rc.bState}_${f9.verdict}`,
             severity: "high",
-            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지${bothLines}`,
+            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중 — 09시창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${confT9})` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지\n※아래 상태줄의 F·M은 08시창(아침 창) 기준 — 이 경보의 피셔F는 09시 정규장창이라 서로 다를 수 있음${bothLines}`,
             smsSubject: "예측 반전경보",
           });
         }
