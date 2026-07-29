@@ -420,7 +420,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     } catch { return ""; }
   };
 
-  // 시초 레인지 폭 (09:30~09:45 ET) — 유사장 적중·광폭 경고 (한국 orBuckets 규칙의 SMH판)
+  // 시초 레인지 폭 (09:30~09:45 ET) — 비슷한 장세 과거적중·광폭 경고 (한국 orBuckets 규칙의 SMH판)
   const OB = UP.orBuckets;
   const orBars = reg.slice(0, 3);
   const orWidthPct = orBars.length >= 3 && reg[0]?.open
@@ -454,7 +454,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       const px = regW.length ? regW[regW.length - 1].close : contW.length ? contW[contW.length - 1].close : null;
       const stateLine = `\nSOXX: F${lab(curF)}·M${lab(curM)}·본${lab(curB)}${px !== null ? ` ${px.toFixed(2)}$` : ""}`;
       const nowHHMM = minToHHMM(minuteOfDay);
-      const statCore = `이시각 실측적중 ${slotHitPct(nowHHMM) ?? "?"}%${minuteOfDay >= ET_OPEN && similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
+      const statCore = `이 시각대 과거적중 ${slotHitPct(nowHHMM) ?? "?"}%${minuteOfDay >= ET_OPEN && similarHit !== null ? `·비슷한 장세 과거적중 ${similarHit}%` : ""}`;
       const postFinal = minuteOfDay > hhmmToMin(UP.finalCp);
       const orWarn = wideOr ? `\n⚠오늘 시초레인지 ${orWidthPct!.toFixed(1)}% 광폭(90분위 초과) — 유사일 표본 부족, 비중 축소 권장.` : "";
 
@@ -584,9 +584,9 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     if (!STREAM_SMS || !UP.sms.enabled) return;
     const judgeKo = v.judge === "fisherF" ? "피셔F" : v.judge === "user" ? "사용자모델" : "피셔";
     const hitPct = v.verdict !== "none" ? slotHitPct(whenLabel) : null;
-    // 유사장 적중은 정규장 컷에만 — 표본 있는 버킷만 표기 (한국과 동일 위치)
-    const similar = v.verdict !== "none" && whenLabel >= "09:30" && similarHit !== null ? `·유사장 적중 ${similarHit}%` : "";
-    const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
+    // 비슷한 장세 과거적중은 정규장 컷에만 — 표본 있는 버킷만 표기 (한국과 동일 위치)
+    const similar = v.verdict !== "none" && whenLabel >= "09:30" && similarHit !== null ? `·비슷한 장세 과거적중 ${similarHit}%` : "";
+    const tail = `(강도 ${v.strength}%${hitPct !== null ? `·이 시각대 과거적중 ${hitPct}%` : ""}${similar})`;
     // 소진 확인 가드 (2026-07-25 — 한국 이식 + SOXX 자체 실측: 기진행 ≥2.5% 확인 16일
     // 잔여 평균 -0.68%·적중 31% vs 그 미만 -0.25%·50%): 방향 확인이 당일 극값 대비 이미 크게
     // 진행된 지점이면 진입 지침 대신 추격 금지 경고.
@@ -602,7 +602,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
     }
     let text: string;
     if (kind === "hold") {
-      text = `[미국예측·${judgeKo}] ${whenLabel} ET 판정 유지 확인: ${V_KO[v.verdict]} (${sinceCp}부터 유지 · 강도 ${v.strength}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""})`;
+      text = `[미국예측·${judgeKo}] ${whenLabel} ET 판정 유지 확인: ${V_KO[v.verdict]} (${sinceCp}부터 유지 · 강도 ${v.strength}%${hitPct !== null ? `·이 시각대 과거적중 ${hitPct}%` : ""})`;
     } else if (exhaustPct !== null) {
       text = (prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`

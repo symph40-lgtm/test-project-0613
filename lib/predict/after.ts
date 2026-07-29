@@ -158,7 +158,7 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
             .not("label", "is", null).neq("verdict", "none").limit(2000);
           const t = (tr ?? []).length;
           const c = (tr ?? []).filter((r) => r.verdict === r.label).length;
-          if (t > 0) ssAcc = `·애프터 실측적중 ${Math.round((100 * c) / t)}%(${t}·시딩 포함)`;
+          if (t > 0) ssAcc = `·과거 애프터판정 ${t}번 중 ${Math.round((100 * c) / t)}% 적중(백테스트 포함 — 이번 신호의 확률 아님)`;
         } catch { /* 통계 실패는 발송을 막지 않는다 */ }
         const ssGuide = `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 시딩 224일 검증·라이브 축적 중 — 소액만.`;
         const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
@@ -178,14 +178,16 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
         // 상방 확정일 갭+ 67%·평균 +1.7% vs 기준선 57%·+0.5 / 하방 38%·-0.8. 갭 이후 장중은 예측력
         // 없음. 확정 컷 신규 진입도 실익 없음(하닉 189일 +0.07%/건 관례 준용) — 진입 지침 대신 내일 대비.
         if (isFinalW && cur !== "none") {
+          // 문구 평문화 (사용자 지시 2026-07-29 밤: "모든 문자 오해 소지 없게 쉽게" — 확정=기록용 명시,
+          // 내일갭=과거 통계임을 명시)
           const ssGapLine = cur === "leverage"
-            ? `\n▶내일갭: 상방 확정일 갭+ 67%·평균 +1.7%(224일 실측) — 인버스 보유 시 내일 시초 정리 검토. 갭 이후 장중 방향은 예측력 없음.`
-            : `\n▶내일갭: 하방 확정일 갭+ 38%·평균 -0.8%(224일 실측) — 레버리지 보유 시 내일 시초 갭 유의.`;
+            ? `\n▶내일 시가 참고(과거 224일 통계): 애프터가 상방으로 끝난 날은 다음날 67%가 갭상승(평균 +1.7%) — 인버스 보유 중이면 내일 시초 정리 검토. 장중 방향 예측은 아님.`
+            : `\n▶내일 시가 참고(과거 224일 통계): 애프터가 하방으로 끝난 날은 다음날 갭상승 38%(평균 -0.8%) — 레버리지 보유 중이면 내일 시초 갭 유의.`;
           try {
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ah_final_${cur}`,
               severity: "medium",
-              text: `[예측·삼전 애프터] 확정(${AH.finalCp}): ${V_KO[cur]} (강도 ${strength}%${ssAcc}) — 채점·내일 대비 기준(확정 컷 신규 진입 실익 없음).${ssGapLine}`,
+              text: `[예측·삼전 애프터] 오늘 애프터 최종(${AH.finalCp} 확정): ${V_KO[cur]} (강도 ${strength}%${ssAcc})\n▶이 문자는 기록·내일 아침 대비용 — 지금 진입하라는 뜻 아님(과거 이 시각 진입 수익 사실상 0).${ssGapLine}`,
               smsSubject: "예측 애프터",
             });
           } catch { /* 발송 실패 무시 */ }
@@ -280,16 +282,17 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
   let afterAccTail = "";
   try {
     const p = await loadAfterPerf();
-    if (p && p.t > 0) afterAccTail = `·애프터 실측적중 ${Math.round((100 * p.c) / p.t)}%(${p.t})`;
+    if (p && p.t > 0) afterAccTail = `·과거 애프터판정 ${p.t}번 중 ${Math.round((100 * p.c) / p.t)}% 적중(이번 신호의 확률 아님)`;
   } catch { /* 통계 실패는 발송을 막지 않는다 */ }
 
   // 내일갭 동봉 (사용자 승인 2026-07-26 — scripts/after-gap-sweep.ts, 하닉 189일): 애프터 확정
   // 방향이 다음날 시가 갭을 예측 (상방 확정일 갭+ 66%·평균 +2.2% vs 기준선 50%·+0.5, 하방 43%·-0.8).
   // 갭 이후 장중(시초30분·시→종)은 예측력 없음 — 갭 대비 지침만. 확정(19:30) 신규 진입은 실익
   // 없음(스펙 7장 실측 +0.07%/건) — 확정 문자는 진입 지침 대신 채점·내일 대비 기준으로 표기.
+  // 문구 평문화 (사용자 지시 2026-07-29 밤) — '내일갭'이 과거 통계임을 명시, 매수 지시로 오독 방지
   const hxGapLine = (v: Verdict): string => v === "leverage"
-    ? `\n▶내일갭: 상방 확정일 갭+ 66%·평균 +2.2%(189일 실측) — 인버스 ETF 보유 시 내일 시초 정리 검토. 갭 이후 장중 방향은 예측력 없음.`
-    : `\n▶내일갭: 하방 확정일 갭+ 43%·평균 -0.8%(189일 실측) — 레버리지 ETF 보유 시 내일 시초 갭 유의.`;
+    ? `\n▶내일 시가 참고(과거 189일 통계): 애프터가 상방으로 끝난 날은 다음날 66%가 갭상승(평균 +2.2%) — 인버스 ETF 보유 중이면 내일 시초 정리 검토. 장중 방향 예측은 아님.`
+    : `\n▶내일 시가 참고(과거 189일 통계): 애프터가 하방으로 끝난 날은 다음날 갭상승 43%(평균 -0.8%) — 레버리지 ETF 보유 중이면 내일 시초 갭 유의.`;
   const sms = async (whenLabel: string, prev: Verdict | null, v: { verdict: Verdict; strength: number }, isFinal: boolean) => {
     if (!PREDICT_CONFIG.sms.enabled) return;
     const head = isFinal ? `확정(${AH.finalCp})` : whenLabel;
@@ -298,7 +301,7 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
       : `[예측·하닉 애프터] ${head} 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`;
     if (v.verdict !== "none") {
       text += isFinal
-        ? `\n▶확정은 채점·내일 대비 기준 — 19:30 신규 진입 실익 없음(실측 +0.07%/건).${hxGapLine(v.verdict)}`
+        ? `\n▶이 문자는 기록·내일 아침 대비용 — 지금 진입하라는 뜻 아님(과거 19:30 진입 평균 +0.07% ≈ 0).${hxGapLine(v.verdict)}`
         : `\n▶애프터장: 본주 전용(ETF 미운영) · 스탑 본주 -1.5% · 20:00 세션 종료 전 청산. 미검증 신호 — 소액만.`;
     }
     try {

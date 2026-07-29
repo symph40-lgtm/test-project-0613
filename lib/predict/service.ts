@@ -296,8 +296,8 @@ async function checkpointStream(
     const judgeKo = judge === "user" ? "사용자모델" : "피셔"; // 어떤 모델의 판정인지 명시 (사용자 요청 2026-07-20)
     const hitPct = next.verdict !== "none" ? slotHitPct(whenLabel) : null;
     const similar = next.verdict !== "none" && similarHit !== null && whenLabel >= cfg.earlyModelBefore
-      ? `·유사장 적중 ${similarHit}%` : "";
-    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·이시각 실측적중 ${hitPct}%` : ""}${similar})`;
+      ? `·비슷한 장세 과거적중 ${similarHit}%` : "";
+    const tail = `(강도 ${Math.round(next.strength)}%${hitPct !== null ? `·이 시각대 과거적중 ${hitPct}%` : ""}${similar})`;
     let text = prev === null
       ? `[예측·${judgeKo}] ${whenLabel} 첫 판정: ${V_KO[next.verdict]} ${tail}`
       : `[예측·${judgeKo}] ${whenLabel} 판정 변경: ${V_KO[prev]}→${V_KO[next.verdict]} ${tail}`;
@@ -356,7 +356,7 @@ async function checkpointStream(
       await dispatchToChannels("signal", today, {
         key: `predict_hold_${sinceCp.replace(":", "")}_${verdict}`,
         severity: "low",
-        text: `[예측·${judgeKo}] ${cp} 판정 유지 확인: ${V_KO[verdict]} (${sinceCp}부터 유지 · 강도 ${Math.round(strength)}%·이시각 실측적중 ${hitPct ?? "?"}%)`,
+        text: `[예측·${judgeKo}] ${cp} 판정 유지 확인: ${V_KO[verdict]} (${sinceCp}부터 유지 · 강도 ${Math.round(strength)}%·이 시각대 과거적중 ${hitPct ?? "?"}%)`,
         smsSubject: "예측 판정",
       });
     } catch { /* 발송 실패 무시 */ }
@@ -411,7 +411,7 @@ async function checkpointStream(
       const nowHHMM2 = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)
       // + 측정 시각 (사용자 지시 2026-07-27: 소멸 등 확인시각 없는 문자도 시각을 다 붙일 것)
-      const statCore = `측정 ${nowHHMM2}·이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
+      const statCore = `측정 ${nowHHMM2}·이 시각대 과거적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·비슷한 장세 과거적중 ${similarHit}%` : ""}`;
       // 이벤트일 경고 라인 (사용자 승인 2026-07-29 밤 — 7/29 실사고 후속: 이벤트일 아침 반등이
       // 낮에 붕괴하는 왕복. 신호 억제는 counter-f-sweep 기각 — 정보 한 줄만, 판정·비중 불변).
       // 캘린더는 predict-daily 소유지만 판정 로직이 아닌 일정 데이터라 공용 참조 (kisToken 전례).
