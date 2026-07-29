@@ -92,7 +92,7 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
       earlyVolMult: PREDICT_CONFIG.earlyVol.mult,
       earlyVolUntil: PREDICT_CONFIG.earlyVol.until,
     });
-    M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+    M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
     if (krx && krx.length >= 20) {
       B = runFisher(
         { date: today, dailyHistory: hist, openPx: krx[0].open, morning: krx, prevDayMinutes: null },

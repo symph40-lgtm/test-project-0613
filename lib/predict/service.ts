@@ -270,7 +270,7 @@ async function checkpointStream(
         // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol, F 전용·M 적용은 실측 기각)
         const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
-        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
         // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — config.ssTrail 근거 참조, 문턱 0.3 분리)
         const ssTrailOpts = isHighVolDay(ssHist)
           ? { trailRangeRatio: PREDICT_CONFIG.ssTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.ssTrail.confirmMinutes }
@@ -441,7 +441,8 @@ async function checkpointStream(
         // 모니터 F에만 빠져 있었음 — 스펙(F 0.05·4봉+강돌파)대로 통일. 하닉 0.1.
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol 근거 참조, F 전용)
         hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
-        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
+        // 장초반 크기 ×1.25 (사용자 승인 2026-07-30 — config.earlyVol.mMult 근거 참조)
+        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
       }
       if (hxReg.length >= 20) {
         hxBo = runFisher(
