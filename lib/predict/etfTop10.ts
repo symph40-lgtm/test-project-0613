@@ -127,11 +127,22 @@ export async function runEtfTop10Monitor(): Promise<void> {
     const allNone = [F.verdict, M.verdict, B.verdict].every((v) => v === "none");
     const prevAllNone = !sameDay || (["F", "M", "B"] as const).every((k) => prev![k] === "none");
     if (allNone && prevAllNone && minuteOfDay >= hhmmToMin("10:00")) {
+      // 경계 이탈 정보 라벨 (2026-07-29 승인 — intraday-regime-sweep: 이탈 적은 날 남은 장 기대 낮음)
+      const orH = Math.max(...reg.slice(0, 15).map((b) => b.high));
+      const orL = Math.min(...reg.slice(0, 15).map((b) => b.low));
+      let cross = 0;
+      let zone: -1 | 0 | 1 = 0;
+      for (const b of reg.slice(15)) {
+        const z: -1 | 0 | 1 = b.close > orH ? 1 : b.close < orL ? -1 : 0;
+        if (z !== zone && z !== 0) cross++;
+        zone = z;
+      }
+      const crossLabel = ` 경계이탈 ${cross}회${cross <= 1 ? " — 이탈 적은 날은 남은 장 기대 낮음(실측)." : "."}`;
       try {
         await dispatchToChannels("signal", today, {
           key: "predict_etf_flat_reg",
           severity: "low",
-          text: `[예측·TOP10] 정규장 방향 없음 (측정 ${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}) — F/M/본 모두 미확인. 방향 확인 시 즉시 문자. (모니터링 스트림 — 프리장은 NXT 미거래로 판정 없음)${stateLine}`,
+          text: `[예측·TOP10] 정규장 방향 없음 (측정 ${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}) — F/M/본 모두 미확인. 방향 확인 시 즉시 문자.${crossLabel} (모니터링 스트림 — 프리장은 NXT 미거래로 판정 없음)${stateLine}`,
           smsSubject: "예측 TOP10",
         });
       } catch { /* 발송 실패 무시 */ }

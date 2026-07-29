@@ -28,6 +28,22 @@ const JUDGE_MIN = 14 * 60 + 1; // 14:01 확정 — 모델별 스냅샷(대조군
 const SCORE_MIN = 15 * 60 + 35; // 15:35부터 당일 채점
 
 const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
+
+// 시초레인지(첫 15봉) 경계 이탈 횟수 — 무추세 확인 문자의 정보 라벨용 (2026-07-29 승인,
+// scripts/intraday-regime-sweep.ts: 3종목 단조 일관 유일 지표 — 이탈 적은 날 남은 장 기대 낮음).
+function countOrCross(reg: { close: number; high: number; low: number }[]): number | null {
+  if (reg.length < 20) return null;
+  const orH = Math.max(...reg.slice(0, 15).map((b) => b.high));
+  const orL = Math.min(...reg.slice(0, 15).map((b) => b.low));
+  let cross = 0;
+  let zone: -1 | 0 | 1 = 0;
+  for (const b of reg.slice(15)) {
+    const z: -1 | 0 | 1 = b.close > orH ? 1 : b.close < orL ? -1 : 0;
+    if (z !== zone && z !== 0) cross++;
+    zone = z;
+  }
+  return cross;
+}
 const V_KO: Record<Verdict, string> = { leverage: "레버리지", inverse: "인버스", none: "추세없음" };
 
 // 체크포인트 스트림 문자 폐기 (2026-07-23 사용자 확정: 사용자모델·체크포인트 문자 중단) —
@@ -634,13 +650,26 @@ async function checkpointStream(
         const preWindow = minuteOfDay >= hhmmToMin("08:30") && minuteOfDay < hhmmToMin("09:05") && hxCont.length >= 20;
         const regWindow = minuteOfDay >= hhmmToMin("10:00") && hxReg.length >= 20;
         if (preWindow || regWindow) {
+          // 경계 이탈 정보 라벨 (사용자 승인 2026-07-29 — 장중 레짐 실측 후속, 판정 불변):
+          // 시초레인지 경계 이탈 횟수가 3종목 단조 일관한 유일 지표 — 이탈 적은 날은 남은 장 기대
+          // 낮음 (10시후 삼전 +5.4·하닉 -8.8·TOP10 +3.2%p — scripts/intraday-regime-sweep.ts).
+          // 개입은 종목 간 이득 상쇄로 기각 — 표시만. 정규장 확인 문자에만 (프리장은 09시창 미형성).
+          const crossLabel = regWindow
+            ? (() => {
+              const hxC = countOrCross(hxReg), ssC = ssRegBars ? countOrCross(ssRegBars) : null;
+              if (hxC === null && ssC === null) return "";
+              const cnt = ` 경계이탈 하닉 ${hxC ?? "?"}·삼전 ${ssC ?? "?"}회`;
+              const low = (hxC ?? 9) <= 1 && (ssC ?? 9) <= 1;
+              return cnt + (low ? " — 이탈 적은 날은 남은 장 기대 낮음(실측: 하닉 음수)." : ".");
+            })()
+            : "";
           try {
             await dispatchToChannels("signal", today, {
               key: preWindow ? "predict_flat_pre" : "predict_flat_reg",
               severity: "low",
               text: preWindow
                 ? `[예측] 프리장 방향 없음 (가동 확인·측정 ${nowHHMM2}) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
-                : `[예측] 정규장 방향 없음 (측정 ${nowHHMM2}) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${bothLines}`,
+                : `[예측] 정규장 방향 없음 (측정 ${nowHHMM2}) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${crossLabel}${bothLines}`,
               smsSubject: "예측 상태",
             });
           } catch { /* 발송 실패 무시 */ }
