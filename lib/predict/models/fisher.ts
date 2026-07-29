@@ -20,6 +20,10 @@ export type FisherCfg = {
   // 고정 OR 앵커의 전환 지연(멀리 갔다 돌아오는 날) 해소 — C반전과 병행, 먼저 오는 쪽. 0 = 비활성.
   trailRangeRatio?: number;
   trailConfirmMinutes?: number;
+  // 장초반 크기 배수 (사용자 제안·승인 2026-07-29 — docs/early-vol-policy.md): earlyVolUntil 이전
+  // 봉은 오프셋·강돌파를 ×earlyVolMult로 넓힘 — 시간 기준(확인·반전봉)은 불변. 1/"" = 비활성.
+  earlyVolMult?: number;
+  earlyVolUntil?: string;
 };
 
 export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
@@ -36,6 +40,10 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   const offset = cfg.offsetRangeRatio * range10;
   const aUp = orHigh + offset;
   const aDown = orLow - offset;
+  // 장초반 크기 배수 — until 이전 봉만 A선·강돌파 문턱을 ×배수 (표시는 기본 A선 기준)
+  const evMult = cfg.earlyVolMult ?? 1;
+  const evUntil = cfg.earlyVolUntil ?? "";
+  const early = (t: string) => evMult !== 1 && evUntil !== "" && t < evUntil;
 
   // OR 이후 완성봉 순회 — 연속 유지 카운트로 A 확인, 확인 후 반대편(C) 이탈이면 전환.
   // 트레일 활성 시(고변동일 하닉): 극값 되돌림 유지도 전환 경로 — C와 병행, 먼저 오는 쪽.
@@ -48,12 +56,15 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   let reversed = false;
   let viaTrail = false;
   for (const b of rest) {
-    upRun = b.close > aUp ? upRun + 1 : 0;
-    downRun = b.close < aDown ? downRun + 1 : 0;
+    const em = early(b.time) ? evMult : 1;
+    const aUpB = em === 1 ? aUp : orHigh + offset * em;
+    const aDownB = em === 1 ? aDown : orLow - offset * em;
+    upRun = b.close > aUpB ? upRun + 1 : 0;
+    downRun = b.close < aDownB ? downRun + 1 : 0;
     if (cfg.strongBreakRatio > 0) {
-      const sm = cfg.strongBreakRatio * range10;
-      if (b.close > aUp + sm) upRun = Math.max(upRun, cfg.confirmMinutes, cfg.reversalMinutes);
-      if (b.close < aDown - sm) downRun = Math.max(downRun, cfg.confirmMinutes, cfg.reversalMinutes);
+      const sm = cfg.strongBreakRatio * range10 * em;
+      if (b.close > aUpB + sm) upRun = Math.max(upRun, cfg.confirmMinutes, cfg.reversalMinutes);
+      if (b.close < aDownB - sm) downRun = Math.max(downRun, cfg.confirmMinutes, cfg.reversalMinutes);
     }
     if (state === "none") {
       if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }

@@ -88,6 +88,9 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
       confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
       strongBreakRatio: sb,
       reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, // F·M도 반전 3봉 (2026-07-25 2차 승인)
+      // 장초반 크기 ×3 (2026-07-29 승인 — 스트림과 동일 조건 미러, 조회 일치)
+      earlyVolMult: PREDICT_CONFIG.earlyVol.mult,
+      earlyVolUntil: PREDICT_CONFIG.earlyVol.until,
     });
     M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes });
     if (krx && krx.length >= 20) {

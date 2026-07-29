@@ -161,7 +161,15 @@ export const PREDICT_CONFIG = {
     strongBreakRatio: 0, // 강돌파 즉시확인 — 기본 비활성 (조기창만 earlyStrongBreakRatio로 활성)
     trailRangeRatio: 0, // 트레일 반전 — 기본 비활성 (하닉 전일·삼전 고변동일 스트림만 hxTrail/ssTrail로 활성)
     trailConfirmMinutes: 5,
+    earlyVolMult: 1, // 장초반 크기 배수 — 기본 비활성 (F 스트림만 earlyVol로 활성, 2026-07-29)
+    earlyVolUntil: "",
   },
+  // 장초반 변동성 완충 (사용자 제안·승인 2026-07-29 — docs/early-vol-policy.md, scripts/early-vol-sweep.ts):
+  // 10:30 이전 피셔F(08연속창)의 크기 기준(오프셋·강돌파)만 ×3 — 시간 기준(확인 4봉·반전 3봉) 불변.
+  // 227일 실측: 삼전 +43.0→+52.4·하닉 +68.0→+74.7%p, 왕복 전환 32→17·49→25(반감), 컷 90→73·121→98.
+  // 4분기 열화 없음·이웃(×2.5~3.5) 평탄·경계(10:00~11:00) 둔감. M(0.10)·본(0.15) 적용은 실측
+  // 대훼손(-17~-29%p)이라 F 전용. 열화 시 mult: 1로 원복.
+  earlyVol: { mult: 3, until: "10:30" },
   // 하닉 고변동일 트레일 반전 (사용자 승인 2026-07-25 — 스트림 전용): 당일 vol10(10일 평균폭/전일
   // 종가)이 과거 60거래일 추적 66.7분위 이상인 날, 본피셔 반전에 '극값-0.5×평균폭 되돌림' 경로
   // 병행. 근거(scripts/trail-conditional-verify.ts, 스탑 결합·추적 경계): 하닉 4/4 개선 — 전체
