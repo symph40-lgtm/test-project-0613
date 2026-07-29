@@ -412,6 +412,19 @@ async function checkpointStream(
       // 강도·실측·유사사례 3종 동봉 (사용자 지시 2026-07-25 — 모든 판정 문자 공통 눈금)
       // + 측정 시각 (사용자 지시 2026-07-27: 소멸 등 확인시각 없는 문자도 시각을 다 붙일 것)
       const statCore = `측정 ${nowHHMM2}·이시각 실측적중 ${slotHitPct(nowHHMM2) ?? "?"}%${similarHit !== null ? `·유사장 적중 ${similarHit}%` : ""}`;
+      // 이벤트일 경고 라인 (사용자 승인 2026-07-29 밤 — 7/29 실사고 후속: 이벤트일 아침 반등이
+      // 낮에 붕괴하는 왕복. 신호 억제는 counter-f-sweep 기각 — 정보 한 줄만, 판정·비중 불변).
+      // 캘린더는 predict-daily 소유지만 판정 로직이 아닌 일정 데이터라 공용 참조 (kisToken 전례).
+      let eventWarn = "";
+      try {
+        const { upcomingEvents } = await import("@/lib/predict-daily/eventCalendar");
+        const { PREDICT_DAILY_CONFIG } = await import("@/lib/predict-daily/config");
+        const evs = [
+          ...upcomingEvents(today, 0).map((e) => e.kind as string),
+          ...PREDICT_DAILY_CONFIG.events.filter((e) => e.date === today).map((e) => e.label),
+        ];
+        if (evs.length) eventWarn = `\n⚠오늘 이벤트일(${evs.join("·")}) — 발표 전후 왕복 위험, 비중 축소 권장 (일봉은 자동 감산)`;
+      } catch { /* 캘린더 조회 실패 — 라인 생략 */ }
       // 스탑 폭 종목 분리 (2026-07-28 — config.stops.fisher 근거 참조): 하닉 -5% / 삼전 -3%
       const fisherEtf = (sym: "hx" | "ss") => (sym === "hx" ? PREDICT_CONFIG.stops.fisher.hxEtfPct : PREDICT_CONFIG.stops.fisher.etfPct);
       const ffStop = fisherEtf("hx");
@@ -556,7 +569,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) + dc2Warn(t.sym, t.tier, confT) : ""}${stopLine}${bothLines}`,
+            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) + dc2Warn(t.sym, t.tier, confT) : ""}${stopLine}${t.cur !== "none" ? eventWarn : ""}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
