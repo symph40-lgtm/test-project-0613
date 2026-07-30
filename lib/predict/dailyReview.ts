@@ -42,19 +42,20 @@ function trends(reg: MinuteBar[]): { sT: string; eT: string; sPx: number; ePx: n
     .sort((a, b) => tMin(a.sT) - tMin(b.sT));
 }
 
-// 라이브 현행 상수로 F/M/본 확인 이벤트 재구성 (전이 시각 = 확인 시각)
-function confirmsOf(code: string, today: string, hist: PredictDailyBar[], pre: MinuteBar[] | null, reg: MinuteBar[]): Conf[] {
+// 라이브 현행 상수로 F/M/본 확인 이벤트 재구성 (전이 시각 = 확인 시각) — 계층별 목록도 반환
+type TierConfs = { merged: Conf[]; byTier: Record<"F" | "M" | "본", Conf[]> };
+function confirmsOf(code: string, today: string, hist: PredictDailyBar[], pre: MinuteBar[] | null, reg: MinuteBar[]): TierConfs {
   const isHx = code === "000660";
   const sb = isHx ? PREDICT_CONFIG.earlyStrongBreakRatio : PREDICT_CONFIG.ssStrongBreakRatio;
   const cont = [...(pre ?? []), ...reg];
-  const out: Conf[] = [];
+  const byTier: TierConfs["byTier"] = { F: [], M: [], "본": [] };
   // 상태기계 전이 나열 — runFisher는 최종 상태만 주므로 컷 시각별 재판정으로 전이 추출
   const walk = (bars: MinuteBar[], tier: "F" | "M" | "본", opts: Parameters<typeof runFisher>[1]) => {
     let prev: "none" | "leverage" | "inverse" = "none";
     for (let i = 16; i <= bars.length; i++) {
       const o = runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars.slice(0, i), prevDayMinutes: null }, opts);
       if (o.verdict !== prev && o.verdict !== "none") {
-        out.push({ tier, time: bars[i - 1].time, px: bars[i - 1].close, dir: o.verdict === "leverage" ? "up" : "down" });
+        byTier[tier].push({ tier, time: bars[i - 1].time, px: bars[i - 1].close, dir: o.verdict === "leverage" ? "up" : "down" });
       }
       if (o.verdict !== "none") prev = o.verdict;
     }
@@ -65,7 +66,45 @@ function confirmsOf(code: string, today: string, hist: PredictDailyBar[], pre: M
   const trailCfg = isHx ? PREDICT_CONFIG.hxTrail : PREDICT_CONFIG.ssTrail;
   const useTrail = isHx || isHighVolDay(hist);
   walk(reg, "본", { strongBreakRatio: isHx ? PREDICT_CONFIG.lateStrongBreakRatio : sb, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...(useTrail ? { trailRangeRatio: trailCfg.rangeRatio, trailConfirmMinutes: trailCfg.confirmMinutes } : {}) });
-  return out.sort((a, b) => tMin(a.time) - tMin(b.time));
+  return { merged: [...byTier.F, ...byTier.M, ...byTier["본"]].sort((a, b) => tMin(a.time) - tMin(b.time)), byTier };
+}
+
+// 계층별 당일 손익 복기 — 실전 스탑(하닉 본주 -2.5%·삼전 -1.5%), 다음 전이 또는 마감 청산
+function tierPnl(bars: MinuteBar[], legs: Conf[], close: number, stopPct: number): { p: number; cuts: number } {
+  const r = { p: 0, cuts: 0 };
+  const s = stopPct / 100;
+  for (let i = 0; i < legs.length; i++) {
+    const e = legs[i], endT = i + 1 < legs.length ? tMin(legs[i + 1].time) : Infinity;
+    let x: number | null = null;
+    for (const b of bars) {
+      const tm = tMin(b.time);
+      if (tm <= tMin(e.time)) continue;
+      if (tm >= endT) break;
+      if (e.dir === "up" && b.low <= e.px * (1 - s)) { x = -stopPct; r.cuts++; break; }
+      if (e.dir === "down" && b.high >= e.px * (1 + s)) { x = -stopPct; r.cuts++; break; }
+    }
+    if (x === null) {
+      const px2 = i + 1 < legs.length ? legs[i + 1].px : close;
+      x = ((px2 - e.px) / e.px) * 100 * (e.dir === "up" ? 1 : -1);
+    }
+    r.p += x;
+  }
+  return r;
+}
+
+// 왕복 강도 — ±1.2% 지그재그 스윙 개수 (오늘이 얼마나 톱니였나)
+function swingCount(reg: MinuteBar[]): number {
+  let dir: 1 | -1 = 1, ext = reg[0].close, n = 0;
+  for (const b of reg) {
+    if (dir === 1) {
+      if (b.close > ext) ext = b.close;
+      else if (((ext - b.close) / ext) * 100 >= 1.2) { n++; dir = -1; ext = b.close; }
+    } else {
+      if (b.close < ext) ext = b.close;
+      else if (((b.close - ext) / ext) * 100 >= 1.2) { n++; dir = 1; ext = b.close; }
+    }
+  }
+  return n;
 }
 
 export async function buildDailyReview(): Promise<string | null> {
@@ -83,8 +122,17 @@ export async function buildDailyReview(): Promise<string | null> {
       if (!reg || reg.length < 100) reg = await fetchTodayMinutes(code, "153000");
       if (!reg || reg.length < 100) continue;
       const tr = trends(reg);
-      if (!tr.length) { blocks.push(`■${name}: ±3% 추세 없음(횡보일)`); continue; }
-      const confs = confirmsOf(code, today, hist, pre, reg);
+      const tc = confirmsOf(code, today, hist, pre, reg);
+      const confs = tc.merged;
+      // 계층별 손익 복기 + 왕복 강도 (사용자 지시 2026-07-30 2차 — "스윙 구조·소진율·손익 복기도")
+      const stopPct = code === "000660" ? 2.5 : 1.5; // 실전 스탑 — ETF -5%/-3%의 본주 환산
+      const cont = [...(pre ?? []), ...reg];
+      const close = reg[reg.length - 1].close;
+      const pF = tierPnl(cont, tc.byTier.F, close, stopPct);
+      const pM = tierPnl(cont, tc.byTier.M, close, stopPct);
+      const pB = tierPnl(reg, tc.byTier["본"], close, stopPct);
+      const recap = ` 복기(스탑 -${stopPct}%): F ${f1(pF.p)}%p(컷${pF.cuts})·M ${f1(pM.p)}(컷${pM.cuts})·본 ${f1(pB.p)}(컷${pB.cuts}) | 왕복 ${swingCount(reg)}스윙(±1.2%)`;
+      if (!tr.length) { blocks.push(`■${name}: ±3% 추세 없음(횡보일)\n${recap}`); continue; }
       const lines: string[] = [`■${name} 추세 ${tr.length}개`];
       tr.forEach((t, i) => {
         const dir = t.pct > 0 ? "up" : "down";
@@ -103,6 +151,7 @@ export async function buildDailyReview(): Promise<string | null> {
           ` 진입알림 ${entryStr} | 반전알림 ${revAl ? `${revAl.tier}${revAl.time}` : "없음"}`,
         );
       });
+      lines.push(recap);
       blocks.push(lines.join("\n"));
     } catch { /* 종목 실패 — 건너뜀 */ }
   }
