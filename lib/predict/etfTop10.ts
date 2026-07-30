@@ -108,10 +108,11 @@ export async function runEtfTop10Monitor(): Promise<void> {
           : cur === "inverse"
             ? "▶하방 — 신규 하방 체결은 기존 삼전 인버스2x 채널 문자 기준 (TOP10 전용 인버스 미상장). 488080 보유분 청산 검토."
             : t.tier === "F"
-              ? `▶1단계: 계획 비중 50% 진입 검토 — 체결 ${CFG.lev.name}(${CFG.lev.code}). 피셔M 중간확인 대기.`
+              // 비중 역순 20/30/50 (2026-07-30 — 국장과 동일 개편, TOP10도 계층 원값 본 우위 +80.6 vs F +46.3)
+              ? `▶1단계: 계획 비중 20% 진입 검토 — 체결 ${CFG.lev.name}(${CFG.lev.code}). 피셔M 중간확인 대기.`
               : t.tier === "M"
-                ? "▶2단계: +30%p(누적 80%) 검토."
-                : "▶3단계: 잔여 +20%p(누적 100%) 검토 · 15:30 마감 전 당일청산 원칙.";
+                ? "▶2단계: +30%p(누적 50%) 검토."
+                : "▶3단계: 본진입 +50%p(누적 100%) 검토 · 15:30 마감 전 당일청산 원칙.";
       const stopLine = !stale && cur === "leverage" ? await levStopLine() : "";
       try {
         await dispatchToChannels("signal", today, {
@@ -230,7 +231,7 @@ export async function fisherNowEtf(): Promise<FisherNow> {
     ...base.tiers.map((t) => `${t.name}: ${V_KO[t.verdict]}${t.confirmedAt ? ` — ${t.confirmedAt} 확인` : ""} · ${t.note}`),
     base.priceLine,
     base.stopLine ? `스탑: ${base.stopLine}` : "스탑: 방향 판정 없음 또는 하방(삼전 인버스2x 채널 이용) — 해당 없음",
-    "비중 프로토콜: F 50% → M +30%p → 본피셔 +20%p · 하방 체결은 삼전 인버스2x 채널",
+    "비중 프로토콜: F 20% → M +30%p(누적 50%) → 본피셔 +50%p(누적 100%) · 하방 체결은 삼전 인버스2x 채널",
   ].filter(Boolean) as string[];
   return base;
 }

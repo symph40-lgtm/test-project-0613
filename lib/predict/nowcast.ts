@@ -171,7 +171,7 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
     ...base.tiers.map((t) => `${t.name}: ${V_KO[t.verdict]}${t.confirmedAt ? ` — ${t.confirmedAt} 확인` : ""} · ${t.note}`),
     base.priceLine ?? "",
     base.stopLine ? `스탑: ${base.stopLine}` : `스탑: ${isHx ? "방향 판정 없음 — 해당 없음" : "삼전은 실매매 ETF 미설정 — 표기 생략"}`,
-    "비중 프로토콜: F 50% → M 동방향 +30%p → 본피셔 확정 +20%p (반대 확인 시 축소·청산)",
+    "비중 프로토콜: F 20% → M 동방향 +30%p(누적 50%) → 본피셔 확정 +50%p(누적 100%) (반대 확인 시 축소·청산 — 2026-07-30 역순 개편)",
   ].filter(Boolean);
   return base;
 }

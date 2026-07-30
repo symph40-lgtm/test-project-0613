@@ -528,16 +528,20 @@ async function checkpointStream(
         { sym: "ss", symKo: "삼전", tier: "M", tierKo: "피셔M 중간확인", prev: sameDay ? prevState!.ss.M : "none", cur: ssM, reason: ssMReason, fDir: ssF, strength: ssMc },
         { sym: "ss", symKo: "삼전", tier: "B", tierKo: "본피셔 확정", prev: sameDay ? prevState!.ss.B : "none", cur: ssB, reason: ssBReason, fDir: ssF, strength: ssBc },
       ];
+      // 비중 역순 20/30/50 (사용자 승인 2026-07-30 밤 — scripts/weight-order-sweep.ts 227일:
+      // 현행 50/30/20 대비 하닉 +82.7→+93.9·삼전 +63.1→+71.5%p, 컷 실손 -123.5→-90.5/-98.1→-85.0.
+      // 원리: 계층 원값 F<M<본 — 가장 확실한 신호(본)에 가장 큰 비중. F 컷 한 방의 계좌 타격
+      // -2.5%p→-1.0%p. 열화 시 이 함수의 비중 숫자만 원복(50/30/20).
       const guideOf = (t: Trig): string => {
         if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
-        if (t.prev !== "none" && t.prev !== t.cur) return "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(50%)부터.";
+        if (t.prev !== "none" && t.prev !== t.cur) return "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(20%)부터.";
         const sp = fisherEtf(t.sym);
-        if (t.tier === "F") return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
+        if (t.tier === "F") return `▶1단계: 계획 비중 20% 진입 검토·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
         if (t.tier === "M") {
-          const warn = t.fDir !== "none" && t.cur !== t.fDir ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
-          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${sp}%.${warn}`;
+          const warn = t.fDir !== "none" && t.cur !== t.fDir ? " ⚠피셔F와 반대 — F 선진입분 축소 검토." : "";
+          return `▶2단계: 투자 비중 +30%p(누적 50%) 검토·스탑 ETF -${sp}%.${warn}`;
         }
-        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${sp}% 고정·당일청산.`;
+        return `▶3단계: 본진입 +50%p(누적 100%) 검토·스탑 ETF -${sp}% 고정·당일청산.`;
       };
       let anyChange = false;
       for (const t of trigs) {
