@@ -122,10 +122,11 @@ function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): num
 
 // ⑤ 상태 기계 (사용자 교정 2026-07-31): 유지·방향없음은 판정 유지(액션 없음), 전환에서만 청산·역진입.
 // 전환 정의는 스펙상 모호해 2안 실측: "slope+judge" = 반대 기울기 ≤-20° 또는 반대 풀판정 / "judge" = 반대 풀판정만.
-function candleStream(bars: MinuteBar[], unit: number[], flipMode: "slope+judge" | "judge"): Tr[] {
+function candleStream(bars: MinuteBar[], unit: number[], flipMode: "slope+judge" | "judge", gateMin = 0): Tr[] {
   const out: Tr[] = [];
   let st: "none" | St = "none";
   for (let t = 5; t < bars.length; t++) {
+    if (gateMin > 0 && tMin(bars[t].time) < gateMin) continue;
     let judgedDir: St | null = null;
     for (const dir of [1, -1] as const) {
       for (const start of [t - 7, t - 6, t - 5]) {
@@ -292,6 +293,36 @@ async function main() {
           legsC2.push({ pnl, cut, i: e.i, to: e.to as St, day: di, kind: "judge", hold: endI - e.i });
         });
         console.log(`  ├ C'(전환청산)    ${stat(legsC2, [])}·보유중앙 ${medHold(legsC2)}분`);
+        // 10시 게이트 (사용자 요청 7/31): 판정 완성이 10:00 이후인 것만 인정 (창이 10시 이전 봉 포함은 허용)
+        if (ac.mode === "fixed" && ac.scale === 0.5) {
+          const firstLegOf = (d: DayB, trs: Tr[], di: number, exit: "close" | "flip"): Leg | null => {
+            const js = trs.filter((t) => t.kind === "judge");
+            if (!js.length) return null;
+            const e = js[0];
+            const opp = exit === "flip" ? js.find((t) => t.i > e.i && t.to !== e.to) : undefined;
+            const endI = opp ? opp.i : d.bars.length;
+            const s = cfg.stop / 100;
+            let pnl: number | null = null, cut = false;
+            for (let i = e.i + 1; i < endI; i++) {
+              const b = d.bars[i];
+              if (e.to === "up" && b.low <= e.px * (1 - s)) { pnl = -cfg.stop; cut = true; break; }
+              if (e.to === "down" && b.high >= e.px * (1 + s)) { pnl = -cfg.stop; cut = true; break; }
+            }
+            if (pnl === null) pnl = (((opp ? opp.px : d.close) - e.px) / e.px) * 100 * (e.to === "up" ? 1 : -1);
+            return { pnl, cut, i: e.i, to: e.to as St, day: di, kind: "judge", hold: endI - e.i };
+          };
+          const g10: Leg[] = []; const g10f: number[] = [];
+          const g10x: Leg[] = [];
+          days.forEach((d, di) => {
+            const trs = candleStream(d.bars, mkFloor(d, ac.scale), "judge", tMin("10:00"));
+            const lc = firstLegOf(d, trs, di, "close");
+            if (lc) { g10.push(lc); g10f.push(tMin(d.bars[lc.i].time)); }
+            const lx = firstLegOf(d, trs, di, "flip");
+            if (lx) g10x.push(lx);
+          });
+          console.log(`  ├ C(종가보유)10시↑ ${stat(g10, g10f)}·보유중앙 ${medHold(g10)}분`);
+          console.log(`  ├ C'(전환청산)10시↑${stat(g10x, [])}·보유중앙 ${medHold(g10x)}분`);
+        }
       }
       {
         // 병행: 피셔F 레그 시작 시점의 창판정 상태로 분리 (전환=풀판정만 스트림 기준)
