@@ -63,6 +63,13 @@ function fisherStream(bars: MinuteBar[], r10: number, off: number, conf: number,
 }
 
 const mid = (b: MinuteBar) => (b.high + b.low) / 2;
+const bmid = (b: MinuteBar) => (b.open + b.close) / 2;
+// 각도 (사용자 정의 2026-07-31): 1봉당 '기준봉 몸통의 절반' 상승 = 45°
+// (비교봉의 시가~종가 중간이 기준봉 종가에 닿는 기울기). 도지 가드로 최근30봉 평균폭×5% 하한.
+// 비교용 "fixed" 모드: floor 값 자체(최근30봉 평균폭×배율)를 45° 눈금으로 사용.
+let ANGLE_MODE: "body" | "fixed" = "body";
+const uOf = (base: MinuteBar, floor: number) =>
+  ANGLE_MODE === "body" ? Math.max(Math.abs(base.close - base.open) / 2, floor, 1e-9) : Math.max(floor, 1e-9);
 
 // ① 체인 구성: 시가 조건으로 skip(≤2)·우측 보충
 function buildChain(bars: MinuteBar[], i: number, dir: 1 | -1): { chain: number[]; used: number[] } | null {
@@ -95,7 +102,7 @@ function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): num
   let ge40 = 0, flat = 0, midBreak = 0;
   for (let p = 0; p < 5; p++) {
     const a = chain[p], b = chain[p + 1];
-    const ang = Math.atan((dir * (mid(bars[b]) - mid(bars[a]))) / unit[b]) * D;
+    const ang = Math.atan((dir * (bmid(bars[b]) - bmid(bars[a]))) / uOf(bars[a], unit[a])) * D;
     if (ang >= 40) ge40++;
     if (Math.abs(ang) <= 10) flat++;
     const m = mid(bars[a]);
@@ -113,61 +120,29 @@ function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): num
   return chain[5];
 }
 
-// ⑤ 상태 기계: 판정 → 유지/방향없음/전환/재개
-function candleStream(bars: MinuteBar[], unit: number[]): Tr[] {
+// ⑤ 상태 기계 (사용자 교정 2026-07-31): 유지·방향없음은 판정 유지(액션 없음), 전환에서만 청산·역진입.
+// 전환 정의는 스펙상 모호해 2안 실측: "slope+judge" = 반대 기울기 ≤-20° 또는 반대 풀판정 / "judge" = 반대 풀판정만.
+function candleStream(bars: MinuteBar[], unit: number[], flipMode: "slope+judge" | "judge"): Tr[] {
   const out: Tr[] = [];
   let st: "none" | St = "none";
-  let lastDir: St | null = null;
   for (let t = 5; t < bars.length; t++) {
-    const s = Math.atan((mid(bars[t]) - mid(bars[t - 5])) / 5 / unit[t]) * D;
-    if (st === "up" || st === "down") {
-      const sd = st === "up" ? s : -s;
-      if (sd >= 20) continue;
-      if (sd <= -20) { st = st === "up" ? "down" : "up"; lastDir = st; out.push({ i: t, to: st, px: bars[t].close, kind: "flip" }); continue; }
-      st = "none"; out.push({ i: t, to: "none", px: bars[t].close, kind: "flat" });
-      continue;
-    }
-    let fired = false;
+    let judgedDir: St | null = null;
     for (const dir of [1, -1] as const) {
       for (const start of [t - 7, t - 6, t - 5]) {
         if (start < 0) continue;
-        if (judgeAt(bars, start, dir, unit) === t) {
-          st = dir === 1 ? "up" : "down"; lastDir = st;
-          out.push({ i: t, to: st, px: bars[t].close, kind: "judge" });
-          fired = true; break;
-        }
+        if (judgeAt(bars, start, dir, unit) === t) { judgedDir = dir === 1 ? "up" : "down"; break; }
       }
-      if (fired) break;
+      if (judgedDir) break;
     }
-    if (fired || !lastDir) continue;
-    if (s >= 20) { st = "up"; lastDir = "up"; out.push({ i: t, to: "up", px: bars[t].close, kind: "slope" }); }
-    else if (s <= -20) { st = "down"; lastDir = "down"; out.push({ i: t, to: "down", px: bars[t].close, kind: "slope" }); }
-  }
-  return out;
-}
-
-// 변형 B: 방향없음(⑤ 플랫)·기울기 재개 없이 — 풀판정 진입, 반대 기울기(≤-20°) 전환·스탑·종가만
-function candleStreamB(bars: MinuteBar[], unit: number[]): Tr[] {
-  const out: Tr[] = [];
-  let st: "none" | St = "none";
-  for (let t = 5; t < bars.length; t++) {
-    const s = Math.atan((mid(bars[t]) - mid(bars[t - 5])) / 5 / unit[t]) * D;
-    if (st === "up" || st === "down") {
+    if (st === "none") {
+      if (judgedDir) { st = judgedDir; out.push({ i: t, to: st, px: bars[t].close, kind: "judge" }); }
+      continue;
+    }
+    if (judgedDir && judgedDir !== st) { st = judgedDir; out.push({ i: t, to: st, px: bars[t].close, kind: "judge" }); continue; }
+    if (flipMode === "slope+judge") {
+      const s = Math.atan((bmid(bars[t]) - bmid(bars[t - 5])) / 5 / uOf(bars[t - 5], unit[t - 5])) * D;
       const sd = st === "up" ? s : -s;
       if (sd <= -20) { st = st === "up" ? "down" : "up"; out.push({ i: t, to: st, px: bars[t].close, kind: "flip" }); }
-      continue;
-    }
-    for (const dir of [1, -1] as const) {
-      let fired = false;
-      for (const start of [t - 7, t - 6, t - 5]) {
-        if (start < 0) continue;
-        if (judgeAt(bars, start, dir, unit) === t) {
-          st = dir === 1 ? "up" : "down";
-          out.push({ i: t, to: st, px: bars[t].close, kind: "judge" });
-          fired = true; break;
-        }
-      }
-      if (fired) break;
     }
   }
   return out;
@@ -246,50 +221,42 @@ async function main() {
     console.log(`피셔F 기준선     ${stat(fF, fFirst)}`);
     console.log(`피셔M 기준선     ${stat(fM, mFirst)}`);
 
-    // 각도 정규화 배율 k 스윕 + 일별 트랜지션 캐시
-    for (const k of [0.5, 0.75, 1.0, 1.5]) {
-      const legs: Leg[] = []; const firsts: number[] = [];
-      let judged = 0, days0 = 0;
-      const trsByDay: Tr[][] = [];
-      days.forEach((d, di) => {
-        const rng: number[] = d.bars.map((b) => b.high - b.low);
-        const unit: number[] = d.bars.map((_, t) => {
-          const lo = Math.max(0, t - 30);
-          const w = rng.slice(lo, Math.max(lo + 1, t));
-          const u = w.length ? w.reduce((a, b) => a + b, 0) / w.length : d.r10 / 100;
-          return Math.max(u * k, 1e-9);
-        });
-        const trs = candleStream(d.bars, unit);
-        trsByDay.push(trs);
-        const dayLegs = legsOf(d, trs, cfg.stop, di);
-        legs.push(...dayLegs);
-        judged += trs.filter((t) => t.kind === "judge").length;
-        const f = trs.find((t) => t.to !== "none");
-        if (f) firsts.push(tMin(d.bars[f.i].time)); else days0++;
+    // 각도 눈금 비교: 사용자 몸통 기준 vs 고정 눈금(최근30봉 평균폭×배율=45°)
+    const mkFloor = (d: DayB, scale: number): number[] => {
+      const rng: number[] = d.bars.map((b) => b.high - b.low);
+      return d.bars.map((_, t) => {
+        const lo = Math.max(0, t - 30);
+        const w = rng.slice(lo, Math.max(lo + 1, t));
+        const u = w.length ? w.reduce((a, b) => a + b, 0) / w.length : d.r10 / 100;
+        return u * scale;
       });
-      console.log(`창판정 k=${k.toFixed(2)}  ${stat(legs, firsts)} (풀판정 ${judged}건·무판정 ${days0}일)`);
-      const byKind = (kd: string) => legs.filter((l) => l.kind === kd);
-      console.log(`  ├ 풀판정 레그  ${stat(byKind("judge"), [])}·보유중앙 ${medHold(byKind("judge"))}분`);
-      console.log(`  ├ 기울기재개   ${stat(byKind("slope"), [])}·보유중앙 ${medHold(byKind("slope"))}분`);
-      console.log(`  ├ 전환 레그    ${stat(byKind("flip"), [])}·보유중앙 ${medHold(byKind("flip"))}분`);
-      {
-        const legsB: Leg[] = [];
+    };
+    for (const ac of [
+      { label: "몸통기준(사용자)", mode: "body" as const, scale: 0.05 },
+      { label: "고정눈금 0.5폭  ", mode: "fixed" as const, scale: 0.5 },
+      { label: "고정눈금 1.0폭  ", mode: "fixed" as const, scale: 1.0 },
+    ]) {
+      ANGLE_MODE = ac.mode;
+      const run = (mode: "slope+judge" | "judge") => {
+        const legs: Leg[] = []; const firsts: number[] = [];
+        let judged = 0, days0 = 0;
+        const trsByDay: Tr[][] = [];
         days.forEach((d, di) => {
-          const rng: number[] = d.bars.map((b) => b.high - b.low);
-          const unit: number[] = d.bars.map((_, t) => {
-            const lo = Math.max(0, t - 30);
-            const w = rng.slice(lo, Math.max(lo + 1, t));
-            const u = w.length ? w.reduce((a, b) => a + b, 0) / w.length : d.r10 / 100;
-            return Math.max(u * k, 1e-9);
-          });
-          legsB.push(...legsOf(d, candleStreamB(d.bars, unit), cfg.stop, di));
+          const trs = candleStream(d.bars, mkFloor(d, ac.scale), mode);
+          trsByDay.push(trs);
+          legs.push(...legsOf(d, trs, cfg.stop, di));
+          judged += trs.filter((t) => t.kind === "judge").length;
+          const f = trs.find((t) => t.to !== "none");
+          if (f) firsts.push(tMin(d.bars[f.i].time)); else days0++;
         });
-        const bj = legsB.filter((l) => l.kind === "judge");
-        console.log(`  └ B(플랫무시)  ${stat(legsB, [])} | 풀판정만 ${stat(bj, [])}·보유중앙 ${medHold(bj)}분`);
-      }
+        return { legs, firsts, judged, days0, trsByDay };
+      };
+      const d2 = run("judge");
+      console.log(`${ac.label} 전환=풀판정 ${stat(d2.legs, d2.firsts)}·보유중앙 ${medHold(d2.legs)}분 (무판정 ${d2.days0}일)`);
+      const trsByDay = d2.trsByDay;
       {
         // 변형 C: 풀판정 → 종가까지 보유(스탑만) — 당일 방향 적중력 측정 (일 최초 풀판정 1건)
-        const legsC: Leg[] = [];
+        const legsC: Leg[] = []; const firstsC: number[] = [];
         days.forEach((d, di) => {
           const trs = trsByDay[di].filter((t) => t.kind === "judge");
           if (!trs.length) return;
@@ -303,11 +270,12 @@ async function main() {
           }
           if (pnl === null) pnl = ((d.close - e.px) / e.px) * 100 * (e.to === "up" ? 1 : -1);
           legsC.push({ pnl, cut, i: e.i, to: e.to as St, day: di, kind: "judge", hold: d.bars.length - e.i });
+          firstsC.push(tMin(d.bars[e.i].time));
         });
-        console.log(`  └ C(종가보유)  ${stat(legsC, [])}·보유중앙 ${medHold(legsC)}분`);
+        console.log(`  ├ C(종가보유)     ${stat(legsC, firstsC)}·보유중앙 ${medHold(legsC)}분`);
       }
-      if (k === 0.75) {
-        // 병행: 피셔F 레그 시작 시점의 창판정 상태로 분리
+      {
+        // 병행: 피셔F 레그 시작 시점의 창판정 상태로 분리 (전환=풀판정만 스트림 기준)
         const stateAt = (di: number, i: number): "none" | St => {
           let st: "none" | St = "none";
           for (const t of trsByDay[di]) { if (t.i <= i) st = t.to; else break; }
@@ -324,6 +292,6 @@ async function main() {
       }
     }
   }
-  console.log("\n주: 각도는 '1봉당 최근30봉 평균 고저폭×k 상승=45°' 정규화. 풀판정=규칙①~④ 완성, 이후 재개·전환은 기울기(⑤). 매수가격 위치 조건(*)은 판정이 아닌 집행 조건이라 미적용.");
+  console.log("\n주: 각도는 사용자 정의(1봉당 기준봉 몸통 절반 상승=45°, 몸통 중간 연결). 유지·방향없음은 판정 유지(액션 없음) — 청산은 전환·스탑·종가만. 매수가격 위치 조건(*)은 집행 조건이라 미적용.");
 }
 main().catch((e) => { console.error(e); process.exit(1); });
