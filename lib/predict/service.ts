@@ -601,9 +601,11 @@ async function checkpointStream(
               await dispatchToChannels("signal", today, {
                 key: `predict_prog5_hx_${hxF2}_${progConfT.replace(":", "")}`,
                 severity: ok ? "low" : "medium",
+                // 표기 교정 (사용자 지적 2026-07-30 밤): 음수 진행을 '< 기준'으로 쓰면 절대값이 커서
+                // 초과로 오독됨 — 전진/역행으로 방향을 명시 (기준 = 판정 방향으로 +N원 이상 전진)
                 text: ok
-                  ? `[예측·하닉 진행확인] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 진행 ≥ 기준 ${Math.round(need).toLocaleString()}원(10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10% = 판정가의 ${pct(need)}%) → 정상. 과거 이 경우 35건: 평균 +2.40%·승률 71%·컷률 6% — 유지.`
-                  : `[예측·하닉 진행경보] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — 진행 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐 < 기준 ${Math.round(need).toLocaleString()}원(10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10% = 판정가의 ${pct(need)}%) → 힘없는 판정. 과거 이 경우 194건: 평균 -0.06%·컷률 30% — 1단계 비중 축소 검토. 무응답=유지.`,
+                  ? `[예측·하닉 진행확인] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 35건: 평균 +2.40%·승률 71%·컷률 6% — 유지.`
+                  : `[예측·하닉 진행경보] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 194건: 평균 -0.06%·컷률 30% — 1단계 비중 축소 검토. 무응답=유지.`,
                 smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
               });
             }
