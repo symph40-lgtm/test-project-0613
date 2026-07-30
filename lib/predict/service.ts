@@ -515,7 +515,7 @@ async function checkpointStream(
         for (let i = 0; i + 5 <= w.length; i += 5) path += Math.abs(w[i + 4].close - w[i].open);
         const dc2 = path > 0 ? Math.abs(w[w.length - 1].close - w[0].open) / path : null;
         if (dc2 === null || dc2 < 0.35) return "";
-        return `\n⚠고효율 소진권 확인(60분 DC2 ${dc2.toFixed(2)}) — 전일추세일 고효율 확인 실측 승률 38~44%·본전 (저효율 확인 53~63% 대비 열위). 비중 축소 권장.`;
+        return `\n⚠고효율 구간 확인 — 추세 소진으로 남은 마진 축소(60분 DC2 ${dc2.toFixed(2)}) — 전일추세일 고효율 확인 실측 승률 38~44%·본전 (저효율 확인 53~63% 대비 열위). 비중 축소 권장.`;
       };
 
       type Trig = { sym: "hx" | "ss"; symKo: string; tier: "F" | "M" | "B"; tierKo: string; prev: Verdict; cur: Verdict; reason: string; fDir: Verdict; strength: number };
@@ -565,7 +565,7 @@ async function checkpointStream(
         const guide = stale
           ? `⚠지연 통지(확인 ${confT}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
           : exhaustPct !== null
-            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권) — 유사일 잔여 평균 -1.2~-2.0%·적중 27~33%. 추격 진입 금지, 기보유 정리·반등 유의.`
+            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인 — 추세 소진으로 남은 마진 축소(유사일 잔여 평균 -1.2~-2.0%·적중 27~33%). 추격 진입 금지, 기보유 정리·반등 유의.`
             : guideOf(t);
         const stopLine = !stale && exhaustPct === null && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {

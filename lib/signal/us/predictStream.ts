@@ -510,7 +510,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
         const guide = stale
           ? `⚠지연 통지(확인 ${etk(confT!)}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
           : exhaustPct !== null
-            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권 — SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`
+            ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인 — 추세 소진으로 남은 마진 축소(SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`
             : guideOf(t);
         const stopLine = !stale && exhaustPct === null && !postFinal && t.cur !== "none" ? await etfStopLine(t.cur) : "";
         try {
@@ -607,7 +607,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
       text = (prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
         : `[미국예측·${judgeKo}] ${whenLabel} ET 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} ${tail}`)
-        + ` ⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인(소진권 — SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`;
+        + ` ⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인 — 추세 소진으로 남은 마진 축소(SOXX 실측 잔여 -0.7%·적중 31%). 추격 진입 금지, 기보유 정리·반등 유의.`;
     } else {
       text = prev === null
         ? `[미국예측·${judgeKo}] ${whenLabel} ET 첫 판정: ${V_KO[v.verdict]} ${tail}`
