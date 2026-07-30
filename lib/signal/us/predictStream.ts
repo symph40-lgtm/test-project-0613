@@ -524,15 +524,15 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
         } catch { /* 발송 실패 무시 */ }
       }
 
-      // 판정 후 5봉(5분봉×5=25분) 진행성 문자 (사용자 지시 2026-07-30 "모든 판정에"):
-      // scripts/prog5-all-sweep.ts 실측(~37일 소표본) — F: OK 16건 +0.98%·컷25% vs 미달 29건
-      // -0.11%·컷52% / M: OK 13건 +1.32%·컷23% vs 미달 28건 -0.53%·컷54% (방향 일관·소표본 명기).
-      // 본은 표본 3/18건 — 통계 생략, 축적 중 표기. 판정 불변 정보 레이어.
+      // 판정 후 2봉(5분봉×2=10분) 진행성 문자 (사용자 제안 2026-07-30 밤 "25분 너무 길어" — 5봉→2봉):
+      // scripts/progn-us-sweep.ts 실측(~37일 소표본, 기준 0.1×10일폭) — F 2봉: OK 13건 +1.51%·컷23%
+      // vs 미달 32건 -0.23%·컷50% (5봉과 동급 이상) / M 2봉: OK 11건 +1.02%·컷36% vs 미달 30건
+      // -0.32%·컷47% (방향 일관). 1봉은 미달 평균 +0.08%로 분리 안 됨(기각). 판정 불변 정보 레이어.
       try {
         const r10us = avgRange(hist, 10);
         const usStats: Record<string, { ok: string; bad: string } | null> = {
-          F: { ok: "16건: 평균 +0.98%·승률 63%·컷률 25%(소표본)", bad: "29건: 평균 -0.11%·컷률 52%(소표본)" },
-          M: { ok: "13건: 평균 +1.32%·승률 69%·컷률 23%(소표본)", bad: "28건: 평균 -0.53%·컷률 54%(소표본)" },
+          F: { ok: "13건: 평균 +1.51%·승률 69%·컷률 23%(소표본)", bad: "32건: 평균 -0.23%·컷률 50%(소표본)" },
+          M: { ok: "11건: 평균 +1.02%·승률 55%·컷률 36%(소표본)", bad: "30건: 평균 -0.32%·컷률 47%(소표본)" },
           B: null,
         };
         const usChecks: { tier: "F" | "M" | "B"; tierKo: string; v: Verdict; reason: string; bars: typeof contW }[] = [
@@ -541,28 +541,28 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           { tier: "B", tierKo: "본피셔", v: curB, reason: bO?.reason ?? "", bars: regW },
         ];
         for (const pc of usChecks) {
-          if (pc.v === "none" || pc.bars.length < 5 || r10us === null) continue;
+          if (pc.v === "none" || pc.bars.length < 2 || r10us === null) continue;
           const confT = pc.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
           if (!confT) continue;
-          const t5 = hhmmToMin(confT) + 25; // 5분봉 5개
-          if (minuteOfDay < t5 + 1) continue;
+          const tN = hhmmToMin(confT) + 10; // 5분봉 2개
+          if (minuteOfDay < tN + 1) continue;
           const confBar = pc.bars.find((b) => b.time === confT);
-          const bar5 = [...pc.bars].reverse().find((b) => b.etMin <= t5);
-          if (!confBar || !bar5 || bar5.etMin < t5 - 5) continue;
+          const barN = [...pc.bars].reverse().find((b) => b.etMin <= tN);
+          if (!confBar || !barN || barN.etMin < tN - 5) continue;
           const dirSgn = pc.v === "leverage" ? 1 : -1;
           const dirKo = pc.v === "leverage" ? "레버" : "인버";
-          const prog = (bar5.close - confBar.close) * dirSgn;
+          const prog = (barN.close - confBar.close) * dirSgn;
           const need = 0.1 * r10us;
           const ok = prog >= need;
           const pctS = (v: number) => ((100 * v) / confBar.close).toFixed(1);
           const st = usStats[pc.tier];
           const statTxt = st ? `과거 이 경우 ${ok ? st.ok : st.bad}` : "표본 부족 — 통계 축적 중";
           await dispatchToChannels("signal", today, {
-            key: `uspredict_prog5_${pc.tier}_${pc.v}_${confT.replace(":", "")}`,
+            key: `uspredict_prog2_${pc.tier}_${pc.v}_${confT.replace(":", "")}`,
             severity: ok ? "low" : "medium",
             text: ok
-              ? `[미국예측·SOXX ${pc.tierKo} 진행확인] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 25분 — ${dirKo} 방향으로 ${prog.toFixed(2)}$(${pctS(prog)}%) 전진 → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 충족, 정상. ${statTxt} — 유지.`
-              : `[미국예측·SOXX ${pc.tierKo} 진행경보] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 25분 — ${prog < 0 ? `판정 방향 반대로 ${(-prog).toFixed(2)}$(${pctS(-prog)}%) 역행` : `전진 ${prog.toFixed(2)}$(${pctS(prog)}%)뿐`} → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 미달. ${statTxt} — 해당 단계 비중 축소 검토. 무응답=유지.`,
+              ? `[미국예측·SOXX ${pc.tierKo} 진행확인] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${dirKo} 방향으로 ${prog.toFixed(2)}$(${pctS(prog)}%) 전진 → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 충족, 정상. ${statTxt} — 유지.`
+              : `[미국예측·SOXX ${pc.tierKo} 진행경보] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${prog < 0 ? `판정 방향 반대로 ${(-prog).toFixed(2)}$(${pctS(-prog)}%) 역행` : `전진 ${prog.toFixed(2)}$(${pctS(prog)}%)뿐`} → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 미달. ${statTxt} — 해당 단계 비중 축소 검토. 무응답=유지.`,
             smsSubject: ok ? "미국 진행확인" : "미국 진행경보",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });
