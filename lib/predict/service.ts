@@ -578,38 +578,53 @@ async function checkpointStream(
         } catch { /* 발송 실패 무시 */ }
       }
 
-      // 판정 후 5봉 진행성 문자 (사용자 승인 2026-07-30 — docs/early-vol-policy.md 후속 실측):
-      // 하닉 전용(삼전은 분리 약해 제외). F 판정 5분 뒤 진행폭을 기준(0.1×10일폭)과 비교해
-      // 후속 문자 1회 — 기준값 원·%, 실제값 원·%, 그룹 과거 통계 전부 명시(사용자 지정 형식).
-      // 실측(227일): 진행 OK 35건 평균 +2.40%·승률 71%·컷률 6% / 미달 194건 평균 -0.06%·컷률 30%.
-      // 키에 확인시각 포함 — 판정(전환)마다 1회. 컷(-2.5%) 전에 축소할 기회를 주는 정보 레이어(판정 불변).
+      // 판정 후 5봉 진행성 문자 (사용자 승인 2026-07-30 "모든 판정에" — docs/early-vol-policy.md):
+      // 하닉·삼전 F/M/본 6조합. 판정 5분 뒤 진행폭을 기준(0.1×10일폭)과 비교해 후속 문자 1회 —
+      // 기준·실제(원·%)·해당 조합 실측 통계 명시(사용자 지정 형식), 전진/역행 표기(오독 교정).
+      // 통계 출처: scripts/prog5-all-sweep.ts 227일. 키에 확인시각 — 판정(전환)마다 1회. 판정 불변 정보 레이어.
       try {
-        const progConfT = hxF2 !== "none" ? (hxFo?.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null) : null;
-        if (progConfT && hxCont.length >= 20) {
+        const r10hx = avgRange(complete.slice(-120), 10);
+        const r10ss = ssHistBars.length >= 11 ? avgRange(ssHistBars.slice(-120), 10) : null;
+        const PROG5_STATS: Record<string, { ok: string; bad: string }> = {
+          hxF: { ok: "35건: 평균 +2.40%·승률 71%·컷률 6%", bad: "194건: 평균 -0.06%·컷률 30%" },
+          hxM: { ok: "37건: 평균 +1.28%·승률 62%·컷률 22%", bad: "167건: 평균 +0.21%·컷률 28%" },
+          hxB: { ok: "56건: 평균 +1.06%·승률 61%·컷률 0%", bad: "339건: 평균 +0.15%·컷률 5%" },
+          ssF: { ok: "26건: 평균 +0.58%·승률 54%·컷률 27%", bad: "189건: 평균 +0.20%·컷률 35%" },
+          ssM: { ok: "29건: 평균 +0.75%·승률 59%·컷률 34%", bad: "168건: 평균 +0.28%·컷률 34%" },
+          ssB: { ok: "37건: 평균 +0.93%·승률 76%·컷률 8%", bad: "265건: 평균 +0.18%·컷률 15%" },
+        };
+        const progChecks: { key: string; symKo: string; tierKo: string; v: Verdict; reason: string; bars: MinuteBar[] | null; r10: number | null }[] = [
+          { key: "hxF", symKo: "하닉", tierKo: "F", v: hxF2, reason: hxFo?.reason ?? "", bars: hxCont, r10: r10hx },
+          { key: "hxM", symKo: "하닉", tierKo: "M", v: hxM2, reason: hxMo?.reason ?? "", bars: hxCont, r10: r10hx },
+          { key: "hxB", symKo: "하닉", tierKo: "본피셔", v: hxB2, reason: hxBo?.reason ?? "", bars: hxReg, r10: r10hx },
+          { key: "ssF", symKo: "삼전", tierKo: "F", v: ssF, reason: ssFReason, bars: ssContBars, r10: r10ss },
+          { key: "ssM", symKo: "삼전", tierKo: "M", v: ssM, reason: ssMReason, bars: ssContBars, r10: r10ss },
+          { key: "ssB", symKo: "삼전", tierKo: "본피셔", v: ssB, reason: ssBReason, bars: ssRegBars, r10: r10ss },
+        ];
+        for (const pc of progChecks) {
+          if (pc.v === "none" || !pc.bars || pc.bars.length < 20 || pc.r10 === null) continue;
+          const progConfT = pc.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+          if (!progConfT) continue;
           const t5 = hhmmToMin(progConfT) + 5;
-          const r10hx = avgRange(complete.slice(-120), 10);
-          if (minuteOfDay >= t5 + 1 && r10hx !== null) {
-            const confBar = hxCont.find((b) => b.time === progConfT);
-            const bar5 = [...hxCont].reverse().find((b) => hhmmToMin(b.time) <= t5);
-            if (confBar && bar5 && hhmmToMin(bar5.time) >= t5 - 1) {
-              const dirSgn = hxF2 === "leverage" ? 1 : -1;
-              const dirKo = hxF2 === "leverage" ? "레버" : "인버";
-              const prog = (bar5.close - confBar.close) * dirSgn;
-              const need = 0.1 * r10hx;
-              const ok = prog >= need;
-              const pct = (v: number) => ((100 * v) / confBar.close).toFixed(1);
-              await dispatchToChannels("signal", today, {
-                key: `predict_prog5_hx_${hxF2}_${progConfT.replace(":", "")}`,
-                severity: ok ? "low" : "medium",
-                // 표기 교정 (사용자 지적 2026-07-30 밤): 음수 진행을 '< 기준'으로 쓰면 절대값이 커서
-                // 초과로 오독됨 — 전진/역행으로 방향을 명시 (기준 = 판정 방향으로 +N원 이상 전진)
-                text: ok
-                  ? `[예측·하닉 진행확인] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 35건: 평균 +2.40%·승률 71%·컷률 6% — 유지.`
-                  : `[예측·하닉 진행경보] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 194건: 평균 -0.06%·컷률 30% — 1단계 비중 축소 검토. 무응답=유지.`,
-                smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
-              });
-            }
-          }
+          if (minuteOfDay < t5 + 1) continue;
+          const confBar = pc.bars.find((b) => b.time === progConfT);
+          const bar5 = [...pc.bars].reverse().find((b) => hhmmToMin(b.time) <= t5);
+          if (!confBar || !bar5 || hhmmToMin(bar5.time) < t5 - 1) continue;
+          const dirSgn = pc.v === "leverage" ? 1 : -1;
+          const dirKo = pc.v === "leverage" ? "레버" : "인버";
+          const prog = (bar5.close - confBar.close) * dirSgn;
+          const need = 0.1 * pc.r10;
+          const ok = prog >= need;
+          const pct = (v: number) => ((100 * v) / confBar.close).toFixed(1);
+          const st = PROG5_STATS[pc.key];
+          await dispatchToChannels("signal", today, {
+            key: `predict_prog5_${pc.key}_${pc.v}_${progConfT.replace(":", "")}`,
+            severity: ok ? "low" : "medium",
+            text: ok
+              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인] ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok} — 유지.`
+              : `[예측·${pc.symKo} ${pc.tierKo} 진행경보] ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad} — 해당 단계 비중 축소 검토. 무응답=유지.`,
+            smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
+          });
         }
       } catch { /* 진행성 문자 실패는 모니터를 막지 않는다 */ }
 

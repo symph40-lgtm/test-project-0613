@@ -123,6 +123,39 @@ export async function runEtfTop10Monitor(): Promise<void> {
       } catch { /* 발송 실패 무시 */ }
     }
 
+    // 판정 후 5봉 진행성 문자 — 본피셔만 (사용자 지시 2026-07-30 "모든 판정에" — 단 TOP10 F/M은
+    // scripts/prog5-all-sweep.ts 실측에서 역전(진행 OK 그룹이 컷률 65%로 더 나쁨)이라 제외.
+    // 본은 정상 분리: OK 29건 +1.21%·컷17% vs 미달 151건 +0.29%·컷27%). 판정 불변 정보 레이어.
+    try {
+      if (B.verdict !== "none") {
+        const confT = B.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null;
+        const r10 = avgRange(hist, 10);
+        if (confT && r10 !== null) {
+          const t5 = hhmmToMin(confT) + 5;
+          if (minuteOfDay >= t5 + 1) {
+            const confBar = reg.find((b) => b.time === confT);
+            const bar5 = [...reg].reverse().find((b) => hhmmToMin(b.time) <= t5);
+            if (confBar && bar5 && hhmmToMin(bar5.time) >= t5 - 1) {
+              const dirSgn = B.verdict === "leverage" ? 1 : -1;
+              const dirKo = B.verdict === "leverage" ? "레버" : "인버";
+              const prog = (bar5.close - confBar.close) * dirSgn;
+              const need = 0.1 * r10;
+              const ok = prog >= need;
+              const pctS = (v: number) => ((100 * v) / confBar.close).toFixed(1);
+              await dispatchToChannels("signal", today, {
+                key: `predict_prog5_t10B_${B.verdict}_${confT.replace(":", "")}`,
+                severity: ok ? "low" : "medium",
+                text: ok
+                  ? `[예측·TOP10 본피셔 진행확인] ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 충족, 정상. 과거 이 경우 29건: 평균 +1.21%·승률 62%·컷률 17% — 유지.`
+                  : `[예측·TOP10 본피셔 진행경보] ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pctS(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%)뿐`} → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 미달. 과거 이 경우 151건: 평균 +0.29%·컷률 27% — 비중 축소 검토. 무응답=유지.`,
+                smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
+              });
+            }
+          }
+        }
+      }
+    } catch { /* 진행성 문자 실패 무시 */ }
+
     // 무추세 확인 (정규장 1회 — 프리장 미거래라 프리장 확인은 구조적으로 없음)
     const allNone = [F.verdict, M.verdict, B.verdict].every((v) => v === "none");
     const prevAllNone = !sameDay || (["F", "M", "B"] as const).every((k) => prev![k] === "none");
