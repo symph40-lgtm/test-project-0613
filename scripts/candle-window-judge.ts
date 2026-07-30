@@ -273,6 +273,25 @@ async function main() {
           firstsC.push(tMin(d.bars[e.i].time));
         });
         console.log(`  ├ C(종가보유)     ${stat(legsC, firstsC)}·보유중앙 ${medHold(legsC)}분`);
+        // C': 동일 진입(일 최초 풀판정), 반대 풀판정이 나오면 그 시점 청산·재진입 없음, 없으면 종가
+        const legsC2: Leg[] = [];
+        days.forEach((d, di) => {
+          const trs = trsByDay[di].filter((t) => t.kind === "judge");
+          if (!trs.length) return;
+          const e = trs[0];
+          const opp = trs.find((t) => t.i > e.i && t.to !== e.to);
+          const endI = opp ? opp.i : d.bars.length;
+          const s = cfg.stop / 100;
+          let pnl: number | null = null, cut = false;
+          for (let i = e.i + 1; i < endI; i++) {
+            const b = d.bars[i];
+            if (e.to === "up" && b.low <= e.px * (1 - s)) { pnl = -cfg.stop; cut = true; break; }
+            if (e.to === "down" && b.high >= e.px * (1 + s)) { pnl = -cfg.stop; cut = true; break; }
+          }
+          if (pnl === null) pnl = (((opp ? opp.px : d.close) - e.px) / e.px) * 100 * (e.to === "up" ? 1 : -1);
+          legsC2.push({ pnl, cut, i: e.i, to: e.to as St, day: di, kind: "judge", hold: endI - e.i });
+        });
+        console.log(`  ├ C'(전환청산)    ${stat(legsC2, [])}·보유중앙 ${medHold(legsC2)}분`);
       }
       {
         // 병행: 피셔F 레그 시작 시점의 창판정 상태로 분리 (전환=풀판정만 스트림 기준)
