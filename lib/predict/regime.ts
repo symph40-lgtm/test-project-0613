@@ -68,11 +68,32 @@ export async function buildRegimeSms(): Promise<string | null> {
       rocs.sort((a, b) => a - b);
       const medRoc = rocs.length ? rocs[Math.floor(rocs.length / 2)] : 0;
       const trail = code === "000660" && (today === 3 || today === 4) ? " · 트레일 가동일" : "";
+      // 해석 라인 (사용자 지시 2026-07-30 — "데이터가 아니라 데이터를 보고 해석한 인사이트를"):
+      // 장기(전 표본) 변동성 백분위로 지금 구간의 의미 + 시스템에 미치는 영향 + 대응을 문장으로.
+      // 숫자는 괄호 근거로만. 판정선·스탑이 10일폭에 비례해 자동 확대되는 구조를 명시.
+      const longVols: number[] = [];
+      for (let j = 90; j < len; j++) {
+        const r = daily.slice(Math.max(0, j - 10), j).reduce((a, b) => a + (b.high - b.low), 0) / 10;
+        longVols.push((r / daily[j - 1].close) * 100);
+      }
+      const sorted = [...longVols].sort((a, b) => a - b);
+      const medVol = sorted[Math.floor(sorted.length / 2)] ?? vol10;
+      const topPct = Math.round((100 * sorted.filter((v) => v > vol10).length) / Math.max(1, sorted.length));
+      const mult = medVol > 0 ? vol10 / medVol : 1;
+      const facts = `(하루 평균폭 ${vol10.toFixed(1)}% — 1년 중앙 ${medVol.toFixed(1)}%의 ${mult.toFixed(1)}배·상위 ${topPct}%)`;
+      const insight = topPct <= 5
+        ? `해석: 지금은 1년 중 손꼽히는 초고변동 구간 — 판정선·스탑이 폭에 비례해 자동으로 넓어져 확인은 늦고 컷 한 방은 커집니다. 빠른 신호(F·M) 추격보다 본피셔 확정 위주·비중 절반 이하가 유리한 시기 ${facts}`
+        : topPct <= 20
+          ? `해석: 고변동 구간 — 판정 문턱과 스탑이 평소보다 넓게 그려지는 중. 왕복 컷 연쇄를 조심할 시기, 분할 진입·확정 위주 ${facts}`
+          : topPct >= 80
+            ? `해석: 이례적 저변동 — 신호 자체가 드물고 폭이 작은 시기. 나오는 신호의 신뢰는 높지만 무리한 진입은 실익 없음 ${facts}`
+            : `해석: 변동성 평시 수준 — 표준 운영 구간 ${facts}`;
       blocks.push(
         `■${name} 오늘 Q${today} ${QUAD[today].name} · 최근5일 ${hist.join("→")}\n` +
         ` 근거: 변동폭 ${vol10.toFixed(1)}%(60일 중 상위 ${pctRank}%) · 전일 ${prevL.rOC >= 0 ? "+" : ""}${prevL.rOC.toFixed(1)}% ${prevKo}\n` +
         ` 유사일 ${n}일 실측: 추세일 ${n ? Math.round((100 * dir) / n) : 0}%(상승 ${up}·하락 ${dn})·|시→종| 중앙 ${medRoc.toFixed(1)}%\n` +
-        ` ${QUAD[today].insight}${trail}`,
+        ` ${QUAD[today].insight}${trail}\n` +
+        ` ${insight}`,
       );
       concl.push(`${name} ${QUAD[today].conclude}`);
     } catch { /* 종목 실패 — 건너뜀 */ }

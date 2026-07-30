@@ -131,8 +131,25 @@ export async function buildDailyReview(): Promise<string | null> {
       const pF = tierPnl(cont, tc.byTier.F, close, stopPct);
       const pM = tierPnl(cont, tc.byTier.M, close, stopPct);
       const pB = tierPnl(reg, tc.byTier["본"], close, stopPct);
-      const recap = ` 복기(스탑 -${stopPct}%): F ${f1(pF.p)}%p(컷${pF.cuts})·M ${f1(pM.p)}(컷${pM.cuts})·본 ${f1(pB.p)}(컷${pB.cuts}) | 왕복 ${swingCount(reg)}스윙(±1.2%)`;
-      if (!tr.length) { blocks.push(`■${name}: ±3% 추세 없음(횡보일)\n${recap}`); continue; }
+      const sw = swingCount(reg);
+      const recap = ` 복기(스탑 -${stopPct}%): F ${f1(pF.p)}%p(컷${pF.cuts})·M ${f1(pM.p)}(컷${pM.cuts})·본 ${f1(pB.p)}(컷${pB.cuts}) | 왕복 ${sw}스윙(±1.2%)`;
+      // 해석 라인 (사용자 지시 2026-07-30 — 데이터가 아닌 해석을): 오늘 장 유형 + 어느 계층이
+      // 감당했는가를 문장으로. 스윙 분포 기준은 227일 실측(하닉 중앙4·상위10% 13 / 삼전 중앙2·10).
+      const [swMed, swP90] = code === "000660" ? [4, 13] : [2, 10];
+      const dayType = sw >= swP90
+        ? `연중 최상위급 톱니장(왕복 ${sw}스윙, 1년 중앙 ${swMed}) — 빠른층(F·M)이 구조적으로 못 이기는 유형, 본피셔+넓은 스탑의 날`
+        : sw > swMed * 1.5
+          ? `왕복이 많은 날(${sw}스윙, 중앙 ${swMed}) — 컷 연쇄 주의형`
+          : `깨끗한 편(${sw}스윙) — 추세가 나오면 온전히 먹는 유형`;
+      const tierMsg = pB.p > 0 && pF.p < 0
+        ? " 오늘도 본피셔가 정답 계층 — 빠른층 비중 축소 논거 하루 추가."
+        : pF.p > 0 && pF.cuts === 0
+          ? " 빠른층이 컷 없이 수익 — 추세 선순환의 날."
+          : pF.p < 0 && pB.p < 0
+            ? " 전 계층 손실 — 어떤 파라미터로도 피하기 어려운 날(비중 제어가 유일한 방어)."
+            : "";
+      const insight = ` 해석: ${dayType}.${tierMsg}`;
+      if (!tr.length) { blocks.push(`■${name}: ±3% 추세 없음(횡보일)\n${recap}\n${insight}`); continue; }
       const lines: string[] = [`■${name} 추세 ${tr.length}개`];
       tr.forEach((t, i) => {
         const dir = t.pct > 0 ? "up" : "down";
@@ -151,7 +168,7 @@ export async function buildDailyReview(): Promise<string | null> {
           ` 진입알림 ${entryStr} | 반전알림 ${revAl ? `${revAl.tier}${revAl.time}` : "없음"}`,
         );
       });
-      lines.push(recap);
+      lines.push(recap, insight);
       blocks.push(lines.join("\n"));
     } catch { /* 종목 실패 — 건너뜀 */ }
   }
