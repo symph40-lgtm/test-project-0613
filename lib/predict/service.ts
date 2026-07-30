@@ -971,5 +971,13 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 추세 리뷰 실패 (본 흐름 무관):", e);
   }
 
+  // ⑪ 하닉 6봉 창판정 페이퍼 스트림 (사용자 승인 2026-07-31 — 문자·기록 전용, 두 청산 기준 병행 채점)
+  try {
+    const { runCandleWindowMonitor } = await import("./candleWindow");
+    await runCandleWindowMonitor();
+  } catch (e) {
+    console.error("[predict] 창판정 페이퍼 스트림 실패 (본 흐름 무관):", e);
+  }
+
   return result;
 }
