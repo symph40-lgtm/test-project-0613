@@ -908,5 +908,13 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] TOP10 모니터 실패 (기존 스트림 무관):", e);
   }
 
+  // ⑩ 매일 추세 리뷰 (사용자 지시 2026-07-30) — 마감 후 15:42~16:10 창 1회, 실패는 내부에서 삼킴
+  try {
+    const { runDailyReview } = await import("./dailyReview");
+    await runDailyReview();
+  } catch (e) {
+    console.error("[predict] 추세 리뷰 실패 (본 흐름 무관):", e);
+  }
+
   return result;
 }
