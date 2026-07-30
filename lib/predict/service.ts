@@ -3,7 +3,7 @@
 // KIS 과거 분봉으로 언제든 소급 가능 — 크론이 며칠 죽어도 다음 호출에서 복구된다.
 
 import { PREDICT_CONFIG } from "./config";
-import { atrPct, isHighVolDay } from "./indicators";
+import { atrPct, avgRange, isHighVolDay } from "./indicators";
 import { fetchDailyPredict, kstNowPredict } from "./data";
 import { fetchDayMinutes, fetchTodayMinutes, fetchNxtPremarket, clipToJudgeWindow } from "./kisMinute";
 import { labelDay } from "./label";
@@ -577,6 +577,40 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+
+      // 판정 후 5봉 진행성 문자 (사용자 승인 2026-07-30 — docs/early-vol-policy.md 후속 실측):
+      // 하닉 전용(삼전은 분리 약해 제외). F 판정 5분 뒤 진행폭을 기준(0.1×10일폭)과 비교해
+      // 후속 문자 1회 — 기준값 원·%, 실제값 원·%, 그룹 과거 통계 전부 명시(사용자 지정 형식).
+      // 실측(227일): 진행 OK 35건 평균 +2.40%·승률 71%·컷률 6% / 미달 194건 평균 -0.06%·컷률 30%.
+      // 키에 확인시각 포함 — 판정(전환)마다 1회. 컷(-2.5%) 전에 축소할 기회를 주는 정보 레이어(판정 불변).
+      try {
+        const progConfT = hxF2 !== "none" ? (hxFo?.reason.match(/^(\d{2}:\d{2})/)?.[1] ?? null) : null;
+        if (progConfT && hxCont.length >= 20) {
+          const t5 = hhmmToMin(progConfT) + 5;
+          const r10hx = avgRange(complete.slice(-120), 10);
+          if (minuteOfDay >= t5 + 1 && r10hx !== null) {
+            const confBar = hxCont.find((b) => b.time === progConfT);
+            const bar5 = [...hxCont].reverse().find((b) => hhmmToMin(b.time) <= t5);
+            if (confBar && bar5 && hhmmToMin(bar5.time) >= t5 - 1) {
+              const dirSgn = hxF2 === "leverage" ? 1 : -1;
+              const dirKo = hxF2 === "leverage" ? "레버" : "인버";
+              const prog = (bar5.close - confBar.close) * dirSgn;
+              const need = 0.1 * r10hx;
+              const ok = prog >= need;
+              const pct = (v: number) => ((100 * v) / confBar.close).toFixed(1);
+              await dispatchToChannels("signal", today, {
+                key: `predict_prog5_hx_${hxF2}_${progConfT.replace(":", "")}`,
+                severity: ok ? "low" : "medium",
+                text: ok
+                  ? `[예측·하닉 진행확인] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 진행 ≥ 기준 ${Math.round(need).toLocaleString()}원(10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10% = 판정가의 ${pct(need)}%) → 정상. 과거 이 경우 35건: 평균 +2.40%·승률 71%·컷률 6% — 유지.`
+                  : `[예측·하닉 진행경보] F ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — 진행 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐 < 기준 ${Math.round(need).toLocaleString()}원(10일평균폭 ${Math.round(r10hx).toLocaleString()}원의 10% = 판정가의 ${pct(need)}%) → 힘없는 판정. 과거 이 경우 194건: 평균 -0.06%·컷률 30% — 1단계 비중 축소 검토. 무응답=유지.`,
+                smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
+              });
+            }
+          }
+        }
+      } catch { /* 진행성 문자 실패는 모니터를 막지 않는다 */ }
+
       // 09창 F 반전 경보 (사용자 승인 2026-07-25 — 스펙 2.12): 본피셔 방향 유지 중 09시창
       // 피셔F(0.05·4봉·강돌파)가 반대 방향을 확인하면 경보. 08창 F는 프리장 급등락이 OR에 들어간 날
       // 반전을 못 잡음 (실측 커버 7/25 → 09창 25/25, 리드 중앙 하닉 11분·삼전 2분, 순효과 하닉 +9.5%p).

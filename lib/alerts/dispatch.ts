@@ -32,7 +32,7 @@ function quietDayBlocked(alertKey: string): boolean {
 // 재사용했는데 그 키들은 M7_MUTED_KEYS로 이미 전부 음소거 — 허용 체크가 사문화되어 7/28 인버스 장에
 // 판정 문자 0건. 현행 판정 채널(예측 스트림)의 전환·반전경보·회복·당일청산·공식판정 키를 허용한다.
 // 유지 차단: 상태·유지확인·성능 등 저정보 키(predict_flat_*·predict_hold_*·predict_perf_* 등).
-const PAUSE_ALLOW_KEYS = /^(trend_up|trend_down|vrebound_long|us_trend_up|us_trend_down)(_cancel)?$|^(us)?predict_(tr|rev9|chg|cp|recut|sell)/;
+const PAUSE_ALLOW_KEYS = /^(trend_up|trend_down|vrebound_long|us_trend_up|us_trend_down)(_cancel)?$|^(us)?predict_(tr|rev9|chg|cp|recut|sell|prog5)/;
 let pauseCache: { until: string | null; allowStrong: boolean; at: number } = { until: null, allowStrong: true, at: 0 };
 
 async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, alertKey: string): Promise<boolean> {
