@@ -68,6 +68,9 @@ const bmid = (b: MinuteBar) => (b.open + b.close) / 2;
 // (비교봉의 시가~종가 중간이 기준봉 종가에 닿는 기울기). 도지 가드로 최근30봉 평균폭×5% 하한.
 // 비교용 "fixed" 모드: floor 값 자체(최근30봉 평균폭×배율)를 45° 눈금으로 사용.
 let ANGLE_MODE: "body" | "fixed" = "body";
+// 개별 봉 조건(두께 20%·양봉) 대상 (사용자 질문 2026-07-31): "used" = 체인(추가봉 포함)+skip봉 전부(현행) /
+// "win6" = 원래 창 6개 봉(skip 포함·추가봉 제외)
+let INDIV_MODE: "used" | "win6" = "used";
 const uOf = (base: MinuteBar, floor: number) =>
   ANGLE_MODE === "body" ? Math.max(Math.abs(base.close - base.open) / 2, floor, 1e-9) : Math.max(floor, 1e-9);
 
@@ -110,7 +113,8 @@ function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): num
   }
   if (ge40 < 4 || flat > 0 || midBreak > 1) return null;
   let thin = 0, wrongColor = 0;
-  for (const k of used) {
+  const indiv = INDIV_MODE === "used" ? used : Array.from({ length: 6 }, (_, k) => i + k);
+  for (const k of indiv) {
     const rng = bars[k].high - bars[k].low;
     const body = Math.abs(bars[k].close - bars[k].open);
     if (rng <= 0 || body < 0.2 * rng) thin++;
@@ -233,11 +237,14 @@ async function main() {
       });
     };
     for (const ac of [
-      { label: "몸통기준(사용자)", mode: "body" as const, scale: 0.05 },
-      { label: "고정눈금 0.5폭  ", mode: "fixed" as const, scale: 0.5 },
-      { label: "고정눈금 1.0폭  ", mode: "fixed" as const, scale: 1.0 },
+      { label: "몸통기준(사용자)", mode: "body" as const, scale: 0.05, indiv: "used" as const },
+      { label: "몸통기준·원창6  ", mode: "body" as const, scale: 0.05, indiv: "win6" as const },
+      { label: "고정눈금 0.5폭  ", mode: "fixed" as const, scale: 0.5, indiv: "used" as const },
+      { label: "고정0.5·원창6   ", mode: "fixed" as const, scale: 0.5, indiv: "win6" as const },
+      { label: "고정눈금 1.0폭  ", mode: "fixed" as const, scale: 1.0, indiv: "used" as const },
     ]) {
       ANGLE_MODE = ac.mode;
+      INDIV_MODE = ac.indiv;
       const run = (mode: "slope+judge" | "judge") => {
         const legs: Leg[] = []; const firsts: number[] = [];
         let judged = 0, days0 = 0;
@@ -294,7 +301,7 @@ async function main() {
         });
         console.log(`  ├ C'(전환청산)    ${stat(legsC2, [])}·보유중앙 ${medHold(legsC2)}분`);
         // 10시 게이트 (사용자 요청 7/31): 판정 완성이 10:00 이후인 것만 인정 (창이 10시 이전 봉 포함은 허용)
-        if (ac.mode === "fixed" && ac.scale === 0.5) {
+        if (ac.mode === "fixed" && ac.scale === 0.5 && ac.indiv === "used") {
           const firstLegOf = (d: DayB, trs: Tr[], di: number, exit: "close" | "flip"): Leg | null => {
             const js = trs.filter((t) => t.kind === "judge");
             if (!js.length) return null;
