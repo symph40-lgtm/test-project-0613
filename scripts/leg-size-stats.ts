@@ -61,6 +61,44 @@ function fisherFirst(bars: MinuteBar[], r10: number): { i: number; dir: 1 | -1; 
   return null;
 }
 
+// 피셔F 전체 전이 스트림 (판정→전환 반복, rev 3봉 — 라이브 상수)
+function fisherStream(bars: MinuteBar[], r10: number): { i: number; dir: 1 | -1; px: number }[] {
+  if (bars.length < 16) return [];
+  const orH = Math.max(...bars.slice(0, 15).map((b) => b.high));
+  const orL = Math.min(...bars.slice(0, 15).map((b) => b.low));
+  const out: { i: number; dir: 1 | -1; px: number }[] = [];
+  let st: 0 | 1 | -1 = 0, up = 0, dn = 0;
+  const emUntil = tMin("10:30");
+  for (let i = 15; i < bars.length; i++) {
+    const b = bars[i];
+    const em = tMin(b.time) < emUntil ? 3 : 1;
+    const aUp = orH + 0.05 * r10 * em, aDn = orL - 0.05 * r10 * em, sbW = 0.1 * r10 * em;
+    up = b.close > aUp ? up + 1 : 0;
+    dn = b.close < aDn ? dn + 1 : 0;
+    if (b.close > aUp + sbW) up = Math.max(up, 4);
+    if (b.close < aDn - sbW) dn = Math.max(dn, 4);
+    if (st !== 1 && up >= (st === 0 ? 4 : 3)) { st = 1; out.push({ i, dir: 1, px: b.close }); }
+    else if (st !== -1 && dn >= (st === 0 ? 4 : 3)) { st = -1; out.push({ i, dir: -1, px: b.close }); }
+  }
+  return out;
+}
+
+// 레그 구간 내 방향성 스윙(%): 상승 = 구간 내 (이전 최저 저가→이후 고가) 최대, 하락 대칭
+function legSpan(bars: MinuteBar[], from: number, to: number, dir: 1 | -1): number {
+  let best = 0, ext = dir === 1 ? Infinity : -Infinity;
+  for (let i = from; i < to; i++) {
+    const b = bars[i];
+    if (dir === 1) {
+      if (b.low < ext) ext = b.low;
+      best = Math.max(best, ((b.high - ext) / ext) * 100);
+    } else {
+      if (b.high > ext) ext = b.high;
+      best = Math.max(best, ((ext - b.low) / ext) * 100);
+    }
+  }
+  return best;
+}
+
 async function main() {
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const daily = (await fetchDailyPredict("000660", 500)).filter((b) => b.date < today);
@@ -68,6 +106,8 @@ async function main() {
   const bucket = (th: number) => ({ th, n: 0, cwCatch: 0, cwCap: [] as number[], fCatch: 0, fCap: [] as number[] });
   const buckets = [bucket(4), bucket(6), bucket(8)];
   let daysN = 0;
+  // 모델 자체 레그 기준 (사용자 정의 7/31 2차): 각 모델이 판정한 레그 구간 내 스윙 ≥8% = 찐모수
+  const cwSpans: number[] = [], fSpans: number[] = [];
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`000660-${daily[i].date}.json`);
     const pre = rc(`000660NX-${daily[i].date}.json`);
@@ -81,6 +121,15 @@ async function main() {
     const trs = candleJudgeStream(bars, unitArr(bars, r10));
     const cw = trs.length ? { i: trs[0].i, dir: trs[0].to === "up" ? 1 : -1, px: trs[0].px } : null;
     const fF = fisherFirst(bars, r10);
+    for (let k = 0; k < trs.length; k++) {
+      const endI = k + 1 < trs.length ? trs[k + 1].i : bars.length;
+      cwSpans.push(legSpan(bars, trs[k].i, endI, trs[k].to === "up" ? 1 : -1));
+    }
+    const fTrs = fisherStream(bars, r10);
+    for (let k = 0; k < fTrs.length; k++) {
+      const endI = k + 1 < fTrs.length ? fTrs[k + 1].i : bars.length;
+      fSpans.push(legSpan(bars, fTrs[k].i, endI, fTrs[k].dir));
+    }
     for (const bk of buckets) {
       if (sw.pct < bk.th) continue;
       bk.n++;
@@ -105,5 +154,13 @@ async function main() {
     console.log(`  피셔F : 포착 ${bk.fCatch}일(${bk.n ? Math.round((100 * bk.fCatch) / bk.n) : 0}%) · 진입→극점 잔여 중앙 ${medOf(bk.fCap).toFixed(2)}%`);
   }
   console.log("\n주: 포착 = 하루 첫 판정이 스윙과 동방향 + 스윙 종료 전. 잔여 = 판정가에서 스윙 극점까지 남은 폭(본주 %).");
+  const legStat = (name: string, spans: number[]) => {
+    const n = spans.length;
+    const c = (th: number) => spans.filter((v) => v >= th).length;
+    console.log(`${name}: 레그 ${n}건 — 구간 스윙 중앙 ${medOf(spans).toFixed(2)}% · ≥4% ${c(4)}건(${Math.round((100 * c(4)) / n)}%) · ≥6% ${c(6)}건(${Math.round((100 * c(6)) / n)}%) · ≥8% ${c(8)}건(${Math.round((100 * c(8)) / n)}%)`);
+  };
+  console.log("\n[모델 자체 레그 기준 — 판정~다음 전환(또는 종가) 구간 내 방향성 스윙, 본주 %]");
+  legStat("창판정", cwSpans);
+  legStat("피셔F ", fSpans);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
