@@ -108,6 +108,10 @@ async function main() {
   let daysN = 0;
   // 모델 자체 레그 기준 (사용자 정의 7/31 2차): 각 모델이 판정한 레그 구간 내 스윙 ≥8% = 찐모수
   const cwSpans: number[] = [], fSpans: number[] = [];
+  // 판정 겹침 (사용자 질문 7/31 3차): 하루 첫 판정 기준 공통/단독/무판정
+  let bothSame = 0, bothDiff = 0, cwOnly = 0, fOnly = 0, neither = 0;
+  let diffCwRight = 0, diffFRight = 0; // 방향 이견일에 일중 최대 스윙 방향과 일치한 쪽
+  const bigDay = { bothSame: 0, bothDiff: 0, cwOnly: 0, fOnly: 0, neither: 0 }; // 본주 스윙 ≥4% 날의 분포
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`000660-${daily[i].date}.json`);
     const pre = rc(`000660NX-${daily[i].date}.json`);
@@ -130,6 +134,11 @@ async function main() {
       const endI = k + 1 < fTrs.length ? fTrs[k + 1].i : bars.length;
       fSpans.push(legSpan(bars, fTrs[k].i, endI, fTrs[k].dir));
     }
+    const big = sw.pct >= 4;
+    if (cw && fF) { if (cw.dir === fF.dir) { bothSame++; if (big) bigDay.bothSame++; } else { bothDiff++; if (big) bigDay.bothDiff++; if (cw.dir === sw.dir) diffCwRight++; else if (fF.dir === sw.dir) diffFRight++; } }
+    else if (cw) { cwOnly++; if (big) bigDay.cwOnly++; }
+    else if (fF) { fOnly++; if (big) bigDay.fOnly++; }
+    else { neither++; if (big) bigDay.neither++; }
     for (const bk of buckets) {
       if (sw.pct < bk.th) continue;
       bk.n++;
@@ -162,5 +171,9 @@ async function main() {
   console.log("\n[모델 자체 레그 기준 — 판정~다음 전환(또는 종가) 구간 내 방향성 스윙, 본주 %]");
   legStat("창판정", cwSpans);
   legStat("피셔F ", fSpans);
+  console.log("\n[판정 겹침 — 하루 첫 판정 기준]");
+  console.log(`둘 다·같은 방향 ${bothSame}일 · 둘 다·다른 방향 ${bothDiff}일 · 창판정만 ${cwOnly}일 · 피셔F만 ${fOnly}일 · 둘 다 무판정 ${neither}일 (합 ${bothSame + bothDiff + cwOnly + fOnly + neither}일)`);
+  console.log(`큰 스윙(본주 ≥4%) ${buckets[0].n}일의 분포: 공통·같은 방향 ${bigDay.bothSame} · 다른 방향 ${bigDay.bothDiff} · 창만 ${bigDay.cwOnly} · 피셔F만 ${bigDay.fOnly} · 무판정 ${bigDay.neither}`);
+  console.log(`방향 이견일 ${bothDiff}일 중 일중 최대 스윙과 일치: 창판정 ${diffCwRight}일 · 피셔F ${diffFRight}일`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
