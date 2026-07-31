@@ -111,6 +111,21 @@ async function main() {
   // 판정 겹침 (사용자 질문 7/31 3차): 하루 첫 판정 기준 공통/단독/무판정
   let bothSame = 0, bothDiff = 0, cwOnly = 0, fOnly = 0, neither = 0;
   let diffCwRight = 0, diffFRight = 0; // 방향 이견일에 일중 최대 스윙 방향과 일치한 쪽
+  // 범주별 품질 (사용자 요청 7/31 4차): 큰 스윙 날을 공통/이견/창만/F만으로 나눠 각 모델 첫 판정 성적
+  type Q = { pnl: number; cut: boolean; remain: number | null };
+  type DayRec = { swPct: number; cat: "both" | "diff" | "cwOnly" | "fOnly"; cwQ: Q | null; fQ: Q | null };
+  const dayRecs: DayRec[] = [];
+  const qualOf = (bars: MinuteBar[], j: { i: number; dir: 1 | -1; px: number }, close: number, sw: Swing): Q => {
+    const s = 2.5 / 100;
+    let cut = false;
+    for (let i = j.i + 1; i < bars.length; i++) {
+      const b = bars[i];
+      if (j.dir === 1 ? b.low <= j.px * (1 - s) : b.high >= j.px * (1 + s)) { cut = true; break; }
+    }
+    const pnl = cut ? -2.5 : ((close - j.px) / j.px) * 100 * j.dir;
+    const remain = j.dir === sw.dir && j.i <= sw.endI ? ((sw.endPx - j.px) / j.px) * 100 * sw.dir : null;
+    return { pnl, cut, remain };
+  };
   const bigDay = { bothSame: 0, bothDiff: 0, cwOnly: 0, fOnly: 0, neither: 0 }; // 본주 스윙 ≥4% 날의 분포
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`000660-${daily[i].date}.json`);
@@ -139,6 +154,14 @@ async function main() {
     else if (cw) { cwOnly++; if (big) bigDay.cwOnly++; }
     else if (fF) { fOnly++; if (big) bigDay.fOnly++; }
     else { neither++; if (big) bigDay.neither++; }
+    if (cw || fF) {
+      dayRecs.push({
+        swPct: sw.pct,
+        cat: cw && fF ? (cw.dir === fF.dir ? "both" : "diff") : cw ? "cwOnly" : "fOnly",
+        cwQ: cw ? qualOf(bars, cw, daily[i].close, sw) : null,
+        fQ: fF ? qualOf(bars, fF, daily[i].close, sw) : null,
+      });
+    }
     for (const bk of buckets) {
       if (sw.pct < bk.th) continue;
       bk.n++;
@@ -175,5 +198,35 @@ async function main() {
   console.log(`둘 다·같은 방향 ${bothSame}일 · 둘 다·다른 방향 ${bothDiff}일 · 창판정만 ${cwOnly}일 · 피셔F만 ${fOnly}일 · 둘 다 무판정 ${neither}일 (합 ${bothSame + bothDiff + cwOnly + fOnly + neither}일)`);
   console.log(`큰 스윙(본주 ≥4%) ${buckets[0].n}일의 분포: 공통·같은 방향 ${bigDay.bothSame} · 다른 방향 ${bigDay.bothDiff} · 창만 ${bigDay.cwOnly} · 피셔F만 ${bigDay.fOnly} · 무판정 ${bigDay.neither}`);
   console.log(`방향 이견일 ${bothDiff}일 중 일중 최대 스윙과 일치: 창판정 ${diffCwRight}일 · 피셔F ${diffFRight}일`);
+  // 범주별 품질 상세 (진입 = 각 모델 첫 판정, 스탑 -2.5% 또는 종가 보유)
+  const fmtQ = (qs: Q[]): string => {
+    if (!qs.length) return "0건";
+    const avg = qs.reduce((a, q) => a + q.pnl, 0) / qs.length;
+    const win = Math.round((100 * qs.filter((q) => q.pnl > 0).length) / qs.length);
+    const cut = Math.round((100 * qs.filter((q) => q.cut).length) / qs.length);
+    const rem = qs.map((q) => q.remain).filter((v): v is number => v !== null);
+    const remS = rem.length ? `잔여중앙 ${medOf(rem).toFixed(2)}%(${rem.length}건)` : "잔여 —";
+    const sum = qs.reduce((a, q) => a + q.pnl, 0);
+    return `${qs.length}건 평균 ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%·승률 ${win}%·컷률 ${cut}%·합 ${sum >= 0 ? "+" : ""}${sum.toFixed(1)}%p·${remS}`;
+  };
+  const CATS = [
+    { key: "both" as const, ko: "공통(같은 방향)" },
+    { key: "diff" as const, ko: "이견(다른 방향)" },
+    { key: "cwOnly" as const, ko: "창판정만" },
+    { key: "fOnly" as const, ko: "피셔F만" },
+  ];
+  for (const th of [4, 6]) {
+    console.log(`\n[범주별 품질 — 본주 스윙 ≥${th}% 날, 진입=각 모델 첫 판정·스탑 -2.5%·종가 보유]`);
+    for (const c of CATS) {
+      const rows = dayRecs.filter((r) => r.swPct >= th && r.cat === c.key);
+      if (!rows.length) { console.log(`${c.ko}: 0일`); continue; }
+      console.log(`${c.ko}: ${rows.length}일`);
+      const fQ = rows.map((r) => r.fQ).filter((q): q is Q => q !== null);
+      const cQ = rows.map((r) => r.cwQ).filter((q): q is Q => q !== null);
+      if (fQ.length) console.log(`  피셔F 진입: ${fmtQ(fQ)}`);
+      if (cQ.length) console.log(`  창판정 진입: ${fmtQ(cQ)}`);
+    }
+  }
+  console.log("주: 잔여 = 판정가→그날 최대 스윙 극점까지 남은 폭(스윙과 동방향 판정만 산출).");
 }
 main().catch((e) => { console.error(e); process.exit(1); });
