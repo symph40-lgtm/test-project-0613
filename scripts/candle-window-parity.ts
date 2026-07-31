@@ -24,8 +24,9 @@ const rc = (f: string): MinuteBar[] | null => {
 };
 const tMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 
-// 피셔 기준선 (prog5-all-sweep.ts와 동일 상수) — 첫 판정 시각 비교용
-function fisherFirst(bars: MinuteBar[], r10: number, off: number, conf: number, sb: number, rev: number, emMult: number, emUntilMin: number): number | null {
+// 피셔 기준선 (prog5-all-sweep.ts와 동일 상수) — 첫 판정 시각·방향·가격
+type FirstJ = { i: number; t: number; dir: 1 | -1; px: number };
+function fisherFirst(bars: MinuteBar[], r10: number, off: number, conf: number, sb: number, rev: number, emMult: number, emUntilMin: number): FirstJ | null {
   if (bars.length < 16) return null;
   const orH = Math.max(...bars.slice(0, 15).map((b) => b.high));
   const orL = Math.min(...bars.slice(0, 15).map((b) => b.low));
@@ -40,9 +41,22 @@ function fisherFirst(bars: MinuteBar[], r10: number, off: number, conf: number, 
       if (b.close > aUp + sbW) up = Math.max(up, conf);
       if (b.close < aDn - sbW) dn = Math.max(dn, conf);
     }
-    if (up >= conf || dn >= conf) return tMin(b.time);
+    if (up >= conf) return { i, t: tMin(b.time), dir: 1, px: b.close };
+    if (dn >= conf) return { i, t: tMin(b.time), dir: -1, px: b.close };
   }
   return null;
+}
+// 극점 기준 (사용자 정의 7/31): 판정 이전 구간의 최저 저가(상승)/최고 고가(하락) = 레그 출발점
+function fromExtreme(bars: MinuteBar[], j: FirstJ): { lagMin: number; consumedPct: number } {
+  let bi = 0, bv = j.dir === 1 ? Infinity : -Infinity;
+  for (let k = 0; k <= j.i; k++) {
+    const v = j.dir === 1 ? bars[k].low : bars[k].high;
+    if (j.dir === 1 ? v < bv : v > bv) { bv = v; bi = k; }
+  }
+  return {
+    lagMin: j.t - tMin(bars[bi].time),
+    consumedPct: (j.dir === 1 ? (j.px - bv) / bv : (bv - j.px) / bv) * 100,
+  };
 }
 const fmtT = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const med = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
@@ -54,6 +68,9 @@ async function main() {
   let holdSum = 0, flipSum = 0;
   const firsts: number[] = [];
   const leadF: number[] = [], leadM: number[] = []; // 창판정 - 피셔 (분, 음수 = 창이 빠름)
+  type Ex = { lagMin: number; consumedPct: number };
+  const exCw: Ex[] = [], exF: Ex[] = [], exM: Ex[] = [];
+  let hhN = 0, hhCwFasterT = 0, hhCwFasterP = 0; // 동방향 맞대결: 극점→판정 시간/가격소모에서 창이 우세한 날
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`000660-${daily[i].date}.json`);
     const pre = rc(`000660NX-${daily[i].date}.json`);
@@ -69,10 +86,21 @@ async function main() {
     entries++;
     const cwT = tMin(bars[e.i].time);
     firsts.push(cwT);
-    const fT = fisherFirst(bars, r10, 0.05, 4, 0.1, 3, 3, tMin("10:30"));
-    const mT = fisherFirst(bars, r10, 0.10, 8, 0, 3, 1.25, tMin("10:30"));
-    if (fT !== null) leadF.push(cwT - fT);
-    if (mT !== null) leadM.push(cwT - mT);
+    const cwJ: FirstJ = { i: e.i, t: cwT, dir: e.to === "up" ? 1 : -1, px: e.px };
+    const fJ = fisherFirst(bars, r10, 0.05, 4, 0.1, 3, 3, tMin("10:30"));
+    const mJ = fisherFirst(bars, r10, 0.10, 8, 0, 3, 1.25, tMin("10:30"));
+    if (fJ) leadF.push(cwT - fJ.t);
+    if (mJ) leadM.push(cwT - mJ.t);
+    const exC = fromExtreme(bars, cwJ);
+    exCw.push(exC);
+    if (fJ) exF.push(fromExtreme(bars, fJ));
+    if (mJ) exM.push(fromExtreme(bars, mJ));
+    if (fJ && fJ.dir === cwJ.dir) {
+      const exFd = fromExtreme(bars, fJ);
+      hhN++;
+      if (exC.lagMin < exFd.lagMin) hhCwFasterT++;
+      if (exC.consumedPct < exFd.consumedPct) hhCwFasterP++;
+    }
     const sgn = e.to === "up" ? 1 : -1;
     const s = 2.5 / 100;
     let cutT: string | null = null;
@@ -100,5 +128,16 @@ async function main() {
   };
   speedLine("피셔F", leadF);
   speedLine("피셔M", leadM);
+  // 극점(레그 출발점) 기준 — 상승은 판정 전 최저 저가, 하락은 최고 고가에서부터
+  const exLine = (name: string, a: Ex[]) => {
+    if (!a.length) return;
+    const lag = a.map((x) => x.lagMin), con = a.map((x) => x.consumedPct);
+    const avgC = con.reduce((x, y) => x + y, 0) / con.length;
+    console.log(`극점→판정 ${name}: ${a.length}일 — 시간 중앙 ${med(lag)}분·평균 ${(lag.reduce((x, y) => x + y, 0) / lag.length).toFixed(0)}분 · 가격소모 중앙 ${med(con).toFixed(2)}%·평균 ${avgC.toFixed(2)}%`);
+  };
+  exLine("창판정", exCw);
+  exLine("피셔F ", exF);
+  exLine("피셔M ", exM);
+  if (hhN) console.log(`동방향 맞대결 ${hhN}일: 극점→판정 시간 창 우세 ${hhCwFasterT}일(${Math.round((100 * hhCwFasterT) / hhN)}%) · 가격소모 창 우세 ${hhCwFasterP}일(${Math.round((100 * hhCwFasterP) / hhN)}%)`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
