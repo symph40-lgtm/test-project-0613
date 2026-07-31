@@ -178,7 +178,7 @@ async function main() {
   }
   const abs = swings.map(Math.abs).sort((a, b) => a - b);
   const medSw = abs[Math.floor(abs.length / 2)];
-  console.log(`${daysN}일 — 일중 최대 방향 스윙(본주): 중앙 ${medSw.toFixed(2)}% · ≥4% ${abs.filter((v) => v >= 4).length}일 · ≥6% ${abs.filter((v) => v >= 6).length}일 · ≥8% ${abs.filter((v) => v >= 8).length}일`);
+  console.log(`${daysN}일 — 일중 최대 방향 스윙(본주): 중앙 ${medSw.toFixed(2)}% · ≥4% ${abs.filter((v) => v >= 4).length}일 · ≥5% ${abs.filter((v) => v >= 5).length}일 · ≥6% ${abs.filter((v) => v >= 6).length}일 · ≥8% ${abs.filter((v) => v >= 8).length}일`);
   const medOf = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
   for (const bk of buckets) {
     console.log(`\n스윙 ≥${bk.th}% (ETF 2x ≈ ${bk.th * 2}%): ${bk.n}일`);
@@ -215,7 +215,7 @@ async function main() {
     { key: "cwOnly" as const, ko: "창판정만" },
     { key: "fOnly" as const, ko: "피셔F만" },
   ];
-  for (const th of [4, 6]) {
+  for (const th of [4, 5, 6]) {
     console.log(`\n[범주별 품질 — 본주 스윙 ≥${th}% 날, 진입=각 모델 첫 판정·스탑 -2.5%·종가 보유]`);
     for (const c of CATS) {
       const rows = dayRecs.filter((r) => r.swPct >= th && r.cat === c.key);
