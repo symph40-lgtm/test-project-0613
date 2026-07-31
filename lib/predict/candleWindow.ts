@@ -1,8 +1,9 @@
 // 하닉 6봉 창판정 페이퍼 스트림 (사용자 승인 2026-07-31 "두가지 적용해줘. 문자 보내줘").
 // 분봉 형태(6봉 윈도우) 판정 — scripts/candle-window-judge.ts(ff7cad1) 227일 실측 근거:
 //   고정눈금(직전 ≤30봉 평균 고저폭×0.5 = 1봉당 45°) · 진입 = 일 최초 풀판정 · 스탑 본주 -2.5%.
-//   종가보유 110건 평균 +0.70%·승률 54%·컷률 25%·합 +76.8%p / 전환청산 +0.54%·컷률 17%·+59.0%p
-//   (피셔F 231건 +72.2%p 대비 절반 진입). 삼전은 전 눈금 적자로 제외. 10시 게이트는 수익 반감으로 기각.
+//   개별 봉 조건은 원창 6봉(사용자 확정 7/31): 종가보유 130건 평균 +0.64%·승률 54%·컷률 25%·합 +83.4%p /
+//   전환청산 +0.47%·컷률 16%·+60.5%p (피셔F 231건 +72.2%p 대비 절반 진입).
+//   삼전은 전 눈금 적자로 제외. 10시 게이트는 수익 반감으로 기각.
 // 규칙(상승, 하락은 대칭 — 사용자 스펙 7/30 밤 + 교정 7/31):
 //   ① 6봉 체인: 비교봉 시가 ≥ 기준봉 몸통(시가~종가)의 2/3 지점. 위반 봉 skip(최대 2)·우측 7·8번봉 보충.
 //   ② 체인 인접봉 몸통중간 연결 기울기 ≥40°가 5경우 중 4 이상, |기울기| ≤10° 0개.
@@ -69,7 +70,7 @@ function buildChain(bars: MinuteBar[], i: number, dir: 1 | -1): { chain: number[
 function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): number | null {
   const bc = buildChain(bars, i, dir);
   if (!bc) return null;
-  const { chain, used } = bc;
+  const { chain } = bc;
   let ge40 = 0, flat = 0, midBreak = 0;
   for (let p = 0; p < 5; p++) {
     const a = chain[p], b = chain[p + 1];
@@ -80,8 +81,9 @@ function judgeAt(bars: MinuteBar[], i: number, dir: 1 | -1, unit: number[]): num
     if (dir === 1 ? bars[b].low < m : bars[b].high > m) midBreak++;
   }
   if (ge40 < 4 || flat > 0 || midBreak > 1) return null;
+  // 개별 봉 조건은 원창 6봉(skip 포함·추가봉 제외) — 사용자 확정 2026-07-31 (실측 +76.8→+83.4%p, 질 동일)
   let thin = 0, wrongColor = 0;
-  for (const k of used) {
+  for (let k = i; k < i + 6; k++) {
     const rng = bars[k].high - bars[k].low;
     const body = Math.abs(bars[k].close - bars[k].open);
     if (rng <= 0 || body < 0.2 * rng) thin++;
@@ -171,7 +173,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const stopPx = st.dir === "up" ? e.px * (1 - STOP_PCT / 100) : e.px * (1 + STOP_PCT / 100);
       const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 기준가 아님.` : "";
       await send(`predict_cw_entry_${st.entryT.replace(":", "")}`, "medium",
-        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 이후 두 기준 병행 기록: ①종가 보유(실측 평균 +0.70%) ②반대 판정 시 청산(컷률 17%). 무응답=관찰만.`);
+        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 이후 두 기준 병행 기록: ①종가 보유(실측 평균 +0.64%) ②반대 판정 시 청산(컷률 16%). 무응답=관찰만.`);
     }
 
     // 진입 이후 이벤트 (재계산 기반 — 크론 결번이 있어도 분봉으로 소급 감지)
