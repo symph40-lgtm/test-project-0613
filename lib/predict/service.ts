@@ -572,7 +572,11 @@ async function checkpointStream(
           ? `⚠지연 통지(확인 ${confT}, ${lagMin}분 경과) — 추격 진입 금지, 현재가와 다음 전이 문자 기준으로 판단.`
           : exhaustPct !== null
             ? `⚠극값 대비 이미 ${exhaustPct.toFixed(1)}% 진행된 확인 — 추세 소진으로 남은 마진 축소(유사일 잔여 평균 -1.2~-2.0%·적중 27~33%). 추격 진입 금지, 기보유 정리·반등 유의.`
-            : guideOf(t);
+            // 삼전 10:00 진입 지연 (사용자 채택 2026-08-01 — config.ssEntryDelayHHMM 근거): 판정은 유효,
+            // 실행만 보류 → 10:00 도달 문자에서 유지 확인 후 실행. 하닉은 즉시 진입 유지.
+            : t.sym === "ss" && t.cur !== "none" && minuteOfDay < hhmmToMin(PREDICT_CONFIG.ssEntryDelayHHMM)
+              ? `▶진입 보류(삼전 10:00 지연 채택) — 10:00 도달 문자에서 방향 유지 시 ${t.tier === "F" ? "1단계 20%" : t.tier === "M" ? "2단계 +30%p(누적 50%)" : "3단계 +50%p(누적 100%)"} 실행. 청산·전환 판단은 즉시 유효.`
+              : guideOf(t);
         const stopLine = !stale && exhaustPct === null && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {
           await dispatchToChannels("signal", today, {
@@ -584,6 +588,27 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+
+      // 삼전 10:00 지연 진입 실행 문자 (사용자 채택 2026-08-01 — entry-delay-sweep 388a0c8:
+      // 새 비중 기준 삼전 +71.5→+82.1%p·컷 실손 -85→-71.8. 10:00 이전 판정은 '보류' 지침으로
+      // 나갔으므로, 도달 시점에 유지 중인 단계를 그 시점 가격으로 실행하라는 1일 1회 알림).
+      try {
+        if (minuteOfDay >= hhmmToMin(PREDICT_CONFIG.ssEntryDelayHHMM) && minuteOfDay <= hhmmToMin(PREDICT_CONFIG.ssEntryDelayHHMM) + 5) {
+          const held: string[] = [];
+          if (ssF !== "none") held.push(`F 1단계 20% ${V_KO[ssF]}`);
+          if (ssM !== "none") held.push(`M 2단계 +30%p ${V_KO[ssM]}`);
+          if (ssB !== "none") held.push(`본 3단계 +50%p ${V_KO[ssB]}`);
+          if (held.length) {
+            const pxB = ssContBars.length ? ssContBars[ssContBars.length - 1] : null;
+            await dispatchToChannels("signal", today, {
+              key: "predict_ss_delay_entry",
+              severity: "medium",
+              text: `[예측·삼전 지연진입] ▶10:00 도달 — 유지 중 단계 지금 실행: ${held.join(" · ")}${pxB ? ` (현재 ${pxB.close.toLocaleString()}원 ${pxB.time})` : ""}. 무응답=현행 유지 | 근거: 삼전 10:00 진입 지연 채택(8/1) — 227일 실측 +71.5→+82.1%p·컷 실손 -85→-71.8. 청산·전환은 지연 없이 즉시.`,
+              smsSubject: "예측 판정",
+            });
+          }
+        }
+      } catch { /* 발송 실패 무시 */ }
 
       // 판정 후 5봉 진행성 문자 (사용자 승인 2026-07-30 "모든 판정에" — docs/early-vol-policy.md):
       // 하닉·삼전 F/M/본 6조합. 판정 5분 뒤 진행폭을 기준(0.1×10일폭)과 비교해 후속 문자 1회 —
