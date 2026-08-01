@@ -575,7 +575,7 @@ async function checkpointStream(
             // 삼전 10:00 진입 지연 (사용자 채택 2026-08-01 — config.ssEntryDelayHHMM 근거): 판정은 유효,
             // 실행만 보류 → 10:00 도달 문자에서 유지 확인 후 실행. 하닉은 즉시 진입 유지.
             : t.sym === "ss" && t.cur !== "none" && minuteOfDay < hhmmToMin(PREDICT_CONFIG.ssEntryDelayHHMM)
-              ? `▶진입 보류(삼전 10:00 지연 채택) — 10:00 도달 문자에서 방향 유지 시 ${t.tier === "F" ? "1단계 20%" : t.tier === "M" ? "2단계 +30%p(누적 50%)" : "3단계 +50%p(누적 100%)"} 실행. 청산·전환 판단은 즉시 유효.`
+              ? `▶삼전은 10:00부터 진입 결정 — 지금은 관망, 10:00 문자에서 방향 유지 시 ${t.tier === "F" ? "1단계 20%" : t.tier === "M" ? "2단계 +30%p(누적 50%)" : "3단계 +50%p(누적 100%)"} 진입. 청산·전환 판단은 즉시 유효.`
               : guideOf(t);
         const stopLine = !stale && exhaustPct === null && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {
@@ -603,7 +603,7 @@ async function checkpointStream(
             await dispatchToChannels("signal", today, {
               key: "predict_ss_delay_entry",
               severity: "medium",
-              text: `[예측·삼전 지연진입] ▶10:00 도달 — 유지 중 단계 지금 실행: ${held.join(" · ")}${pxB ? ` (현재 ${pxB.close.toLocaleString()}원 ${pxB.time})` : ""}. 무응답=현행 유지 | 근거: 삼전 10:00 진입 지연 채택(8/1) — 227일 실측 +71.5→+82.1%p·컷 실손 -85→-71.8. 청산·전환은 지연 없이 즉시.`,
+              text: `[예측·삼전 진입결정] ▶10:00 진입 결정 시점 — 유지 중 단계 진입: ${held.join(" · ")}${pxB ? ` (현재 ${pxB.close.toLocaleString()}원 ${pxB.time})` : ""}. 무응답=현행 유지 | 근거: 삼전 10:00부터 진입 결정(8/1 채택) — 227일 실측 +71.5→+82.1%p·컷 실손 -85→-71.8. 청산·전환은 즉시.`,
               smsSubject: "예측 판정",
             });
           }
