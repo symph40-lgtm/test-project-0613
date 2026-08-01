@@ -28,6 +28,12 @@ export type FisherCfg = {
   // 발생하지 않는다. 스트릭·트레일 극값 계산은 프리장부터 계속 — 프리장 추세가 지속되면 이 시각의
   // 첫 충족 봉에서 확인된다. 실측: F 프리장 첫확인 하닉 3·삼전 3건 전부 컷(합 -12.0%p). ""/미지정 = 비활성.
   confirmFromHHMM?: string;
+  // 0930 OR 재박스 (사용자 제안 2026-08-01 — 8/6 반영 여부 결정 대기, 기본 비활성): 이 시각부터
+  // reboxMinutes 동안의 박스가 완성되는 시점(예: "09:30"+15분 → 09:45)부터 A선 앵커를 그 박스로
+  // 전환한다. 상태(확인 방향)는 승계, 연속봉 카운터는 리셋. 개장 30분 소란 이후의 안정 박스가
+  // 오후 전환 감지를 살린다는 실측(F +78.5→+115.6%p 등) 근거 — 스윕 재현은 scripts/or0930-live-sweep.ts.
+  reboxHHMM?: string;
+  reboxMinutes?: number;
 };
 
 export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
@@ -42,8 +48,9 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   const orHigh = Math.max(...or.map((b) => b.high));
   const orLow = Math.min(...or.map((b) => b.low));
   const offset = cfg.offsetRangeRatio * range10;
-  const aUp = orHigh + offset;
-  const aDown = orLow - offset;
+  // 활성 앵커 — 0930 OR 재박스 시 중간에 교체된다 (비활성이면 시초 OR 고정 = 기존과 동일)
+  let curOrH = orHigh;
+  let curOrL = orLow;
   // 장초반 크기 배수 — until 이전 봉만 A선·강돌파 문턱을 ×배수 (표시는 기본 A선 기준)
   const evMult = cfg.earlyVolMult ?? 1;
   const evUntil = cfg.earlyVolUntil ?? "";
@@ -64,12 +71,26 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   // 완성하면 재확인 — 직전 확인·재확인에서 30분 이상 경과분만 (톱니 문자 폭주 방지)
   const hm = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
   const reconfirms: string[] = [];
+  const transitions: { time: string; to: "up" | "down"; px: number }[] = [];
   let hadReset = false;
   let lastConfT: string | null = null;
+  // 0930 OR 재박스 준비 — 박스 완성 시각 이후 첫 봉에서 앵커 교체·카운터 리셋 (상태는 승계)
+  const reboxHH = cfg.reboxHHMM ?? "";
+  const reboxEndMin = reboxHH !== "" ? hm(reboxHH) + (cfg.reboxMinutes ?? 15) : -1;
+  let reboxed = false;
   for (const b of rest) {
+    if (reboxEndMin >= 0 && !reboxed && hm(b.time) >= reboxEndMin) {
+      const box = input.morning.filter((x) => hm(x.time) >= hm(reboxHH) && hm(x.time) < reboxEndMin);
+      if (box.length > 0) {
+        curOrH = Math.max(...box.map((x) => x.high));
+        curOrL = Math.min(...box.map((x) => x.low));
+        upRun = 0; downRun = 0; trailRun = 0;
+      }
+      reboxed = true; // 박스 결손 시 재시도 없이 시초 OR 유지 (라이브 결손 가드와 동일 태도)
+    }
     const em = early(b.time) ? evMult : 1;
-    const aUpB = em === 1 ? aUp : orHigh + offset * em;
-    const aDownB = em === 1 ? aDown : orLow - offset * em;
+    const aUpB = curOrH + offset * em;
+    const aDownB = curOrL - offset * em;
     upRun = b.close > aUpB ? upRun + 1 : 0;
     downRun = b.close < aDownB ? downRun + 1 : 0;
     if (cfg.strongBreakRatio > 0) {
@@ -80,8 +101,8 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     const canConfirm = confirmFrom === "" || b.time >= confirmFrom;
     if (state === "none") {
       if (!canConfirm) continue; // 프리장 확인 금지 — 스트릭은 위에서 계속 쌓인다
-      if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; }
-      else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; }
+      if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; transitions.push({ time: b.time, to: "up", px: b.close }); }
+      else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; transitions.push({ time: b.time, to: "down", px: b.close }); }
     } else if (state === "up") {
       if (trailW > 0) {
         extreme = Math.max(extreme, b.close);
@@ -90,6 +111,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       if (canConfirm && (downRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = downRun < cfg.reversalMinutes;
         state = "down"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; reversed = true; extreme = b.close; trailRun = 0;
+        transitions.push({ time: b.time, to: "down", px: b.close });
       } else if (upRun === 0) hadReset = true;
       else if (hadReset && canConfirm && upRun >= cfg.confirmMinutes && lastConfT !== null && hm(b.time) - hm(lastConfT) >= 30) {
         reconfirms.push(b.time); lastConfT = b.time; hadReset = false; // 같은 방향 재확인
@@ -102,6 +124,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       if (canConfirm && (upRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = upRun < cfg.reversalMinutes;
         state = "up"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; reversed = true; extreme = b.close; trailRun = 0;
+        transitions.push({ time: b.time, to: "up", px: b.close });
       } else if (downRun === 0) hadReset = true;
       else if (hadReset && canConfirm && downRun >= cfg.confirmMinutes && lastConfT !== null && hm(b.time) - hm(lastConfT) >= 30) {
         reconfirms.push(b.time); lastConfT = b.time; hadReset = false; // 같은 방향 재확인
@@ -109,7 +132,8 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     }
   }
 
-  const lv = `A상 ${Math.round(aUp)}·A하 ${Math.round(aDown)} (OR ${Math.round(orLow)}~${Math.round(orHigh)}, 오프셋 ${Math.round(offset)}원)`;
+  // 표시는 활성 앵커 기준 (재박스 시 0930 박스 — 비활성이면 시초 OR와 동일)
+  const lv = `A상 ${Math.round(curOrH + offset)}·A하 ${Math.round(curOrL - offset)} (OR ${Math.round(curOrL)}~${Math.round(curOrH)}, 오프셋 ${Math.round(offset)}원)`;
   if (state === "none") {
     return { model, verdict: "none", confidence: 0.5, reason: `A지점 미확인 — ${lv}` };
   }
@@ -123,5 +147,6 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     confidence: conf,
     reason: `${head} — ${lv}`,
     ...(reconfirms.length ? { reconfirms } : {}),
+    ...(transitions.length ? { transitions } : {}),
   };
 }

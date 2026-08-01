@@ -64,6 +64,9 @@ export type ModelOutput = {
   // 재확인 시각들 (사용자 지시 2026-08-01 — 상태 유지 중이라도 확인 조건이 이탈 후 다시 완성되면
   // 알림. 피셔 전용, 직전 확인·재확인에서 30분 이상 경과한 재성립만 수집)
   reconfirms?: string[];
+  // 전이 전체 기록 (2026-08-01 — 0930 OR 라이브 재현 스윕용 관측 필드): 확인·전환이 일어난
+  // 봉의 시각·방향·종가. 피셔 전용, 전이가 있을 때만 존재 — 판정·문자 로직은 이 필드를 읽지 않는다.
+  transitions?: { time: string; to: "up" | "down"; px: number }[];
 };
 
 export type DayLabelResult = {

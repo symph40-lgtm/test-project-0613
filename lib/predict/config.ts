@@ -173,6 +173,8 @@ export const PREDICT_CONFIG = {
     earlyVolMult: 1, // 장초반 크기 배수 — 기본 비활성 (F 스트림만 earlyVol로 활성, 2026-07-29)
     earlyVolUntil: "",
     confirmFromHHMM: "", // 확인 허용 시각 — 기본 비활성 (국장 F·M 스트림만 confirmFromKr로 활성, 2026-08-01)
+    reboxHHMM: "", // 0930 OR 재박스 — 기본 비활성 (8/6 반영 여부 결정 대기, scripts/or0930-live-sweep.ts)
+    reboxMinutes: 15,
   },
   // 장초반 변동성 완충 (사용자 제안·승인 2026-07-29~30 — docs/early-vol-policy.md, scripts/early-vol-sweep.ts):
   // 10:30 이전 크기 기준(오프셋·강돌파)만 배수 강화 — 시간 기준(확인·반전봉) 불변. 227일 실측:
