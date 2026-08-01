@@ -52,7 +52,7 @@ async function main() {
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const daily = (await fetchDailyPredict("000660", 500)).filter((b) => b.date < today);
   type Day = {
-    bars: MinuteBar[]; close: number; r10: number;
+    date: string; bars: MinuteBar[]; close: number; r10: number;
     fJ: ReturnType<typeof fisherFirst>;
     cw: { t: number; i: number; dir: 1 | -1; px: number } | null;
     cat: "공통" | "이견" | "F만" | "창만" | "무";
@@ -75,7 +75,7 @@ async function main() {
       progI = fJ.i + 5;
       progOk = (bars[progI].close - fJ.px) * fJ.dir >= 0.1 * r10;
     }
-    days.push({ bars, close: daily[i].close, r10, fJ, cw, cat, progI, progOk });
+    days.push({ date: daily[i].date, bars, close: daily[i].close, r10, fJ, cw, cat, progI, progOk });
   }
 
   // 트랜치 손익: 자체 앵커 스탑 -STOP% (기본 2.5 — 스탑 폭 스윕용 가변), forceI 전 강제 청산, 아니면 종가
@@ -99,6 +99,7 @@ async function main() {
   // exitOnFOpp: 창 선행일에 F가 나중에 반대로 서면 그 시점 청산 (창선행+F반대 4일 전패 실측 — 대칭 규칙)
   const run = (mid: number | null, tier3: Tier3 = null, exitOnFOpp = false): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number } => {
     let total = 0, worst = 0;
+    dayPnls = [];
     const prog: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
     const t3sum: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
     for (const d of days) {
@@ -148,9 +149,11 @@ async function main() {
       }
       total += pnl;
       worst = Math.min(worst, pnl);
+      dayPnls.push(pnl);
     }
-    return { total, prog, t3: t3sum, worst };
+    return { total, prog, t3: t3sum, worst, dayPnls };
   };
+  let dayPnls: number[] = []; // run() 호출마다 리셋 후 일별 손익 축적 (월별 분해용)
 
   const base = run(null);
   console.log(`2단 기준선 (30→창100):        합 ${base.total >= 0 ? "+" : ""}${base.total.toFixed(1)}%p · 최악일 ${base.worst.toFixed(2)}%`);
@@ -194,5 +197,27 @@ async function main() {
     }
   }
   STOP = 2.5;
+
+  // 월별 분해 (사용자 질문 2026-08-01 "장세 좋을 땐 공격, 7월 같은 하락기엔 방어가 맞지 않나"):
+  // 통합 최종안(X=0.3·창선행 F반대 청산)의 월 성적 vs 그 달 하닉 등락 — 나쁜 달이 '하락 달'인지 '무추세 달'인지.
+  {
+    const r = run(0.7, { type: "advance", x: 0.3 }, true);
+    const byMon = new Map<string, { pnl: number; n: number; cut: number; first: number; last: number; swSum: number }>();
+    days.forEach((d, di) => {
+      const mon = d.date.slice(0, 7);
+      const m = byMon.get(mon) ?? { pnl: 0, n: 0, cut: 0, first: d.close, last: d.close, swSum: 0 };
+      if (!byMon.has(mon)) m.first = d.close;
+      m.pnl += r.dayPnls[di];
+      m.n++;
+      if (r.dayPnls[di] <= -0.7) m.cut++; // 컷성 손실일 (정찰 컷 이상)
+      m.last = d.close;
+      byMon.set(mon, m);
+    });
+    console.log("\n[월별 — 통합 최종안(X=0.3) vs 하닉 등락]");
+    for (const [mon, m] of byMon) {
+      const ret = ((m.last - m.first) / m.first) * 100;
+      console.log(`${mon}: 전략 ${m.pnl >= 0 ? "+" : ""}${m.pnl.toFixed(1)}%p (${m.n}일·컷성손실 ${m.cut}일) · 하닉 ${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%`);
+    }
+  }
 }
 main().catch((e) => { console.error(e); process.exit(1); });
