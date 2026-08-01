@@ -76,8 +76,8 @@ async function main() {
       }
       return { pnl: (((endI !== undefined ? endPx ?? close : close) - px) / px) * 100 * dir, cut: false };
     };
-    // 사다리 (채택 규칙판, 서킷브레이커 없이 — 레짐 순수 비교)
-    const lad = simLadder(bars, r10, close, trs, false);
+    // 사다리 (확정 규칙판, 서킷브레이커 없이 — 레짐 순수 비교. 8/1 2차 확정 후 시그니처에 레짐 전달)
+    const lad = simLadder(bars, r10, close, trs, false, hv === "고");
     R.ladder += lad.pnl;
     R.ladderWorst = Math.min(R.ladderWorst, lad.pnl);
     if (lad.cut) R.ladderCutD++;
