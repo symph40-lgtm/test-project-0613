@@ -258,6 +258,7 @@ async function checkpointStream(
   let ssRegBars: MinuteBar[] | null = null; // 09창 반전 경보용 (2026-07-25)
   let ssContBars: MinuteBar[] | null = null; // 08 연속창 — 효율 소진 경고용 (2026-07-26)
   let ssHistBars: PredictDailyBar[] = [];
+  let ssFRe: string[] = [], ssMRe: string[] = []; // 삼전 F·M 재확인 시각 (사용자 지시 2026-08-01)
   try {
     if (minuteOfDay >= hhmmToMin("08:25")) {
       const nowHHMMs = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
@@ -283,6 +284,7 @@ async function checkpointStream(
         ssF = f.verdict; ssM = m.verdict; ssB = b.verdict;
         ssFReason = f.reason; ssMReason = m.reason; ssBReason = b.reason;
         ssFc = Math.round(f.confidence * 100); ssMc = Math.round(m.confidence * 100); ssBc = Math.round(b.confidence * 100);
+        ssFRe = f.reconfirms ?? []; ssMRe = m.reconfirms ?? [];
         ssRegBars = ssReg.length >= 20 ? ssReg : null;
         ssContBars = ssCont;
         ssHistBars = ssHist;
@@ -609,6 +611,32 @@ async function checkpointStream(
           }
         }
       } catch { /* 발송 실패 무시 */ }
+
+      // 같은 방향 재확인 문자 (사용자 지시 2026-08-01 — "이전 상태가 어떻든 현재 판정 조건이 되면
+      // 보내라": 상태 유지 중 확인 스트릭이 리셋 후 재완성되면(직전 확인에서 30분+) 알림.
+      // 7/31 실사고: M 09:10 레버 유지로 11:17 재상승(추세4)이 무음이었음. 발송은 직후 10분 내 재확인만
+      // (재배포 시 과거분 일괄 발송 방지) — 키에 시각 포함, 1건 1회.
+      try {
+        const reChecks: { sym: string; symKo: string; tierKo: string; v: Verdict; times: string[] }[] = [
+          { sym: "hx", symKo: "하닉", tierKo: "피셔F", v: hxF2, times: hxFo?.reconfirms ?? [] },
+          { sym: "hx", symKo: "하닉", tierKo: "피셔M", v: hxM2, times: hxMo?.reconfirms ?? [] },
+          { sym: "ss", symKo: "삼전", tierKo: "피셔F", v: ssF, times: ssFRe },
+          { sym: "ss", symKo: "삼전", tierKo: "피셔M", v: ssM, times: ssMRe },
+        ];
+        for (const rc2 of reChecks) {
+          if (rc2.v === "none") continue;
+          for (const t of rc2.times) {
+            const age = minuteOfDay - hhmmToMin(t);
+            if (age < 0 || age > 10) continue;
+            await dispatchToChannels("signal", today, {
+              key: `predict_reconf_${rc2.sym}${rc2.tierKo.includes("M") ? "M" : "F"}_${t.replace(":", "")}`,
+              severity: "medium",
+              text: `[예측·${rc2.symKo} ${rc2.tierKo} 재확인] ▶${V_KO[rc2.v]} 조건 재성립 — 보유 중이면 유지, 미진입·축소 상태면 해당 단계 비중 합류 검토. 무응답=현행 유지 | 근거: ${t} 같은 방향 확인이 밴드 복귀 후 다시 완성 — 중간 반대 추세를 반전으로 못 잡았던 구간을 커버하는 신호(7/31형).`,
+              smsSubject: "예측 판정",
+            });
+          }
+        }
+      } catch { /* 재확인 발송 실패 무시 */ }
 
       // 판정 후 5봉 진행성 문자 (사용자 승인 2026-07-30 "모든 판정에" — docs/early-vol-policy.md):
       // 하닉·삼전 F/M/본 6조합. 판정 5분 뒤 진행폭을 기준(0.1×10일폭)과 비교해 후속 문자 1회 —

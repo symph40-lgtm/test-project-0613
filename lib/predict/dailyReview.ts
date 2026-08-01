@@ -155,13 +155,16 @@ export async function buildDailyReview(): Promise<string | null> {
         const dir = t.pct > 0 ? "up" : "down";
         const dirKo = t.pct > 0 ? "상승" : "하락";
         // 진입 알림 = 추세 구간 내 같은 방향 첫 확인 / 반전 알림 = 추세 끝 이후 첫 반대 확인
-        const entry = confs.find((c) => c.dir === dir && tMin(c.time) >= tMin(t.sT) && tMin(c.time) <= tMin(t.eT));
+        // 시작 -3분 허용 (7/31 실사고: 09:01 인버스 확인이 추세 시작 09:02와 1분 차로 '알림 없음' 오표기)
+        const entry = confs.find((c) => c.dir === dir && tMin(c.time) >= tMin(t.sT) - 3 && tMin(c.time) <= tMin(t.eT));
         const revAl = confs.find((c) => c.dir !== dir && tMin(c.time) >= tMin(t.eT));
         let entryStr = "알림 없음(미확인)";
         if (entry) {
-          const consumed = Math.round((100 * (entry.px - t.sPx)) / (t.ePx - t.sPx)); // 소진율
+          const consumed = Math.round((100 * (entry.px - t.sPx)) / (t.ePx - t.sPx)); // 소진율(진행률)
+          // 가격% 병기 (사용자 지적 8/1: 진행률·수익률 단위 혼동 방지 — 소진 6%(+0.4%) 형태)
+          const consumedPx = ((entry.px - t.sPx) / t.sPx) * 100 * (dir === "up" ? 1 : -1);
           const remain = ((t.ePx - entry.px) / entry.px) * 100 * (dir === "up" ? 1 : -1);
-          entryStr = `${entry.tier}${entry.time} ${entry.px.toLocaleString()} 소진${consumed}%·잔여${f1(remain)}%`;
+          entryStr = `${entry.tier}${entry.time} ${entry.px.toLocaleString()} 소진${consumed}%(${f1(consumedPx)}%)·잔여${f1(remain)}%`;
         }
         lines.push(
           `${i + 1}) ${dirKo} ${t.sT}~${t.eT} ${f1(t.pct)}% (${t.sPx.toLocaleString()}→${t.ePx.toLocaleString()})\n` +

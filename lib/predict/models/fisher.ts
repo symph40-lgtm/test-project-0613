@@ -60,6 +60,12 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   let reversed = false;
   let viaTrail = false;
   const confirmFrom = cfg.confirmFromHHMM ?? "";
+  // 재확인 수집 (사용자 지시 2026-08-01): 같은 방향 유지 중 스트릭이 리셋됐다가 다시 확인 봉수를
+  // 완성하면 재확인 — 직전 확인·재확인에서 30분 이상 경과분만 (톱니 문자 폭주 방지)
+  const hm = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
+  const reconfirms: string[] = [];
+  let hadReset = false;
+  let lastConfT: string | null = null;
   for (const b of rest) {
     const em = early(b.time) ? evMult : 1;
     const aUpB = em === 1 ? aUp : orHigh + offset * em;
@@ -74,8 +80,8 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     const canConfirm = confirmFrom === "" || b.time >= confirmFrom;
     if (state === "none") {
       if (!canConfirm) continue; // 프리장 확인 금지 — 스트릭은 위에서 계속 쌓인다
-      if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
-      else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
+      if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; }
+      else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; extreme = b.close; trailRun = 0; }
     } else if (state === "up") {
       if (trailW > 0) {
         extreme = Math.max(extreme, b.close);
@@ -83,7 +89,10 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       }
       if (canConfirm && (downRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = downRun < cfg.reversalMinutes;
-        state = "down"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
+        state = "down"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; reversed = true; extreme = b.close; trailRun = 0;
+      } else if (upRun === 0) hadReset = true;
+      else if (hadReset && canConfirm && upRun >= cfg.confirmMinutes && lastConfT !== null && hm(b.time) - hm(lastConfT) >= 30) {
+        reconfirms.push(b.time); lastConfT = b.time; hadReset = false; // 같은 방향 재확인
       }
     } else {
       if (trailW > 0) {
@@ -92,7 +101,10 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       }
       if (canConfirm && (upRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = upRun < cfg.reversalMinutes;
-        state = "up"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
+        state = "up"; confirmedAt = b.time; lastConfT = b.time; hadReset = false; reversed = true; extreme = b.close; trailRun = 0;
+      } else if (downRun === 0) hadReset = true;
+      else if (hadReset && canConfirm && downRun >= cfg.confirmMinutes && lastConfT !== null && hm(b.time) - hm(lastConfT) >= 30) {
+        reconfirms.push(b.time); lastConfT = b.time; hadReset = false; // 같은 방향 재확인
       }
     }
   }
@@ -110,5 +122,6 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
     verdict: state === "up" ? "leverage" : "inverse",
     confidence: conf,
     reason: `${head} — ${lv}`,
+    ...(reconfirms.length ? { reconfirms } : {}),
   };
 }

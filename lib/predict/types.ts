@@ -61,6 +61,9 @@ export type ModelOutput = {
   verdict: Verdict;
   confidence: number; // 0~1
   reason: string;
+  // 재확인 시각들 (사용자 지시 2026-08-01 — 상태 유지 중이라도 확인 조건이 이탈 후 다시 완성되면
+  // 알림. 피셔 전용, 직전 확인·재확인에서 30분 이상 경과한 재성립만 수집)
+  reconfirms?: string[];
 };
 
 export type DayLabelResult = {
