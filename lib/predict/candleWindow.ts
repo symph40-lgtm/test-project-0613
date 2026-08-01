@@ -241,6 +241,10 @@ export async function runCandleWindowMonitor(): Promise<void> {
 
     const trs = candleJudgeStream(bars, unitArr(bars, r10));
     const hv = isHighVolDay(hist); // 레짐 분기 (전일까지 일봉 — 사용자 확정 8/1: 저변동일 종가보유·고변동일 전환청산)
+    // 대형 갭일 (사용자 채택 8/1 — tmp-gap-day 실측): 시가 |갭| ≥4%면 정찰 절반. ≥7%는 이익 0·컷 38% 구간.
+    const prevClose = hist[hist.length - 1]?.close ?? 0;
+    const gapPct = krx.length && prevClose > 0 ? ((krx[0].open - prevClose) / prevClose) * 100 : 0;
+    const gapBig = Math.abs(gapPct) >= 4;
     const admin = createAdminClient();
     const { data: stRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_state").maybeSingle();
     const prevRaw = (stRow?.value ?? null) as CwState | null;
@@ -252,6 +256,16 @@ export async function runCandleWindowMonitor(): Promise<void> {
       } catch { /* 발송 실패 무시 */ }
     };
     const paperNote = "(페이퍼 60일 채점 중 — 실투자 판정은 기존 피셔 문자)";
+
+    // 갭 경보 문자 (사용자 지시 8/1 "갭에 따른 이익·컷과 비중 지침을 같이 안내") — 개장 직후 1일 1회
+    if (gapBig && minuteOfDay >= hhmmToMin("09:01") && minuteOfDay <= hhmmToMin("09:20")) {
+      const g = gapPct.toFixed(1);
+      const big7 = Math.abs(gapPct) >= 7;
+      await send("predict_gap_hx", big7 ? "high" : "medium",
+        big7
+          ? `[예측·하닉 갭경보] ▶오늘 전 계층 정찰 비중 절반(1단계 20→10%)·증액 신중. 무응답=비중 절반 | 근거: 시가 갭 ${g}% — |갭|≥7% 21일 실측: 이익 합 0·컷일 38%(평시 17%). 판정이 늦어서가 아니라 맞아도 이어지지 않는 유형(갭 위 출발이라 추세 연료 소진). 사다리 채점 자동 반영.`
+          : `[예측·하닉 갭주의] ▶오늘 정찰 비중 절반(1단계 20→10%). 무응답=비중 절반 | 근거: 시가 갭 ${g}% — 갭 4~7% 36일 실측: 일당 +0.26%·컷일 33% (평시 +0.47·17%). 참고: 갭 2~4%는 최고 구간(+0.99)이라 4% 미만은 정상 비중. 사다리 채점 자동 반영.`);
+    }
 
     // ① 진입: 일 최초 풀판정
     if (!st.entryT && trs.length) {
@@ -274,7 +288,8 @@ export async function runCandleWindowMonitor(): Promise<void> {
       try {
         const { data: lRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ladder").maybeSingle();
         const arr = (Array.isArray(lRow?.value) ? (lRow!.value as LadRow[]) : []).filter((r) => r.date !== today);
-        const defense = arr.slice(-3).filter((r) => r.cut).length >= 2; // 서킷브레이커 K=3·M=2 (사용자 확정 8/1)
+        // 정찰 절반 = 서킷브레이커(K=3·M=2) 또는 대형 갭일(|갭|≥4%) — 사용자 확정 8/1
+        const defense = arr.slice(-3).filter((r) => r.cut).length >= 2 || gapBig;
         const lad = simLadder(bars, r10, krx[krx.length - 1].close, trs, defense, hv);
         ladToday = { date: today, pnl: Math.round(lad.pnl * 100) / 100, cut: lad.cut, def: defense };
         arr.push(ladToday);
