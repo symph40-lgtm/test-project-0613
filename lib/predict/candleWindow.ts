@@ -120,8 +120,89 @@ type CwState = {
   cutT?: string; cutPx?: number;
   flipT?: string; flipPx?: number;
   eodDone?: boolean;
+  ladderDone?: boolean;
 };
-type CwScore = { date: string; dir: Dir; entryT: string; entryPx: number; holdPnl: number; flipPnl: number; cut: boolean; flip: boolean };
+type CwScore = { date: string; dir: Dir; entryT: string; entryPx: number; holdPnl: number; flipPnl: number; cut: boolean; flip: boolean; ladderPnl?: number; ladderCut?: boolean };
+
+// ── 가상 4단 사다리 채점 (사용자 확정 2026-08-01 — 결산 문자 병기, 60일 실전 채점 후 승격 판단) ──
+// 규칙: F 30%(방어일 15%) → F+5분 진행성(≥0.1×r10) 70% → 전진 0.3×r10 또는 창 동의 100% /
+// 창 선행 즉시 100%·전환청산 / 이견 전량 청산 + 30분 내면 창 방향 50% 재진입 / F반대(창선행) 청산 /
+// 스탑 -2.5%·종가 청산. 서킷브레이커: 직전 3거래일 사다리 컷 ≥2 → 정찰 절반 (실측 +2.1%p·무해).
+// 실측 근거: scripts/ladder3-sweep.ts(+113.5%p)·circuit-breaker-sweep.ts. F는 프리장 게이트(09:00) 반영.
+function fisherFirstKr(bars: MinuteBar[], r10: number): { t: number; i: number; dir: 1 | -1; px: number } | null {
+  if (bars.length < 16) return null;
+  const orH = Math.max(...bars.slice(0, 15).map((b) => b.high));
+  const orL = Math.min(...bars.slice(0, 15).map((b) => b.low));
+  let up = 0, dn = 0;
+  const emUntil = hhmmToMin("10:30"), from9 = hhmmToMin("09:00");
+  for (let i = 15; i < bars.length; i++) {
+    const b = bars[i];
+    const t = hhmmToMin(b.time);
+    const em = t < emUntil ? 3 : 1;
+    const aUp = orH + 0.05 * r10 * em, aDn = orL - 0.05 * r10 * em, sbW = 0.1 * r10 * em;
+    up = b.close > aUp ? up + 1 : 0;
+    dn = b.close < aDn ? dn + 1 : 0;
+    if (b.close > aUp + sbW) up = Math.max(up, 4);
+    if (b.close < aDn - sbW) dn = Math.max(dn, 4);
+    if (t < from9) continue; // 프리장 확인 금지 (라이브 confirmFromKr 미러)
+    if (up >= 4) return { t, i, dir: 1, px: b.close };
+    if (dn >= 4) return { t, i, dir: -1, px: b.close };
+  }
+  return null;
+}
+
+export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr[], defense: boolean): { pnl: number; cut: boolean } {
+  let cut = false;
+  const tr = (i0: number, dir: 1 | -1, px: number, size: number, forceI?: number, forcePx?: number): number => {
+    if (size <= 0) return 0;
+    const s = STOP_PCT / 100;
+    const lim = forceI ?? bars.length;
+    for (let k = i0 + 1; k < lim; k++) {
+      const b = bars[k];
+      if (dir === 1 ? b.low <= px * (1 - s) : b.high >= px * (1 + s)) { cut = true; return -STOP_PCT * size; }
+    }
+    const px2 = forceI !== undefined ? (forcePx ?? close) : close;
+    return ((px2 - px) / px) * 100 * dir * size;
+  };
+  const cw = trs.length ? { t: hhmmToMin(bars[trs[0].i].time), i: trs[0].i, dir: (trs[0].to === "up" ? 1 : -1) as 1 | -1, px: trs[0].px } : null;
+  const cwFlip = trs.length ? trs.find((x) => x.i > trs[0].i && x.to !== trs[0].to) ?? null : null;
+  const fJ = fisherFirstKr(bars, r10);
+  let pnl = 0;
+  const fFirst = fJ && (!cw || fJ.t < cw.t);
+  if (fFirst && fJ) {
+    const opp = cw && cw.dir !== fJ.dir;
+    const oppI = opp ? cw!.i : undefined, oppPx = opp ? cw!.px : undefined;
+    const scout = tr(fJ.i, fJ.dir, fJ.px, 0.3, oppI, oppPx);
+    pnl += defense ? scout * 0.5 : scout; // 서킷브레이커: 정찰 절반 (실측과 동일한 산식)
+    let held = 0.3;
+    const evs: { i: number; target: number; px: number }[] = [];
+    if (fJ.i + 5 < bars.length && (bars[fJ.i + 5].close - fJ.px) * fJ.dir >= 0.1 * r10) evs.push({ i: fJ.i + 5, target: 0.7, px: bars[fJ.i + 5].close });
+    for (let k = fJ.i + 1; k < bars.length; k++) {
+      if ((bars[k].close - fJ.px) * fJ.dir >= 0.3 * r10) { evs.push({ i: k, target: 1.0, px: bars[k].close }); break; }
+    }
+    if (cw && cw.dir === fJ.dir) evs.push({ i: cw.i, target: 1.0, px: cw.px });
+    evs.sort((a, b) => a.i - b.i);
+    for (const ev of evs) {
+      if (oppI !== undefined && ev.i >= oppI) break;
+      const add = ev.target - held;
+      if (add <= 0) continue;
+      pnl += tr(ev.i, fJ.dir, ev.px, add, oppI, oppPx);
+      held = ev.target;
+    }
+    if (opp && cw) {
+      // 이견: 30분 내 전환이면 창 방향 50% 재진입 (사용자 확정 — 늦으면 관망), 창 레그는 전환청산
+      if (cw.t - fJ.t <= 30) pnl += tr(cw.i, cw.dir, cw.px, 0.5, cwFlip?.i, cwFlip?.px);
+    }
+  } else if (cw) {
+    // 창 선행 100% — 청산: 전환(창 반대 풀판정)·F 반대 중 먼저, 없으면 스탑·종가
+    const fOppLate = fJ && fJ.dir !== cw.dir ? fJ : null;
+    let endI: number | undefined, endPx: number | undefined;
+    if (cwFlip && (!fOppLate || cwFlip.i <= fOppLate.i)) { endI = cwFlip.i; endPx = cwFlip.px; }
+    else if (fOppLate) { endI = fOppLate.i; endPx = fOppLate.px; }
+    pnl += tr(cw.i, cw.dir, cw.px, 1.0, endI, endPx);
+  }
+  return { pnl, cut };
+}
 
 const DIR_KO: Record<Dir, string> = { up: "상승(레버 방향)", down: "하락(인버 방향)" };
 const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
@@ -176,6 +257,31 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 기준가 아님.` : "";
       await send(`predict_cw_entry_${st.entryT.replace(":", "")}`, "medium",
         `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 청산 기준: ★전환청산(반대 판정 시 — 컷률 14%, 사용자 채택 8/1) · 종가보유는 대조 기록. 무응답=관찰만.`);
+    }
+
+    // ⑤ 가상 4단 사다리 일일 채점 (사용자 확정 2026-08-01) — 창판정 유무와 무관하게 매 거래일 기록.
+    // 8/3~8/5 데이터 분석 기간을 거쳐 8/6 시범 시행 예정 — 그때까지는 기록·결산 병기만.
+    type LadRow = { date: string; pnl: number; cut: boolean; def?: boolean };
+    let ladToday: LadRow | null = null;
+    let ladSum = 0, ladN = 0;
+    if (!st.ladderDone && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
+      try {
+        const { data: lRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ladder").maybeSingle();
+        const arr = (Array.isArray(lRow?.value) ? (lRow!.value as LadRow[]) : []).filter((r) => r.date !== today);
+        const defense = arr.slice(-3).filter((r) => r.cut).length >= 2; // 서킷브레이커 K=3·M=2 (사용자 확정 8/1)
+        const lad = simLadder(bars, r10, krx[krx.length - 1].close, trs, defense);
+        ladToday = { date: today, pnl: Math.round(lad.pnl * 100) / 100, cut: lad.cut, def: defense };
+        arr.push(ladToday);
+        const kept = arr.slice(-120);
+        ladSum = kept.reduce((a, r) => a + r.pnl, 0);
+        ladN = kept.length;
+        await admin.from("ops_settings").upsert(
+          { key: "predict_cw_ladder", value: kept, updated_at: new Date().toISOString() },
+          { onConflict: "key" },
+        );
+        st.ladderDone = true;
+        changed = true;
+      } catch { /* 사다리 채점 실패는 본 흐름 무관 */ }
     }
 
     // 진입 이후 이벤트 (재계산 기반 — 크론 결번이 있어도 분봉으로 소급 감지)
@@ -237,7 +343,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] ${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원 — ★전환청산(공식) ${pct(flipPnl)}${st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)"} · 종가보유(대조) ${pct(holdPnl)}${st.cutT ? "(스탑)" : ""} ${paperNote}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.`);
+            `[예측·하닉 창판정 결산] ${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원 — ★전환청산(공식) ${pct(flipPnl)}${st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)"} · 종가보유(대조) ${pct(holdPnl)}${st.cutT ? "(스탑)" : ""} ${paperNote}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)} · 누적 ${ladN}일 ${pct(ladSum)}.` : ""}`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }
