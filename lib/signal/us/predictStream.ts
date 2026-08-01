@@ -481,13 +481,13 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
         // 확인·스탑컷. 실측(config 주석): M 동반 시 F 적중 97% vs 미동반 50% — 미동반이면 상한 명시)
         if (t.tier === "F") {
           const mWarn = curM !== t.cur ? ` ⚠피셔M 미확인 — F 단독 적중 50%·M 동반 97%(실측). 50% 초과 금지.` : "";
-          return `▶1단계: 계획 비중 50% 진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기.${mWarn}`;
+          return `▶1단계: 비중 50%만 진입(초과 금지 — 비중 엄수가 총이익의 원천)·스탑 ETF -${stopEtfPct.toFixed(1)}%. 피셔M 중간확인 대기.${mWarn}`;
         }
         if (t.tier === "M") {
           const warn = curF !== "none" && t.cur !== curF ? " ⚠피셔F와 반대 — F 선진입분 30%p 축소 검토." : "";
-          return `▶2단계: 투자 비중 +30%p(누적 80%) 검토·스탑 ETF -${stopEtfPct.toFixed(1)}%.${warn}`;
+          return `▶2단계: +30%p 증액(누적 80% 상한 엄수)·스탑 ETF -${stopEtfPct.toFixed(1)}%.${warn}`;
         }
-        return `▶3단계: 잔여 +20%p(누적 100%) 본진입 검토·스탑 ETF -${stopEtfPct.toFixed(1)}% 고정·16:00 ET(한국 ${kstOf("16:00")}) 당일청산.`;
+        return `▶3단계: 잔여 +20%p 본진입(누적 100% 상한 — 초과 신용 금지)·스탑 ETF -${stopEtfPct.toFixed(1)}% 고정·16:00 ET(한국 ${kstOf("16:00")}) 당일청산.`;
       };
       let anyChange = false;
       for (const t of trigs) {

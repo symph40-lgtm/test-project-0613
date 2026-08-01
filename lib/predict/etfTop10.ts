@@ -108,11 +108,11 @@ export async function runEtfTop10Monitor(): Promise<void> {
           : cur === "inverse"
             ? "▶하방 — 신규 하방 체결은 기존 삼전 인버스2x 채널 문자 기준 (TOP10 전용 인버스 미상장). 488080 보유분 청산 검토."
             : t.tier === "F"
-              // 비중 역순 20/30/50 (2026-07-30 — 국장과 동일 개편, TOP10도 계층 원값 본 우위 +80.6 vs F +46.3)
-              ? `▶1단계: 계획 비중 20% 진입 검토 — 체결 ${CFG.lev.name}(${CFG.lev.code}). 피셔M 중간확인 대기.`
+              // 비중 역순 20/30/50 (2026-07-30) + 비중 엄수 표기 (사용자 지시 2026-08-01)
+              ? `▶1단계: 비중 20%만 진입(초과 금지) — 체결 ${CFG.lev.name}(${CFG.lev.code}). 피셔M 중간확인 대기.`
               : t.tier === "M"
-                ? "▶2단계: +30%p(누적 50%) 검토."
-                : "▶3단계: 본진입 +50%p(누적 100%) 검토 · 15:30 마감 전 당일청산 원칙.";
+                ? "▶2단계: +30%p 증액(누적 50% 상한 엄수)."
+                : "▶3단계: 본진입 +50%p(누적 100% 상한) · 15:30 마감 전 당일청산 원칙.";
       const stopLine = !stale && cur === "leverage" ? await levStopLine() : "";
       try {
         await dispatchToChannels("signal", today, {
