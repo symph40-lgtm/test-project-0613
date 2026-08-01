@@ -359,8 +359,11 @@ export async function runCandleWindowMonitor(): Promise<void> {
           { onConflict: "key" },
         );
         const sum = (f: (r: CmpRow) => number) => cArr.reduce((a, r) => a + f(r), 0);
-        await send("predict_nm_cmp", "low",
-          `[예측·하닉 신모델 비교] 테스트 ${cArr.length}일차 (8/3~5)\n▶정보 — 오늘: 신사다리 ${pct(ladToday.pnl)} · 0930판 ${pct(lad93.pnl)} · 현행계층 ${pct(hier)}\n무응답=관찰만\n----\n누적 ${cArr.length}일: 신사다리 ${pct(sum((r) => r.lad))} · 0930판 ${pct(sum((r) => r.l93))} · 현행계층 ${pct(sum((r) => r.hier))}. 8/6부터 시범 시행 예정(별도 오더 없으면 진행 — F 30%·진행확인 70% 지침 + F·M 0930 박스). 산식: 현행계층 = F/M/본 각자 레그 손익의 20/30/50 가중, 전 계층 스탑 본주 -2.5%·종가청산. 백테스트 227일 기대: 신사다리 +118.2·0930판 +122.0·컷일 52/227.`);
+        // 마지막 테스트일(8/5)엔 내일 시범 시작 예고 + go/no-go 기준 동봉 (사용자 확정 8/1 밤:
+        // "효과가 예상대로 나오면 목요일부터" — 3일 손익은 표본이 작아 참고, 기준은 무사고·재현 정합)
+        const lastDay = today >= PREDICT_CONFIG.newModel.cmpTo;
+        await send("predict_nm_cmp", lastDay ? "medium" : "low",
+          `[예측·하닉 신모델 비교] 테스트 ${cArr.length}일차 (8/3~5)\n▶정보 — 오늘: 신사다리 ${pct(ladToday.pnl)} · 0930판 ${pct(lad93.pnl)} · 현행계층 ${pct(hier)}\n${lastDay ? "▶내일(8/6) 아침부터 시범 자동 시작 — 중단하려면 회신\n" : ""}무응답=${lastDay ? "예정대로 시범 시작" : "관찰만"}\n----\n누적 ${cArr.length}일: 신사다리 ${pct(sum((r) => r.lad))} · 0930판 ${pct(sum((r) => r.l93))} · 현행계층 ${pct(sum((r) => r.hier))}.${lastDay ? " 시작 기준(효과가 예상대로): ①3일 문자 사고 없음(누락·시각 불일치) ②창판정 백테스트 재현 일치 ③비교 손익은 참고(3일 표본은 운이 지배 — 신사다리가 크게 뒤지지만 않으면 진행)." : " 8/6부터 시범 시행 예정(별도 오더 없으면 진행 — F 30%·진행확인 70% 지침 + F·M 0930 박스)."} 산식: 현행계층 = F/M/본 각자 레그 손익의 20/30/50 가중, 전 계층 스탑 본주 -2.5%·종가청산. 백테스트 227일 기대: 신사다리 +118.2·0930판 +122.0·컷일 52/227.`);
       } catch { /* 비교 문자 실패는 본 흐름 무관 */ }
     }
 
