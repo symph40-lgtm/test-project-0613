@@ -158,7 +158,7 @@ export async function buildDailyReview(): Promise<string | null> {
         // 시작 -3분 허용 (7/31 실사고: 09:01 인버스 확인이 추세 시작 09:02와 1분 차로 '알림 없음' 오표기)
         const entry = confs.find((c) => c.dir === dir && tMin(c.time) >= tMin(t.sT) - 3 && tMin(c.time) <= tMin(t.eT));
         const revAl = confs.find((c) => c.dir !== dir && tMin(c.time) >= tMin(t.eT));
-        let entryStr = "알림 없음(미확인)";
+        let entryStr = "판정 조건 미충족"; // 표현 교정 (사용자 지시 2026-08-01 — '알림 없음'은 발송 누락으로 오독됨)
         if (entry) {
           const consumed = Math.round((100 * (entry.px - t.sPx)) / (t.ePx - t.sPx)); // 소진율(진행률)
           // 가격% 병기 (사용자 지적 8/1: 진행률·수익률 단위 혼동 방지 — 소진 6%(+0.4%) 형태)
