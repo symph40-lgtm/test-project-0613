@@ -599,7 +599,7 @@ async function checkpointStream(
           if (ssM !== "none") held.push(`M 2단계 +30%p ${V_KO[ssM]}`);
           if (ssB !== "none") held.push(`본 3단계 +50%p ${V_KO[ssB]}`);
           if (held.length) {
-            const pxB = ssContBars.length ? ssContBars[ssContBars.length - 1] : null;
+            const pxB = ssContBars?.length ? ssContBars[ssContBars.length - 1] : null;
             await dispatchToChannels("signal", today, {
               key: "predict_ss_delay_entry",
               severity: "medium",
