@@ -118,7 +118,8 @@ export async function runEtfTop10Monitor(): Promise<void> {
         await dispatchToChannels("signal", today, {
           key: `predict_tr_etf${t.tier}_${t.prevV}_${cur}`,
           severity: t.tier === "B" ? "high" : "medium",
-          text: `[예측·TOP10 ${t.tierKo}] ${label}${cur !== "none" ? ` — ${t.out.reason.split(" — ")[0]}` : ""} (강도 ${Math.round(t.out.confidence * 100)}%·모니터링 60일 채점 중 — 실투자 판정은 기존 삼전·하닉 문자). ${guide} 무응답=현행 유지${stopLine}${stateLine}`,
+          // 액션 선두·근거 후행 (사용자 지시 2026-08-01 — 장중 빠른 판단용)
+          text: `[예측·TOP10 ${t.tierKo}] ${guide} 무응답=현행 유지 | 근거: ${label}${cur !== "none" ? ` — ${t.out.reason.split(" — ")[0]}` : ""} (강도 ${Math.round(t.out.confidence * 100)}%·모니터링 60일 채점 중 — 실투자 판정은 기존 삼전·하닉 문자)${stopLine}${stateLine}`,
           smsSubject: "예측 TOP10",
         });
       } catch { /* 발송 실패 무시 */ }
@@ -146,9 +147,10 @@ export async function runEtfTop10Monitor(): Promise<void> {
               await dispatchToChannels("signal", today, {
                 key: `predict_prog5_t10B_${B.verdict}_${confT.replace(":", "")}`,
                 severity: ok ? "low" : "medium",
+                // 액션 선두·근거 후행 (사용자 지시 2026-08-01)
                 text: ok
-                  ? `[예측·TOP10 본피셔 진행확인] ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 충족, 정상. 과거 이 경우 29건: 평균 +1.21%·승률 62%·컷률 17% — 유지.`
-                  : `[예측·TOP10 본피셔 진행경보] ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pctS(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%)뿐`} → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 미달. 과거 이 경우 151건: 평균 +0.29%·컷률 27% — 비중 축소 검토. 무응답=유지.`,
+                  ? `[예측·TOP10 본피셔 진행확인] ▶유지 | 근거: ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 충족, 정상. 과거 이 경우 29건: 평균 +1.21%·승률 62%·컷률 17%.`
+                  : `[예측·TOP10 본피셔 진행경보] ▶비중 축소 검토. 무응답=유지 | 근거: ${dirKo} 판정(${confT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pctS(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pctS(prog)}%)뿐`} → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭의 10%) 미달. 과거 이 경우 151건: 평균 +0.29%·컷률 27%.`,
                 smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
               });
             }

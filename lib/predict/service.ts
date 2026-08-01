@@ -578,7 +578,8 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_tr_${t.sym}${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[예측·${t.symKo} ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) + dc2Warn(t.sym, t.tier, confT) : ""}${stopLine}${t.cur !== "none" ? eventWarn : ""}${bothLines}`,
+            // 액션 선두·근거 후행 (사용자 지시 2026-08-01 — 장중 빠른 판단용)
+            text: `[예측·${t.symKo} ${t.tierKo}] ${guide} 무응답=현행 유지 | 근거: ${label}${t.cur !== "none" && t.reason ? ` — ${t.reason.split(" — ")[0]}` : ""} (강도 ${t.strength}%·${statCore})${!stale && t.cur !== "none" ? gapLine(t.sym) + orWarnLine(t.sym) + dc2Warn(t.sym, t.tier, confT) : ""}${stopLine}${t.cur !== "none" ? eventWarn : ""}${bothLines}`,
             smsSubject: "예측 판정",
           });
         } catch { /* 발송 실패 무시 */ }
@@ -626,9 +627,10 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_prog5_${pc.key}_${pc.v}_${progConfT.replace(":", "")}`,
             severity: ok ? "low" : "medium",
+            // 액션 선두·근거 후행 (사용자 지시 2026-08-01)
             text: ok
-              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인] ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok} — 유지.`
-              : `[예측·${pc.symKo} ${pc.tierKo} 진행경보] ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad} — 해당 단계 비중 축소 검토. 무응답=유지.`,
+              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인] ▶유지 | 근거: ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
+              : `[예측·${pc.symKo} ${pc.tierKo} 진행경보] ▶해당 단계 비중 축소 검토. 무응답=유지 | 근거: ${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad}.`,
             smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
           });
         }

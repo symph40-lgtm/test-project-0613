@@ -517,7 +517,8 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: `uspredict_tr_${t.tier}_${t.prev}_${t.cur}`,
             severity: t.tier === "B" ? "high" : "medium",
-            text: `[미국예측·SOXX ${t.tierKo}] ${label}${t.cur !== "none" && t.reason ? ` — ${headKst(t.reason.split(" — ")[0])}` : ""} (강도 ${t.strength}%·${statCore}). ${guide} 무응답=현행 유지${!stale && t.cur !== "none" ? orWarn : ""}${stopLine}${stateLine}`,
+            // 액션 선두·근거 후행 (사용자 지시 2026-08-01 — 장중 빠른 판단용)
+            text: `[미국예측·SOXX ${t.tierKo}] ${guide} 무응답=현행 유지 | 근거: ${label}${t.cur !== "none" && t.reason ? ` — ${headKst(t.reason.split(" — ")[0])}` : ""} (강도 ${t.strength}%·${statCore})${!stale && t.cur !== "none" ? orWarn : ""}${stopLine}${stateLine}`,
             smsSubject: "미국 예측",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });
@@ -560,9 +561,10 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: `uspredict_prog2_${pc.tier}_${pc.v}_${confT.replace(":", "")}`,
             severity: ok ? "low" : "medium",
+            // 액션 선두·근거 후행 (사용자 지시 2026-08-01)
             text: ok
-              ? `[미국예측·SOXX ${pc.tierKo} 진행확인] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${dirKo} 방향으로 ${prog.toFixed(2)}$(${pctS(prog)}%) 전진 → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 충족, 정상. ${statTxt} — 유지.`
-              : `[미국예측·SOXX ${pc.tierKo} 진행경보] ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${prog < 0 ? `판정 방향 반대로 ${(-prog).toFixed(2)}$(${pctS(-prog)}%) 역행` : `전진 ${prog.toFixed(2)}$(${pctS(prog)}%)뿐`} → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 미달. ${statTxt} — 해당 단계 비중 축소 검토. 무응답=유지.`,
+              ? `[미국예측·SOXX ${pc.tierKo} 진행확인] ▶유지 | 근거: ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${dirKo} 방향으로 ${prog.toFixed(2)}$(${pctS(prog)}%) 전진 → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 충족, 정상. ${statTxt}.`
+              : `[미국예측·SOXX ${pc.tierKo} 진행경보] ▶해당 단계 비중 축소 검토. 무응답=유지 | 근거: ${dirKo} 판정(${etk(confT)} ${confBar.close.toFixed(2)}$) 후 10분 — ${prog < 0 ? `판정 방향 반대로 ${(-prog).toFixed(2)}$(${pctS(-prog)}%) 역행` : `전진 ${prog.toFixed(2)}$(${pctS(prog)}%)뿐`} → 기준(전진 ${need.toFixed(2)}$=10일평균폭의 10%) 미달. ${statTxt}.`,
             smsSubject: ok ? "미국 진행확인" : "미국 진행경보",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });
