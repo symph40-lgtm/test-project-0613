@@ -78,14 +78,16 @@ async function main() {
     days.push({ bars, close: daily[i].close, r10, fJ, cw, cat, progI, progOk });
   }
 
-  // 트랜치 손익: 자체 앵커 스탑 -2.5%, forceI 전 강제 청산(그 가격), 아니면 종가
+  // 트랜치 손익: 자체 앵커 스탑 -STOP% (기본 2.5 — 스탑 폭 스윕용 가변), forceI 전 강제 청산, 아니면 종가
+  let STOP = 2.5;
+  let cutN = 0; // run별 컷 트랜치 수 (호출부에서 리셋)
   const tr = (d: Day, i0: number, dir: 1 | -1, px: number, size: number, forceI?: number, forcePx?: number): number => {
     if (size <= 0) return 0;
-    const s = 2.5 / 100;
+    const s = STOP / 100;
     const lim = forceI ?? d.bars.length;
     for (let k = i0 + 1; k < lim; k++) {
       const b = d.bars[k];
-      if (dir === 1 ? b.low <= px * (1 - s) : b.high >= px * (1 + s)) return -2.5 * size;
+      if (dir === 1 ? b.low <= px * (1 - s) : b.high >= px * (1 + s)) { cutN++; return -STOP * size; }
     }
     const px2 = forceI !== undefined ? (forcePx ?? d.close) : d.close;
     return ((px2 - px) / px) * 100 * dir * size;
@@ -181,5 +183,16 @@ async function main() {
     const r = run(0.7, { type: "advance", x }, true);
     console.log(`X=${x.toFixed(2)}: 합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p · 최악일 ${r.worst.toFixed(2)}%`);
   }
+
+  // 스탑 폭 스윕 (사용자 질문 2026-08-01 "레버 5%는 높은데 3·4%는?"): 본주 1.5/2.0/2.5 = ETF 2x 3/4/5%
+  console.log("\n[통합 최종안의 스탑 폭 스윕 — 본주 % (ETF 2x = ×2)]");
+  for (const x of [0.15, 0.3]) {
+    for (const stop of [1.5, 2.0, 2.5]) {
+      STOP = stop; cutN = 0;
+      const r = run(0.7, { type: "advance", x }, true);
+      console.log(`X=${x.toFixed(2)} 스탑 -${stop.toFixed(1)}%(ETF -${(stop * 2).toFixed(0)}%): 합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p · 최악일 ${r.worst.toFixed(2)}% · 컷 트랜치 ${cutN}회`);
+    }
+  }
+  STOP = 2.5;
 }
 main().catch((e) => { console.error(e); process.exit(1); });
