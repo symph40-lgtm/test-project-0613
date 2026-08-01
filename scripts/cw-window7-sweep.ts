@@ -132,10 +132,22 @@ const fmt = (qs: Q[]): string => {
   return `${n}건 평균 ${sum / n >= 0 ? "+" : ""}${(sum / n).toFixed(2)}%·승률 ${win}%·컷률 ${cut}%·합 ${sum >= 0 ? "+" : ""}${sum.toFixed(1)}%p`;
 };
 
+// 일중 최대 방향 스윙(%) — ≥5% 찐추세 날 필터용 (leg-size-stats.ts와 동일)
+function maxSwingPct(bars: MinuteBar[]): number {
+  let minLow = Infinity, maxHigh = -Infinity, up = 0, dn = 0;
+  for (const b of bars) {
+    if (b.low < minLow) minLow = b.low;
+    up = Math.max(up, ((b.high - minLow) / minLow) * 100);
+    if (b.high > maxHigh) maxHigh = b.high;
+    dn = Math.max(dn, ((maxHigh - b.low) / maxHigh) * 100);
+  }
+  return Math.max(up, dn);
+}
+
 async function main() {
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const daily = (await fetchDailyPredict("000660", 500)).filter((b) => b.date < today);
-  type Day = { bars: MinuteBar[]; unit: number[]; r10: number; close: number };
+  type Day = { bars: MinuteBar[]; unit: number[]; r10: number; close: number; sw: number };
   const days: Day[] = [];
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`000660-${daily[i].date}.json`);
@@ -144,10 +156,11 @@ async function main() {
     const r10 = avgRange(hist, 10);
     if (!reg || reg.length < 240 || r10 === null) continue;
     const bars = [...(pre ?? []), ...reg];
-    days.push({ bars, unit: unitArr(bars, r10), r10, close: daily[i].close });
+    days.push({ bars, unit: unitArr(bars, r10), r10, close: daily[i].close, sw: maxSwingPct(bars) });
   }
   const fFirsts = days.map((d) => fisherFirst(d.bars, d.r10));
   for (const v of [
+    { name: "5봉(4중3)     ", N: 5, skip: 2, need: 3 },
     { name: "현행 6봉(5중4)", N: 6, skip: 2, need: 4 },
     { name: "7봉 완화(6중4)", N: 7, skip: 3, need: 4 },
     { name: "7봉 강화(6중5)", N: 7, skip: 2, need: 5 },
@@ -155,12 +168,20 @@ async function main() {
     const hold: Q[] = [], flip: Q[] = [];
     let judged = 0;
     let bothSame = 0, bothDiff = 0, cwOnly = 0, fOnly = 0, neither = 0;
-    const commonHold: Q[] = [], diffHold: Q[] = [], commonF: Q[] = [], diffF: Q[] = [];
+    const commonHold: Q[] = [], diffHold: Q[] = [], commonF: Q[] = [], diffF: Q[] = [], fOnlyF: Q[] = [];
+    let c5 = 0, f5 = 0; // ≥5% 날의 공통·F만 일수
+    const commonHold5: Q[] = [], commonF5: Q[] = [], fOnlyF5: Q[] = [];
     days.forEach((d, di) => {
       const trs = stream(d.bars, d.unit, v.N, v.skip, v.need);
       const fJ = fFirsts[di];
+      const big5 = d.sw >= 5;
       if (!trs.length) {
-        if (fJ) fOnly++; else neither++;
+        if (fJ) {
+          fOnly++;
+          const fq = holdPnl(d.bars, fJ, d.close);
+          fOnlyF.push(fq);
+          if (big5) { f5++; fOnlyF5.push(fq); }
+        } else neither++;
         return;
       }
       judged++;
@@ -171,8 +192,10 @@ async function main() {
       flip.push(opp ? holdPnl(d.bars, e, d.close, opp.i, opp.px) : hq);
       if (!fJ) { cwOnly++; return; }
       const fq = holdPnl(d.bars, fJ, d.close);
-      if (fJ.dir === e.dir) { bothSame++; commonHold.push(hq); commonF.push(fq); }
-      else { bothDiff++; diffHold.push(hq); diffF.push(fq); }
+      if (fJ.dir === e.dir) {
+        bothSame++; commonHold.push(hq); commonF.push(fq);
+        if (big5) { c5++; commonHold5.push(hq); commonF5.push(fq); }
+      } else { bothDiff++; diffHold.push(hq); diffF.push(fq); }
     });
     console.log(`\n=== ${v.name} — 판정 ${judged}일 / 무판정 ${days.length - judged}일 ===`);
     console.log(`단독 종가보유: ${fmt(hold)}`);
@@ -180,6 +203,9 @@ async function main() {
     console.log(`겹침: 공통 ${bothSame} · 이견 ${bothDiff} · 창만 ${cwOnly} · F만 ${fOnly} · 무판정 ${neither}`);
     console.log(`  공통일 — 창진입: ${fmt(commonHold)} | F진입: ${fmt(commonF)}`);
     console.log(`  이견일 — 창진입: ${fmt(diffHold)} | F진입: ${fmt(diffF)}`);
+    console.log(`  F만   — F진입: ${fmt(fOnlyF)}`);
+    console.log(`  [스윙 ≥5% 날] 공통 ${c5}일 창진입: ${fmt(commonHold5)} | F진입: ${fmt(commonF5)}`);
+    console.log(`  [스윙 ≥5% 날] F만 ${f5}일 F진입: ${fmt(fOnlyF5)}`);
   }
   console.log("\n주: 진입 = 일 최초 풀판정·스탑 -2.5%. 전환청산 = 첫 반대 풀판정 시점 청산(컷 선행 시 컷).");
 }
