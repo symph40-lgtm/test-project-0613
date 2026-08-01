@@ -132,7 +132,7 @@ type CwScore = { date: string; dir: Dir; entryT: string; entryPx: number; holdPn
 // 저변동 예상일 = 전환 무시·종가보유 (+18.1%p — 저변동일 전환 신호는 가짜 다수. 당일폭 반영은 추세
 // 크기와 오염돼 열위 실측·기각) / 스탑 -2.5%·종가 청산. 서킷브레이커: 직전 3거래일 컷 ≥2 → 정찰 절반.
 // 실측: ladder3-sweep·circuit-breaker-sweep·vol-regime-sweep. F는 프리장 게이트(09:00) 반영.
-function fisherFirstKr(bars: MinuteBar[], r10: number): { t: number; i: number; dir: 1 | -1; px: number } | null {
+export function fisherFirstKr(bars: MinuteBar[], r10: number): { t: number; i: number; dir: 1 | -1; px: number } | null {
   if (bars.length < 16) return null;
   const orH = Math.max(...bars.slice(0, 15).map((b) => b.high));
   const orL = Math.min(...bars.slice(0, 15).map((b) => b.low));
@@ -154,7 +154,8 @@ function fisherFirstKr(bars: MinuteBar[], r10: number): { t: number; i: number; 
   return null;
 }
 
-export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr[], defense: boolean, highVol: boolean): { pnl: number; cut: boolean } {
+// fJOverride: F 첫 판정 주입 (0930 OR 스윕 등 변형 실측용 — 미지정 시 내부 미러로 계산, 라이브 동작 불변)
+export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr[], defense: boolean, highVol: boolean, fJOverride?: { t: number; i: number; dir: 1 | -1; px: number } | null): { pnl: number; cut: boolean } {
   let cut = false;
   const tr = (i0: number, dir: 1 | -1, px: number, size: number, forceI?: number, forcePx?: number): number => {
     if (size <= 0) return 0;
@@ -169,7 +170,7 @@ export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr
   };
   const cw = trs.length ? { t: hhmmToMin(bars[trs[0].i].time), i: trs[0].i, dir: (trs[0].to === "up" ? 1 : -1) as 1 | -1, px: trs[0].px } : null;
   const cwFlip = trs.length ? trs.find((x) => x.i > trs[0].i && x.to !== trs[0].to) ?? null : null;
-  const fJ = fisherFirstKr(bars, r10);
+  const fJ = fJOverride !== undefined ? fJOverride : fisherFirstKr(bars, r10);
   let pnl = 0;
   const fFirst = fJ && (!cw || fJ.t < cw.t);
   if (fFirst && fJ) {
@@ -262,9 +263,10 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const g = gapPct.toFixed(1);
       const big7 = Math.abs(gapPct) >= 7;
       await send("predict_gap_hx", big7 ? "high" : "medium",
+        // 상단=액션만·하단=부연 (사용자 지시 2026-08-01 2차)
         big7
-          ? `[예측·하닉 갭경보] ▶오늘 전 계층 정찰 비중 절반(1단계 20→10%)·증액 신중. 무응답=비중 절반 | 근거: 시가 갭 ${g}% — |갭|≥7% 21일 실측: 이익 합 0·컷일 38%(평시 17%). 판정이 늦어서가 아니라 맞아도 이어지지 않는 유형(갭 위 출발이라 추세 연료 소진). 사다리 채점 자동 반영.`
-          : `[예측·하닉 갭주의] ▶오늘 정찰 비중 절반(1단계 20→10%). 무응답=비중 절반 | 근거: 시가 갭 ${g}% — 갭 4~7% 36일 실측: 일당 +0.26%·컷일 33% (평시 +0.47·17%). 참고: 갭 2~4%는 최고 구간(+0.99)이라 4% 미만은 정상 비중. 사다리 채점 자동 반영.`);
+          ? `[예측·하닉 갭경보]\n▶오늘 정찰 비중 절반: 1단계 20→10%\n▶증액(2·3단계) 신중\n무응답=비중 절반\n----\n시가 갭 ${g}%. |갭|≥7% 날 21일 실측: 이익 합 0·컷일 38%(평시 17%) — 판정이 맞아도 이어지지 않는 유형(갭 위 출발, 추세 연료 소진). 사다리 채점 자동 반영.`
+          : `[예측·하닉 갭주의]\n▶오늘 정찰 비중 절반: 1단계 20→10%\n무응답=비중 절반\n----\n시가 갭 ${g}%. 갭 4~7% 날 36일 실측: 일당 +0.26%·컷일 33%(평시 +0.47·17%). 갭 2~4%는 최고 수익 구간(+0.99)이라 4% 미만은 정상 비중. 사다리 채점 자동 반영.`);
     }
 
     // ① 진입: 일 최초 풀판정
@@ -276,7 +278,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const stopPx = st.dir === "up" ? e.px * (1 - STOP_PCT / 100) : e.px * (1 + STOP_PCT / 100);
       const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 기준가 아님.` : "";
       await send(`predict_cw_entry_${st.entryT.replace(":", "")}`, "medium",
-        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 청산 기준(레짐 분기): ${hv ? "★전환청산 — 고변동 예상일(반대 판정 시 청산)" : "★종가보유 — 저변동 예상일(전환 신호 무시)"} · 다른 기준은 대조 기록. 무응답=관찰만.`);
+        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정\n▶페이퍼 관찰만(실투자 지침 아님) — ${st.entryT} ${e.px.toLocaleString()}원·스탑 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%)\n무응답=관찰만\n----\n6봉 형태 조건 충족.${lagNote} 오늘 청산 기준(레짐): ${hv ? "★전환청산(고변동 예상일 — 반대 판정 시 청산)" : "★종가보유(저변동 예상일 — 전환 신호 무시)"}, 다른 기준은 대조 기록. ${paperNote}`);
     }
 
     // ⑤ 가상 4단 사다리 일일 채점 (사용자 확정 2026-08-01) — 창판정 유무와 무관하게 매 거래일 기록.
@@ -321,7 +323,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           changed = true;
           const beforeFlip = flipMin === null || hhmmToMin(b.time) <= flipMin;
           await send(`predict_cw_cut_${b.time.replace(":", "")}`, "medium",
-            `[예측·하닉 창판정] 스탑 도달 — ${b.time} 진입가 대비 -${STOP_PCT}% ${paperNote}. ${beforeFlip ? "두 기준(종가보유·전환청산) 모두 이 시점 -2.5%로 기록." : "종가보유 기준 -2.5% 기록 (전환청산 기준은 이미 전환 시점에 확정)."} 무응답=관찰만.`);
+            `[예측·하닉 창판정] 스탑 도달\n▶기록만(페이퍼) — 재진입 없음(확정규칙)\n무응답=관찰만\n----\n${b.time} 진입가 대비 -${STOP_PCT}%. ${beforeFlip ? "두 기준(종가보유·전환청산) 모두 이 시점 -2.5%로 기록." : "종가보유 기준 -2.5% 기록(전환청산 기준은 이미 전환 시점에 확정)."} ${paperNote}`);
           break;
         }
       }
@@ -334,7 +336,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const cutBefore = st.cutT !== undefined && hhmmToMin(st.cutT) < hhmmToMin(st.flipT);
           const flipPnl = cutBefore ? -STOP_PCT : ((flip.px - st.entryPx) / st.entryPx) * 100 * sgn;
           await send(`predict_cw_flip_${st.flipT.replace(":", "")}`, "medium",
-            `[예측·하닉 창판정] 추세 전환 — ${st.flipT} 반대 방향(${DIR_KO[flip.to]}) 풀판정 ${paperNote}.${hv ? "" : " 저변동 예상일 — 공식 기준은 전환 무시·보유 지속."} 전환청산 기준 ${pct(flipPnl)}${cutBefore ? "(선행 스탑)" : ` (진입 ${st.entryPx.toLocaleString()} → ${flip.px.toLocaleString()}원)`}. 종가보유 기준은 계속 보유 중. 무응답=관찰만.`);
+            `[예측·하닉 창판정] 추세 전환 발생\n${hv ? "▶전환청산 기준: 이 시점 청산 확정 (고변동 예상일)" : "▶공식 기준(저변동 예상일): 전환 무시·보유 지속"}\n▶반대 방향 재진입 금지(확정규칙 — 창 전환 후 재진입 -22.5%p 실측)\n무응답=관찰만\n----\n${st.flipT} 반대 방향(${DIR_KO[flip.to]}) 풀판정. 전환청산 기준 ${pct(flipPnl)}${cutBefore ? "(선행 스탑)" : ` (진입 ${st.entryPx.toLocaleString()} → ${flip.px.toLocaleString()}원)`}, 종가보유 기준은 계속 보유 중. ${paperNote}`);
         }
       }
       // ④ 마감 결산 (15:31 이후 1회): 두 기준 성적 확정·기록
@@ -364,7 +366,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] ${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원 — ★${hv ? "전환청산" : "종가보유"}(공식·${hv ? "고" : "저"}변동일) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · ${hv ? "종가보유" : "전환청산"}(대조) ${pct(hv ? holdPnl : flipPnl)} ${paperNote}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)} · 누적 ${ladN}일 ${pct(ladSum)}.` : ""}`);
+            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)} · 누적 ${ladN}일 ${pct(ladSum)}.` : ""} ${paperNote}`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }
