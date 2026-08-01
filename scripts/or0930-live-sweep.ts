@@ -98,6 +98,10 @@ async function main() {
   const daily = (await fetchDailyPredict("000660", 500)).filter((b) => b.date < today);
   const agg = { F: [newAgg(), newAgg()], M: [newAgg(), newAgg()], B: [newAgg(), newAgg()] } as const;
   const aggBnt = [newAgg(), newAgg()];
+  // 장초반 완충 종료 스윕 (사용자 지시 2026-08-01 밤 "~10:30 → 10:00까지로 변경해봐"):
+  // F ×3·M ×1.25의 종료를 10:00으로 당겼을 때 — OR 현행/0930 각각. 사다리는 해당 F 첫판정 주입.
+  const evAgg = new Map<string, { pnl: number; cuts: number }>();
+  const evAdd = (k: string, pnl: number, cuts: number) => { const a = evAgg.get(k) ?? { pnl: 0, cuts: 0 }; a.pnl += pnl; a.cuts += cuts; evAgg.set(k, a); };
   // 박스 시작 시각 이웃 격자 (연구 '평원 09:35~55 전부 +112~121' 라이브 재현 — 첨점 여부 확인)
   const BOX_STARTS = ["09:20", "09:25", "09:30", "09:35", "09:40", "09:45"] as const;
   const boxAgg = new Map<string, { pnl: number; cuts: number }>(BOX_STARTS.map((s) => [s, { pnl: 0, cuts: 0 }]));
@@ -136,6 +140,27 @@ async function main() {
     addDay(aggBnt[0], date, legPnl(reg, bBnt, close), null);
     addDay(aggBnt[1], date, legPnl(reg0930, bVnt, close), null);
 
+    // 완충 종료 10:00 변형 — F·M × OR 현행/0930 + 사다리(F 첫판정 주입)
+    {
+      const combos: [string, Trans[], MinuteBar[]][] = [
+        ["F|10:00|현행", runStream(bars, hist, date, { ...F_CFG, earlyVolUntil: "10:00" }), bars],
+        ["F|10:00|0930", runStream(bars, hist, date, { ...F_CFG, earlyVolUntil: "10:00", ...REBOX }), bars],
+        ["M|10:00|현행", runStream(bars, hist, date, { ...M_CFG, earlyVolUntil: "10:00" }), bars],
+        ["M|10:00|0930", runStream(bars, hist, date, { ...M_CFG, earlyVolUntil: "10:00", ...REBOX }), bars],
+      ];
+      for (const [k, t, bb] of combos) {
+        const r = legPnl(bb, t, close);
+        evAdd(k, r.pnl, r.cuts);
+      }
+      const idx2 = new Map<string, number>();
+      bars.forEach((b, k) => { if (!idx2.has(b.time)) idx2.set(b.time, k); });
+      const trsCw = candleJudgeStream(bars, unitArr(bars, r10));
+      for (const [k, t] of [["lad|10:00|현행", combos[0][1]], ["lad|10:00|0930", combos[1][1]]] as const) {
+        const fj = t.length ? { t: tMin(t[0].time), i: idx2.get(t[0].time) ?? -1, dir: (t[0].to === "up" ? 1 : -1) as 1 | -1, px: t[0].px } : null;
+        const l = simLadder(bars, r10, close, trsCw, false, hv, fj && fj.i >= 0 ? fj : null);
+        evAdd(k, l.pnl, l.cut ? 1 : 0);
+      }
+    }
     for (const bs of BOX_STARTS) {
       const trsF = bs === "09:30" ? fV : runStream(bars, hist, date, { ...F_CFG, reboxHHMM: bs, reboxMinutes: 15 });
       const r = legPnl(bars, trsF, close);
@@ -215,6 +240,14 @@ async function main() {
   console.log(`  → 0930 F가 발화 후 같은 방향 '전이' 도달: ${revF0930Same}일 · 시차 중앙 ${Number.isNaN(med(revLeadF)) ? "—" : `${med(revLeadF) >= 0 ? "+" : ""}${med(revLeadF)}분`} (양수 = rev9가 빠름)`);
   console.log(`  → 0930 본이 같은 방향 전이 도달: ${revB0930Same}일 · 시차 중앙 ${Number.isNaN(med(revLeadB)) ? "—" : `${med(revLeadB) >= 0 ? "+" : ""}${med(revLeadB)}분`}`);
   console.log(`  → 현행 본(이동 없음) 자체 전환 도달: ${revBCurSame}일 · 시차 중앙 ${Number.isNaN(med(revLeadBCur)) ? "—" : `${med(revLeadBCur) >= 0 ? "+" : ""}${med(revLeadBCur)}분`} — rev9 리드의 현재 가치`);
+  console.log(`\n[장초반 완충 종료 — 10:30(현행) vs 10:00 (사용자 지시 8/1 밤)]`);
+  const ev = (k: string) => evAgg.get(k) ?? { pnl: 0, cuts: 0 };
+  console.log(`피셔F: 현행OR — 10:30 ${s1(agg.F[0].pnl)}%p(컷 ${agg.F[0].cuts}) vs 10:00 ${s1(ev("F|10:00|현행").pnl)}%p(컷 ${ev("F|10:00|현행").cuts})`);
+  console.log(`       0930OR — 10:30 ${s1(agg.F[1].pnl)}%p(컷 ${agg.F[1].cuts}) vs 10:00 ${s1(ev("F|10:00|0930").pnl)}%p(컷 ${ev("F|10:00|0930").cuts})`);
+  console.log(`피셔M: 현행OR — 10:30 ${s1(agg.M[0].pnl)}%p(컷 ${agg.M[0].cuts}) vs 10:00 ${s1(ev("M|10:00|현행").pnl)}%p(컷 ${ev("M|10:00|현행").cuts})`);
+  console.log(`       0930OR — 10:30 ${s1(agg.M[1].pnl)}%p(컷 ${agg.M[1].cuts}) vs 10:00 ${s1(ev("M|10:00|0930").pnl)}%p(컷 ${ev("M|10:00|0930").cuts})`);
+  console.log(`사다리: 현행OR — 10:30 ${s1(ladBase)}%p vs 10:00 ${s1(ev("lad|10:00|현행").pnl)}%p(컷일 ${ev("lad|10:00|현행").cuts})`);
+  console.log(`        0930OR — 10:30 ${s1(ladV)}%p vs 10:00 ${s1(ev("lad|10:00|0930").pnl)}%p(컷일 ${ev("lad|10:00|0930").cuts})`);
   console.log(`\n[박스 시작 시각 격자 — 피셔F (전환 적용은 시작+15분부터)]`);
   for (const bs of BOX_STARTS) {
     const a = boxAgg.get(bs)!;
