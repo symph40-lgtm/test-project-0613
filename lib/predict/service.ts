@@ -438,15 +438,18 @@ async function checkpointStream(
       const hxReg = krx.filter((b) => b.time < nowHHMM2);
       let hxFo: ReturnType<typeof runFisher> | null = null;
       let hxMo: ReturnType<typeof runFisher> | null = null;
+      // 신모델 시범 (사용자 지시 2026-08-01 밤 — config.newModel 근거 참조): applyFrom부터
+      // 하닉 F 지침 사다리 전환·진행성 70% 증액·F·M 0930 OR rebox. 별다른 오더 없으면 계속.
+      const nmLive = PREDICT_CONFIG.newModel.applyFrom !== "" && today >= PREDICT_CONFIG.newModel.applyFrom;
       let hxBo: ReturnType<typeof runFisher> | null = null;
       if (hxCont.length >= 20) {
         const inC = { date: today, dailyHistory: complete.slice(-120), openPx: hxCont[0].open, morning: hxCont, prevDayMinutes: null };
         // 강돌파 동봉 (2026-07-25 정합 수정): 판정 스트림·실시간 조회의 F는 강돌파 포함인데
         // 모니터 F에만 빠져 있었음 — 스펙(F 0.05·4봉+강돌파)대로 통일. 하닉 0.1.
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol 근거 참조, F 전용)
-        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
+        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...(nmLive ? PREDICT_CONFIG.newModel.rebox : {}) });
         // 장초반 크기 ×1.25 (사용자 승인 2026-07-30 — config.earlyVol.mMult 근거 참조)
-        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
+        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...(nmLive ? PREDICT_CONFIG.newModel.rebox : {}) });
       }
       if (hxReg.length >= 20) {
         hxBo = runFisher(
@@ -538,10 +541,14 @@ async function checkpointStream(
       // -2.5%p→-1.0%p. 열화 시 이 함수의 비중 숫자만 원복(50/30/20).
       // 비중 '엄수' 표기 (사용자 지시 2026-08-01: 비중 준수가 승률 아닌 총이익의 원천 — 정확히 지키도록)
       const guideOf = (t: Trig): string => {
+        const nmHx = nmLive && t.sym === "hx"; // 신모델 시범: 하닉 F만 사다리 지침 (M·본 문자는 기존 계층 유지)
         if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
-        if (t.prev !== "none" && t.prev !== t.cur) return "▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(비중 20% 초과 금지)부터.";
+        if (t.prev !== "none" && t.prev !== t.cur) return `▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(비중 ${nmHx ? "30%" : "20%"} 초과 금지)부터.`;
         const sp = fisherEtf(t.sym);
-        if (t.tier === "F") return `▶1단계: 비중 20%만 진입(초과 금지 — 비중 엄수가 총이익의 원천)·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
+        if (t.tier === "F") {
+          if (nmHx) return `▶1단계: 비중 30% 진입(초과 금지)·스탑 ETF -${sp}%. 5분 뒤 진행확인 문자에서 70% 증액 판단 (신모델 시범).`;
+          return `▶1단계: 비중 20%만 진입(초과 금지 — 비중 엄수가 총이익의 원천)·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
+        }
         if (t.tier === "M") {
           const warn = t.fDir !== "none" && t.cur !== t.fDir ? " ⚠피셔F와 반대 — F 선진입분 축소 검토." : "";
           return `▶2단계: +30%p 증액(누적 50% 상한 엄수)·스탑 ETF -${sp}%.${warn}`;
@@ -591,6 +598,18 @@ async function checkpointStream(
           });
         } catch { /* 발송 실패 무시 */ }
       }
+
+      // 신모델 시범 시행 시작 안내 (사용자 지시 2026-08-01 밤 — "별다른 오더 없으면 계속") — 시행 첫날 1회
+      try {
+        if (nmLive && today === PREDICT_CONFIG.newModel.applyFrom && minuteOfDay >= hhmmToMin("08:12") && minuteOfDay <= hhmmToMin("09:30")) {
+          await dispatchToChannels("signal", today, {
+            key: "predict_nm_start",
+            severity: "medium",
+            text: `[예측·하닉 신모델] 오늘부터 시범 시행\n▶F 판정 문자 = 사다리 지침: 30% 진입 → 진행확인 문자에서 70% 증액\n▶하닉 F·M 판정은 0930 박스 기준(09:45부터 09:30~45 박스로 전환)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/1)\n----\n8/3~5 테스트 후 예정 시행. 100% 증액(창판정 동의·전진폭 0.3×10일폭 도달) 문자는 2단계(1~2주 무사고 후) — 그때까지 30→70%까지만 문자 지침, 창판정 문자는 페이퍼 유지. M·본 문자는 기존 계층 지침 그대로. 근거: 라이브 재현 227일 사다리 +122.0%p·최악일 -3.27%(scripts/or0930-live-sweep.ts).`,
+            smsSubject: "신모델 시범",
+          });
+        }
+      } catch { /* 안내 실패 무시 */ }
 
       // 삼전 10:00 지연 진입 실행 문자 (사용자 채택 2026-08-01 — entry-delay-sweep 388a0c8:
       // 새 비중 기준 삼전 +71.5→+82.1%p·컷 실손 -85→-71.8. 10:00 이전 판정은 '보류' 지침으로
@@ -685,7 +704,7 @@ async function checkpointStream(
             severity: ok ? "low" : "medium",
             // 상단=액션만·하단=부연 (사용자 지시 2026-08-01 2차)
             text: ok
-              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인]\n▶유지 (비중 변경 없음)\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
+              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인]\n${pc.key === "hxF" && nmLive ? "▶70%로 증액 (누적 70% 상한 엄수 — 신모델 사다리 2단)" : "▶유지 (비중 변경 없음)"}\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
               : `[예측·${pc.symKo} ${pc.tierKo} 진행경보]\n▶해당 단계 비중 축소 검토\n무응답=유지\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad}.`,
             smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
           });

@@ -20,6 +20,7 @@ import { PREDICT_CONFIG } from "./config";
 import { fetchDailyPredict } from "./data";
 import { avgRange, isHighVolDay } from "./indicators";
 import { fetchDayMinutes, fetchNxtPremarket, fetchTodayMinutes } from "./kisMinute";
+import { runFisher } from "./models/fisher";
 import type { MinuteBar } from "./types";
 
 const CODE = PREDICT_CONFIG.symbol; // 000660 하닉 본주
@@ -305,6 +306,62 @@ export async function runCandleWindowMonitor(): Promise<void> {
         st.ladderDone = true;
         changed = true;
       } catch { /* 사다리 채점 실패는 본 흐름 무관 */ }
+    }
+
+    // 신모델 vs 현행 비교 성능 문자 (사용자 지시 2026-08-01 밤 — 8/3~5 실전 테스트 기간, 장마감 1회):
+    // 신사다리(오늘 채점분)·0930판 사다리(F만 rebox 주입) vs 현행 계층 지침(F/M/본 각자 레그 손익
+    // 20/30/50 가중 — 계층 구조는 각 계층이 자기 신호로 진입·전환하므로 가중합이 곧 계층 성적).
+    // ladToday가 있는 실행에서만 = 하루 1회. 실패는 본 흐름 무관.
+    if (ladToday && today >= PREDICT_CONFIG.newModel.cmpFrom && today <= PREDICT_CONFIG.newModel.cmpTo) {
+      try {
+        const C = PREDICT_CONFIG;
+        const close = krx[krx.length - 1].close;
+        const mkIn = (b: MinuteBar[]) => ({ date: today, dailyHistory: hist, openPx: b[0].open, morning: b, prevDayMinutes: null });
+        const fCfg = { offsetRangeRatio: C.earlyOffsetRatio, confirmMinutes: C.earlyConfirmMinutes, strongBreakRatio: C.earlyStrongBreakRatio, reversalMinutes: C.streamReversalMinutes, earlyVolMult: C.earlyVol.mult, earlyVolUntil: C.earlyVol.until, confirmFromHHMM: C.confirmFromKr };
+        const fT = runFisher(mkIn(bars), fCfg).transitions ?? [];
+        const mT = runFisher(mkIn(bars), { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: C.streamReversalMinutes, earlyVolMult: C.earlyVol.mMult, earlyVolUntil: C.earlyVol.until, confirmFromHHMM: C.confirmFromKr }).transitions ?? [];
+        const bT = krx.length >= 20 ? runFisher(mkIn(krx), { strongBreakRatio: C.lateStrongBreakRatio, reversalMinutes: C.streamReversalMinutes, trailRangeRatio: C.hxTrail.rangeRatio, trailConfirmMinutes: C.hxTrail.confirmMinutes }).transitions ?? [] : [];
+        // 레그 회계 (stop-width-sweep 관례): 전이=진입/전환, 컷 -2.5%(앵커=확인가), 잔여 종가
+        const leg = (bb: MinuteBar[], tl: { time: string; to: Dir; px: number }[]): number => {
+          const idx = new Map<string, number>();
+          bb.forEach((x, i) => { if (!idx.has(x.time)) idx.set(x.time, i); });
+          const s = STOP_PCT / 100;
+          let p = 0;
+          for (let k = 0; k < tl.length; k++) {
+            const t = tl[k];
+            const i0 = idx.get(t.time);
+            if (i0 === undefined) continue;
+            const endI = k + 1 < tl.length ? idx.get(tl[k + 1].time) ?? bb.length : bb.length;
+            const dir = t.to === "up" ? 1 : -1;
+            let cutHit = false;
+            for (let i = i0 + 1; i < endI; i++) {
+              if (dir === 1 ? bb[i].low <= t.px * (1 - s) : bb[i].high >= t.px * (1 + s)) { cutHit = true; break; }
+            }
+            p += cutHit ? -STOP_PCT : (((k + 1 < tl.length ? tl[k + 1].px : close) - t.px) / t.px) * 100 * dir;
+          }
+          return p;
+        };
+        const hier = 0.2 * leg(bars, fT) + 0.3 * leg(bars, mT) + 0.5 * leg(krx, bT);
+        // 0930판 사다리: F 첫판정만 rebox 스트림으로 교체 (창판정·레짐·방어 동일)
+        const f93 = runFisher(mkIn(bars), { ...fCfg, ...C.newModel.rebox }).transitions ?? [];
+        const idx93 = new Map<string, number>();
+        bars.forEach((x, i) => { if (!idx93.has(x.time)) idx93.set(x.time, i); });
+        const fj93 = f93.length && idx93.has(f93[0].time)
+          ? { t: hhmmToMin(f93[0].time), i: idx93.get(f93[0].time)!, dir: (f93[0].to === "up" ? 1 : -1) as 1 | -1, px: f93[0].px }
+          : null;
+        const lad93 = simLadder(bars, r10, close, trs, ladToday.def === true, hv, fj93);
+        type CmpRow = { date: string; lad: number; l93: number; hier: number };
+        const { data: cRow } = await admin.from("ops_settings").select("value").eq("key", "predict_nm_cmp").maybeSingle();
+        const cArr = (Array.isArray(cRow?.value) ? (cRow!.value as CmpRow[]) : []).filter((r) => r.date !== today);
+        cArr.push({ date: today, lad: ladToday.pnl, l93: Math.round(lad93.pnl * 100) / 100, hier: Math.round(hier * 100) / 100 });
+        await admin.from("ops_settings").upsert(
+          { key: "predict_nm_cmp", value: cArr.slice(-30), updated_at: new Date().toISOString() },
+          { onConflict: "key" },
+        );
+        const sum = (f: (r: CmpRow) => number) => cArr.reduce((a, r) => a + f(r), 0);
+        await send("predict_nm_cmp", "low",
+          `[예측·하닉 신모델 비교] 테스트 ${cArr.length}일차 (8/3~5)\n▶정보 — 오늘: 신사다리 ${pct(ladToday.pnl)} · 0930판 ${pct(lad93.pnl)} · 현행계층 ${pct(hier)}\n무응답=관찰만\n----\n누적 ${cArr.length}일: 신사다리 ${pct(sum((r) => r.lad))} · 0930판 ${pct(sum((r) => r.l93))} · 현행계층 ${pct(sum((r) => r.hier))}. 8/6부터 시범 시행 예정(별도 오더 없으면 진행 — F 30%·진행확인 70% 지침 + F·M 0930 박스). 산식: 현행계층 = F/M/본 각자 레그 손익의 20/30/50 가중, 전 계층 스탑 본주 -2.5%·종가청산. 백테스트 227일 기대: 신사다리 +118.2·0930판 +122.0·컷일 52/227.`);
+      } catch { /* 비교 문자 실패는 본 흐름 무관 */ }
     }
 
     // 진입 이후 이벤트 (재계산 기반 — 크론 결번이 있어도 분봉으로 소급 감지)
