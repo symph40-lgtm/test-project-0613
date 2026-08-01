@@ -91,9 +91,13 @@ async function main() {
     return ((px2 - px) / px) * 100 * dir * size;
   };
 
-  const run = (mid: number | null): { total: number; prog: Record<string, number>; worst: number } => {
+  // tier3 (사용자 제안 2026-08-01 "창을 기다릴 수 없으니"): 창 없이 100% 가는 제3 트리거
+  //   advance: 판정가 대비 전진 ≥ x×r10 도달 봉에서 100% / prog10: F+10봉 전진 ≥ y×r10이면 100%
+  type Tier3 = { type: "advance"; x: number } | { type: "prog10"; y: number } | null;
+  const run = (mid: number | null, tier3: Tier3 = null): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number } => {
     let total = 0, worst = 0;
     const prog: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
+    const t3sum: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
     for (const d of days) {
       let pnl = 0;
       const { fJ, cw } = d;
@@ -103,26 +107,44 @@ async function main() {
         const oppPx = cw && cw.dir !== fJ.dir ? cw.px : undefined;
         pnl += tr(d, fJ.i, fJ.dir, fJ.px, 0.3, oppI, oppPx); // ① 정찰 30%
         let held = 0.3;
-        // ② 진행성 증액 — 창 동의·반대가 그 전에 오면 생략
         const cwEventI = cw ? cw.i : Infinity;
-        if (mid !== null && d.progOk && d.progI !== null && d.progI < cwEventI) {
-          const addSize = mid - held;
-          const p = tr(d, d.progI, fJ.dir, d.bars[d.progI].close, addSize, oppI, oppPx);
+        // 제3 트리거 발동 인덱스 계산
+        let t3I: number | null = null;
+        if (tier3?.type === "advance") {
+          for (let k = fJ.i + 1; k < d.bars.length; k++) {
+            if ((d.bars[k].close - fJ.px) * fJ.dir >= tier3.x * d.r10) { t3I = k; break; }
+          }
+        } else if (tier3?.type === "prog10" && fJ.i + 10 < d.bars.length) {
+          if ((d.bars[fJ.i + 10].close - fJ.px) * fJ.dir >= tier3.y * d.r10) t3I = fJ.i + 10;
+        }
+        // 이벤트를 시간순 적용: ②진행성(→mid) · ③제3트리거(→100) · 창 동의(→100)
+        type Ev = { i: number; target: number; px: number; kind: "prog" | "t3" | "cw" };
+        const evs: Ev[] = [];
+        if (mid !== null && d.progOk && d.progI !== null) evs.push({ i: d.progI, target: mid, px: d.bars[d.progI].close, kind: "prog" });
+        if (t3I !== null) evs.push({ i: t3I, target: 1.0, px: d.bars[t3I].close, kind: "t3" });
+        if (cw && cw.dir === fJ.dir) evs.push({ i: cw.i, target: 1.0, px: cw.px, kind: "cw" });
+        evs.sort((a, b) => a.i - b.i);
+        for (const ev of evs) {
+          if (ev.i >= cwEventI && ev.kind !== "cw") continue; // 창 이벤트 이후는 창이 처리
+          if (oppI !== undefined && ev.i >= oppI) break;
+          const add = ev.target - held;
+          if (add <= 0) continue;
+          const p = tr(d, ev.i, fJ.dir, ev.px, add, oppI, oppPx);
           pnl += p;
-          held = mid;
-          if (d.cat === "공통" || d.cat === "이견" || d.cat === "F만") prog[d.cat] += p;
+          held = ev.target;
+          if (d.cat === "공통" || d.cat === "이견" || d.cat === "F만") {
+            if (ev.kind === "prog") prog[d.cat] += p;
+            if (ev.kind === "t3") t3sum[d.cat] += p;
+          }
         }
-        if (cw) {
-          if (cw.dir === fJ.dir) pnl += tr(d, cw.i, cw.dir, cw.px, 1.0 - held); // ③ 동의 → 100%
-          else pnl += tr(d, cw.i, cw.dir, cw.px, 1.0); // ③ 반대 → 역전환 100% (기존 트랜치는 위에서 강제 청산)
-        }
+        if (cw && cw.dir !== fJ.dir) pnl += tr(d, cw.i, cw.dir, cw.px, 1.0); // 반대 → 역전환 100%
       } else if (cw) {
         pnl += tr(d, cw.i, cw.dir, cw.px, 1.0); // ④ 창 선행 → 즉시 100%
       }
       total += pnl;
       worst = Math.min(worst, pnl);
     }
-    return { total, prog, worst };
+    return { total, prog, t3: t3sum, worst };
   };
 
   const base = run(null);
@@ -136,5 +158,18 @@ async function main() {
   const progDays = days.filter((dd) => dd.fJ && dd.progOk).length;
   const fDays = days.filter((dd) => dd.fJ).length;
   console.log(`\n주: F 판정 ${fDays}일 중 진행성 충족 ${progDays}일. 증액분 앵커는 5봉째 종가·스탑 -2.5%.`);
+
+  // 4단: 창 없이 100% 가는 제3 트리거 (사용자 제안 — 전진폭 도달 or 10분 2차 진행성). 중간 70% 고정.
+  console.log("\n[4단 — 30 → 70(진행성 5분) → 100(제3 트리거 or 창 동의)]");
+  const base3 = run(0.7);
+  console.log(`기준 3단(창 동의만 100): 합 ${base3.total >= 0 ? "+" : ""}${base3.total.toFixed(1)}%p · 최악일 ${base3.worst.toFixed(2)}%`);
+  for (const x of [0.15, 0.2, 0.3, 0.4]) {
+    const r = run(0.7, { type: "advance", x });
+    console.log(`전진 ≥${x.toFixed(2)}×r10 → 100:  합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p (3단 대비 ${(r.total - base3.total) >= 0 ? "+" : ""}${(r.total - base3.total).toFixed(1)}) · 최악일 ${r.worst.toFixed(2)}% · 트리거분: F만 ${r.t3["F만"] >= 0 ? "+" : ""}${r.t3["F만"].toFixed(1)} · 공통 ${r.t3["공통"] >= 0 ? "+" : ""}${r.t3["공통"].toFixed(1)} · 이견 ${r.t3["이견"] >= 0 ? "+" : ""}${r.t3["이견"].toFixed(1)}%p`);
+  }
+  for (const y of [0.15, 0.2, 0.3]) {
+    const r = run(0.7, { type: "prog10", y });
+    console.log(`10분 전진 ≥${y.toFixed(2)}×r10 → 100: 합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p (3단 대비 ${(r.total - base3.total) >= 0 ? "+" : ""}${(r.total - base3.total).toFixed(1)}) · 최악일 ${r.worst.toFixed(2)}% · 트리거분: F만 ${r.t3["F만"] >= 0 ? "+" : ""}${r.t3["F만"].toFixed(1)} · 공통 ${r.t3["공통"] >= 0 ? "+" : ""}${r.t3["공통"].toFixed(1)} · 이견 ${r.t3["이견"] >= 0 ? "+" : ""}${r.t3["이견"].toFixed(1)}%p`);
+  }
 }
 main().catch((e) => { console.error(e); process.exit(1); });
