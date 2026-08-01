@@ -189,7 +189,7 @@ async function main() {
   const legStat = (name: string, spans: number[]) => {
     const n = spans.length;
     const c = (th: number) => spans.filter((v) => v >= th).length;
-    console.log(`${name}: 레그 ${n}건 — 구간 스윙 중앙 ${medOf(spans).toFixed(2)}% · ≥4% ${c(4)}건(${Math.round((100 * c(4)) / n)}%) · ≥6% ${c(6)}건(${Math.round((100 * c(6)) / n)}%) · ≥8% ${c(8)}건(${Math.round((100 * c(8)) / n)}%)`);
+    console.log(`${name}: 레그 ${n}건 — 구간 스윙 중앙 ${medOf(spans).toFixed(2)}% · ≥4% ${c(4)}건(${Math.round((100 * c(4)) / n)}%) · ≥5% ${c(5)}건(${Math.round((100 * c(5)) / n)}%) · ≥6% ${c(6)}건(${Math.round((100 * c(6)) / n)}%) · ≥8% ${c(8)}건(${Math.round((100 * c(8)) / n)}%)`);
   };
   console.log("\n[모델 자체 레그 기준 — 판정~다음 전환(또는 종가) 구간 내 방향성 스윙, 본주 %]");
   legStat("창판정", cwSpans);
