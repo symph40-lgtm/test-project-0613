@@ -85,5 +85,48 @@ async function main() {
     for (const t of [0.2, 0.3, 0.4]) report(`무장 +${p.toFixed(1)}% 후 트레일 ${t.toFixed(1)}`, { trailR: t, armPct: p });
   }
   console.log("\n주: 트레일 = 진입 후 극값(종가) 대비 T×10일폭 되돌림 봉 종가 청산. 무장형은 미실현 +P% 도달 후에만 활성.");
+
+  // 왕복 모델 (사용자 제안 2차: "빠져나왔다가 원래 방향 재개면 약한 신호로 복귀 — 추세 관성"):
+  //   되돌림 T×r10 → 이탈(실현) → 이탈 후 저점 대비 R×r10 회복 → 같은 방향 복귀(반복 허용).
+  //   보유 중 스탑 -2.5%(트랜치 진입가 앵커)면 레그 종료. 이탈 상태로 마감이면 그대로 종료.
+  const roundTrip = (L: Leg, T: number, R: number, armPct?: number): { pnl: number; trips: number } => {
+    const s = 2.5 / 100;
+    let pnl = 0, trips = 0;
+    let inPos = true, tPx = L.px, ext = L.px, pullLow = 0;
+    let armed = armPct === undefined;
+    for (let k = L.i0 + 1; k < L.bars.length; k++) {
+      const b = L.bars[k];
+      if (inPos) {
+        if (L.dir === 1 ? b.low <= tPx * (1 - s) : b.high >= tPx * (1 + s)) return { pnl: pnl - 2.5, trips };
+        ext = L.dir === 1 ? Math.max(ext, b.close) : Math.min(ext, b.close);
+        if (!armed && armPct !== undefined && ((ext - L.px) / L.px) * 100 * L.dir >= armPct) armed = true;
+        const pullback = L.dir === 1 ? ext - b.close : b.close - ext;
+        if (armed && pullback >= T * L.r10) {
+          pnl += ((b.close - tPx) / tPx) * 100 * L.dir;
+          inPos = false; pullLow = b.close;
+        }
+      } else {
+        pullLow = L.dir === 1 ? Math.min(pullLow, b.close) : Math.max(pullLow, b.close);
+        const recover = L.dir === 1 ? b.close - pullLow : pullLow - b.close;
+        if (recover >= R * L.r10) {
+          inPos = true; trips++; tPx = b.close; ext = b.close;
+        }
+      }
+    }
+    if (inPos) pnl += ((L.close - tPx) / tPx) * 100 * L.dir;
+    return { pnl, trips };
+  };
+  console.log("\n[왕복 모델 — 이탈 T → 저점 대비 R 회복 시 복귀 (기준 A 종가보유 +83.4%p)]");
+  for (const arm of [undefined, 1.0]) {
+    for (const T of [0.15, 0.2, 0.3]) {
+      for (const R of [0.1, 0.15, 0.2]) {
+        const rs = legs.map((L) => roundTrip(L, T, R, arm));
+        const sum = rs.reduce((a, r) => a + r.pnl, 0);
+        const trips = rs.reduce((a, r) => a + r.trips, 0);
+        const win = Math.round((100 * rs.filter((r) => r.pnl > 0).length) / rs.length);
+        console.log(`${arm !== undefined ? `무장+${arm.toFixed(1)}% ` : "상시     "} T=${T.toFixed(2)} R=${R.toFixed(2)}: 합 ${sum >= 0 ? "+" : ""}${sum.toFixed(1).padStart(6)}%p · 승률 ${win}%·복귀 ${trips}회`);
+      }
+    }
+  }
 }
 main().catch((e) => { console.error(e); process.exit(1); });
