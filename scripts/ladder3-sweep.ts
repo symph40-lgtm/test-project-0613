@@ -97,7 +97,7 @@ async function main() {
   //   advance: 판정가 대비 전진 ≥ x×r10 도달 봉에서 100% / prog10: F+10봉 전진 ≥ y×r10이면 100%
   type Tier3 = { type: "advance"; x: number } | { type: "prog10"; y: number } | null;
   // exitOnFOpp: 창 선행일에 F가 나중에 반대로 서면 그 시점 청산 (창선행+F반대 4일 전패 실측 — 대칭 규칙)
-  const run = (mid: number | null, tier3: Tier3 = null, exitOnFOpp = false): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number } => {
+  const run = (mid: number | null, tier3: Tier3 = null, exitOnFOpp = false): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number; dayPnls: number[] } => {
     let total = 0, worst = 0;
     dayPnls = [];
     const prog: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
