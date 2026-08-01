@@ -138,7 +138,7 @@ async function main() {
     const sw = maxSwing(bars);
     swings.push(sw.pct * sw.dir);
     const trs = candleJudgeStream(bars, unitArr(bars, r10));
-    const cw = trs.length ? { i: trs[0].i, dir: trs[0].to === "up" ? 1 : -1, px: trs[0].px } : null;
+    const cw = trs.length ? { i: trs[0].i, dir: (trs[0].to === "up" ? 1 : -1) as 1 | -1, px: trs[0].px } : null;
     const fF = fisherFirst(bars, r10);
     for (let k = 0; k < trs.length; k++) {
       const endI = k + 1 < trs.length ? trs[k + 1].i : bars.length;

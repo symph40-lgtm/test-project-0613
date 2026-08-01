@@ -24,6 +24,10 @@ export type FisherCfg = {
   // 봉은 오프셋·강돌파를 ×earlyVolMult로 넓힘 — 시간 기준(확인·반전봉)은 불변. 1/"" = 비활성.
   earlyVolMult?: number;
   earlyVolUntil?: string;
+  // 확인 허용 시각 (사용자 지시 2026-08-01 "프리장 판정 하지 말자"): 이 시각 이전 봉에서는 확인·전환이
+  // 발생하지 않는다. 스트릭·트레일 극값 계산은 프리장부터 계속 — 프리장 추세가 지속되면 이 시각의
+  // 첫 충족 봉에서 확인된다. 실측: F 프리장 첫확인 하닉 3·삼전 3건 전부 컷(합 -12.0%p). ""/미지정 = 비활성.
+  confirmFromHHMM?: string;
 };
 
 export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput {
@@ -55,6 +59,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
   let confirmedAt: string | null = null;
   let reversed = false;
   let viaTrail = false;
+  const confirmFrom = cfg.confirmFromHHMM ?? "";
   for (const b of rest) {
     const em = early(b.time) ? evMult : 1;
     const aUpB = em === 1 ? aUp : orHigh + offset * em;
@@ -66,7 +71,9 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
       if (b.close > aUpB + sm) upRun = Math.max(upRun, cfg.confirmMinutes, cfg.reversalMinutes);
       if (b.close < aDownB - sm) downRun = Math.max(downRun, cfg.confirmMinutes, cfg.reversalMinutes);
     }
+    const canConfirm = confirmFrom === "" || b.time >= confirmFrom;
     if (state === "none") {
+      if (!canConfirm) continue; // 프리장 확인 금지 — 스트릭은 위에서 계속 쌓인다
       if (upRun >= cfg.confirmMinutes) { state = "up"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
       else if (downRun >= cfg.confirmMinutes) { state = "down"; confirmedAt = b.time; extreme = b.close; trailRun = 0; }
     } else if (state === "up") {
@@ -74,7 +81,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
         extreme = Math.max(extreme, b.close);
         trailRun = b.close < extreme - trailW ? trailRun + 1 : 0;
       }
-      if (downRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN)) {
+      if (canConfirm && (downRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = downRun < cfg.reversalMinutes;
         state = "down"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
       }
@@ -83,7 +90,7 @@ export function runFisher(input: DayInput, cfgOverride?: FisherCfg): ModelOutput
         extreme = Math.min(extreme, b.close);
         trailRun = b.close > extreme + trailW ? trailRun + 1 : 0;
       }
-      if (upRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN)) {
+      if (canConfirm && (upRun >= cfg.reversalMinutes || (trailW > 0 && trailRun >= trailN))) {
         viaTrail = upRun < cfg.reversalMinutes;
         state = "up"; confirmedAt = b.time; reversed = true; extreme = b.close; trailRun = 0;
       }

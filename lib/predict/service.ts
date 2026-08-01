@@ -162,13 +162,14 @@ async function checkpointStream(
         confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
         strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, // 강돌파 즉시확인 (2026-07-22)
         reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, // F·M도 반전 3봉 (사용자 승인 2026-07-25 2차)
+        confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, // 프리장 확인 금지 (사용자 지시 2026-08-01)
       });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = early;
     } else if (cutHHMM > PREDICT_CONFIG.earlyOffsetUntil) {
       // 본판정 구간도 강돌파 즉시확인 (2026-07-22, 스트림 전용) — 스파이크형 급변 시 8봉 대기 생략
       // + C반전 3봉 (사용자 승인 2026-07-25, 스트림 전용 — config.streamReversalMinutes 근거 참조)
-      const late = runFisher(input, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...hxTrailOpts });
+      const late = runFisher(input, { strongBreakRatio: PREDICT_CONFIG.lateStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...hxTrailOpts });
       const i = outputs.findIndex((o) => o.model === "fisher");
       if (i >= 0) outputs[i] = late;
     }
@@ -185,6 +186,7 @@ async function checkpointStream(
         confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
         strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio,
         reversalMinutes: PREDICT_CONFIG.streamReversalMinutes,
+        confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, // 프리장 확인 금지 (사용자 지시 2026-08-01)
       });
       if (fb.verdict !== "none") return { verdict: fb.verdict, strength: Number((fb.confidence * 100).toFixed(0)) };
     }
@@ -269,8 +271,8 @@ async function checkpointStream(
         const inCont = { date: today, dailyHistory: ssHist, openPx: ssCont[0].open, morning: ssCont, prevDayMinutes: null };
         // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol, F 전용·M 적용은 실측 기각)
-        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
-        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
+        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
+        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
         // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — config.ssTrail 근거 참조, 문턱 0.3 분리)
         const ssTrailOpts = isHighVolDay(ssHist)
           ? { trailRangeRatio: PREDICT_CONFIG.ssTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.ssTrail.confirmMinutes }
@@ -440,9 +442,9 @@ async function checkpointStream(
         // 강돌파 동봉 (2026-07-25 정합 수정): 판정 스트림·실시간 조회의 F는 강돌파 포함인데
         // 모니터 F에만 빠져 있었음 — 스펙(F 0.05·4봉+강돌파)대로 통일. 하닉 0.1.
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol 근거 참조, F 전용)
-        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
+        hxFo = runFisher(inC, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.earlyStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
         // 장초반 크기 ×1.25 (사용자 승인 2026-07-30 — config.earlyVol.mMult 근거 참조)
-        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
+        hxMo = runFisher(inC, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
       }
       if (hxReg.length >= 20) {
         hxBo = runFisher(

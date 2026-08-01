@@ -91,15 +91,16 @@ export async function fisherNowKr(stock: KrStock = "hx"): Promise<FisherNow> {
       // 장초반 크기 ×3 (2026-07-29 승인 — 스트림과 동일 조건 미러, 조회 일치)
       earlyVolMult: PREDICT_CONFIG.earlyVol.mult,
       earlyVolUntil: PREDICT_CONFIG.earlyVol.until,
+      confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, // 프리장 확인 금지 (사용자 지시 2026-08-01, 스트림 미러)
     });
-    M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until });
+    M = runFisher(input08, { offsetRangeRatio: 0.1, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
     if (krx && krx.length >= 20) {
       B = runFisher(
         { date: today, dailyHistory: hist, openPx: krx[0].open, morning: krx, prevDayMinutes: null },
         { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...trailOpts },
       );
     } else {
-      B = runFisher(input08, { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...trailOpts });
+      B = runFisher(input08, { strongBreakRatio: sbLate, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...trailOpts });
       bonNote = "정규장 창 형성 전 — 08시창 참고";
     }
   }

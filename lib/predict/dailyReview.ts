@@ -61,8 +61,8 @@ function confirmsOf(code: string, today: string, hist: PredictDailyBar[], pre: M
     }
   };
   const EV = PREDICT_CONFIG.earlyVol;
-  walk(cont, "F", { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: sb, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: EV.mult, earlyVolUntil: EV.until });
-  walk(cont, "M", { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: EV.mMult, earlyVolUntil: EV.until });
+  walk(cont, "F", { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: sb, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: EV.mult, earlyVolUntil: EV.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
+  walk(cont, "M", { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: EV.mMult, earlyVolUntil: EV.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
   const trailCfg = isHx ? PREDICT_CONFIG.hxTrail : PREDICT_CONFIG.ssTrail;
   const useTrail = isHx || isHighVolDay(hist);
   walk(reg, "본", { strongBreakRatio: isHx ? PREDICT_CONFIG.lateStrongBreakRatio : sb, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, ...(useTrail ? { trailRangeRatio: trailCfg.rangeRatio, trailConfirmMinutes: trailCfg.confirmMinutes } : {}) });
