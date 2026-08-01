@@ -94,7 +94,8 @@ async function main() {
   // tier3 (사용자 제안 2026-08-01 "창을 기다릴 수 없으니"): 창 없이 100% 가는 제3 트리거
   //   advance: 판정가 대비 전진 ≥ x×r10 도달 봉에서 100% / prog10: F+10봉 전진 ≥ y×r10이면 100%
   type Tier3 = { type: "advance"; x: number } | { type: "prog10"; y: number } | null;
-  const run = (mid: number | null, tier3: Tier3 = null): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number } => {
+  // exitOnFOpp: 창 선행일에 F가 나중에 반대로 서면 그 시점 청산 (창선행+F반대 4일 전패 실측 — 대칭 규칙)
+  const run = (mid: number | null, tier3: Tier3 = null, exitOnFOpp = false): { total: number; prog: Record<string, number>; t3: Record<string, number>; worst: number } => {
     let total = 0, worst = 0;
     const prog: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
     const t3sum: Record<string, number> = { 공통: 0, 이견: 0, F만: 0 };
@@ -139,7 +140,9 @@ async function main() {
         }
         if (cw && cw.dir !== fJ.dir) pnl += tr(d, cw.i, cw.dir, cw.px, 1.0); // 반대 → 역전환 100%
       } else if (cw) {
-        pnl += tr(d, cw.i, cw.dir, cw.px, 1.0); // ④ 창 선행 → 즉시 100%
+        // ④ 창 선행 → 즉시 100% (옵션: 이후 F 반대 시 그 시점 청산)
+        const fOppLate = exitOnFOpp && fJ && fJ.dir !== cw.dir;
+        pnl += tr(d, cw.i, cw.dir, cw.px, 1.0, fOppLate ? fJ!.i : undefined, fOppLate ? fJ!.px : undefined);
       }
       total += pnl;
       worst = Math.min(worst, pnl);
@@ -170,6 +173,13 @@ async function main() {
   for (const y of [0.15, 0.2, 0.3]) {
     const r = run(0.7, { type: "prog10", y });
     console.log(`10분 전진 ≥${y.toFixed(2)}×r10 → 100: 합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p (3단 대비 ${(r.total - base3.total) >= 0 ? "+" : ""}${(r.total - base3.total).toFixed(1)}) · 최악일 ${r.worst.toFixed(2)}% · 트리거분: F만 ${r.t3["F만"] >= 0 ? "+" : ""}${r.t3["F만"].toFixed(1)} · 공통 ${r.t3["공통"] >= 0 ? "+" : ""}${r.t3["공통"].toFixed(1)} · 이견 ${r.t3["이견"] >= 0 ? "+" : ""}${r.t3["이견"].toFixed(1)}%p`);
+  }
+
+  // 통합 최종안: 4단 + 창 선행일 F 반대 청산 (순서 행렬의 마지막 칸)
+  console.log("\n[통합 최종 — 4단 + 창선행 후 F반대 청산]");
+  for (const x of [0.15, 0.3]) {
+    const r = run(0.7, { type: "advance", x }, true);
+    console.log(`X=${x.toFixed(2)}: 합 ${r.total >= 0 ? "+" : ""}${r.total.toFixed(1)}%p · 최악일 ${r.worst.toFixed(2)}%`);
   }
 }
 main().catch((e) => { console.error(e); process.exit(1); });
