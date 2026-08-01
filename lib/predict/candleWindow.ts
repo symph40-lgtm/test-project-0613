@@ -10,6 +10,8 @@
 //   ③ 저점이 이전 봉 고저중간 아래 ≤1회 ④ 몸통 <20%폭 ≤1개·음봉 ≤1개 (skip 포함).
 //   유지·방향없음은 판정 유지(액션 없음) — 청산 이벤트는 반대 풀판정(전환)·스탑·종가뿐.
 // 문자·기록 전용 (실투자 판정은 기존 피셔 문자 불변) — 두 청산 기준 병행 60일 채점 후 승격 검토.
+// 공식 청산 기준 = 전환청산 (사용자 채택 2026-08-01: 창 선행 레그 실측 이익 동률·컷률 24→14%,
+// tmp-q2q3 실측 — 종가보유는 대조군으로 계속 기록).
 // 문자 키 predict_cw_* — sms_pause 허용목록 밖(정보성이라 일시정지 시 조용히 멈춤이 맞음).
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -173,7 +175,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const stopPx = st.dir === "up" ? e.px * (1 - STOP_PCT / 100) : e.px * (1 + STOP_PCT / 100);
       const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 기준가 아님.` : "";
       await send(`predict_cw_entry_${st.entryT.replace(":", "")}`, "medium",
-        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 이후 두 기준 병행 기록: ①종가 보유(실측 평균 +0.64%) ②반대 판정 시 청산(컷률 16%). 무응답=관찰만.`);
+        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 — ${st.entryT} ${e.px.toLocaleString()}원, 6봉 형태 조건 충족 ${paperNote}.${lagNote} 스탑 본주 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%). 청산 기준: ★전환청산(반대 판정 시 — 컷률 14%, 사용자 채택 8/1) · 종가보유는 대조 기록. 무응답=관찰만.`);
     }
 
     // 진입 이후 이벤트 (재계산 기반 — 크론 결번이 있어도 분봉으로 소급 감지)
@@ -235,7 +237,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] ${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원 — 종가보유 ${pct(holdPnl)}${st.cutT ? "(스탑)" : ""} · 전환청산 ${pct(flipPnl)}${st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)"} ${paperNote}. 누적 ${n}일: 종가보유 ${pct(sum((s) => s.holdPnl))} · 전환청산 ${pct(sum((s) => s.flipPnl))}.`);
+            `[예측·하닉 창판정 결산] ${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원 — ★전환청산(공식) ${pct(flipPnl)}${st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)"} · 종가보유(대조) ${pct(holdPnl)}${st.cutT ? "(스탑)" : ""} ${paperNote}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }
