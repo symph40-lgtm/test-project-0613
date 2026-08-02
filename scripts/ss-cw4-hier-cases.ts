@@ -80,6 +80,11 @@ async function main() {
     const cases: Record<string, Case> = { 공통: mk(), 이견: mk(), F만: mk(), 창만: mk(), 무: mk() };
     let ladTotal = 0, ladWorstAll = 0, ladCutDays = 0;
     let lad2Total = 0, lad2Worst = 0, lad2CutDays = 0;
+    // v3 (사용자 제안 8/2 밤): 창 50% → F 동의 시 +50%(앵커 F확인가) → F 반대 시 전량 청산
+    //   a = 청산만 / b = 청산 + F 방향 100% 역진입. F 무판정일은 50%인 채 종가.
+    let lad3aTotal = 0, lad3aWorst = 0, lad3aCut = 0;
+    let lad3bTotal = 0, lad3bWorst = 0, lad3bCut = 0;
+    const v3bCase: Record<string, number> = { 공통: 0, 이견: 0, F만: 0, 창만: 0, 무: 0 };
 
     for (const d of days) {
       const unit = unitArr(d.bars, d.r10);
@@ -152,6 +157,28 @@ async function main() {
         lad2Worst = Math.min(lad2Worst, p2);
         if (c2) lad2CutDays++;
       }
+
+      // v3a/v3b
+      for (const withRe of [false, true]) {
+        let p3 = 0, c3 = false;
+        const add3 = (r: { pnl: number; cut: boolean }) => { p3 += r.pnl; c3 = c3 || r.cut; };
+        if (fFirst && fJ) {
+          // F 선행(0~1% 희귀) — 창모델 밖이라 F 단독 100%로 처리
+          add3(tranche(d.bars, d.close, fJ.i, fJ.dir, fJ.px, 1.0));
+        } else if (cw) {
+          const fSame = fJ && fJ.dir === cw.dir ? fJ : null;
+          const fOpp = fJ && fJ.dir !== cw.dir ? fJ : null;
+          add3(tranche(d.bars, d.close, cw.i, cw.dir, cw.px, 0.5, fOpp?.i, fOpp?.px)); // 정찰 50%
+          if (fSame) add3(tranche(d.bars, d.close, fSame.i, cw.dir, fSame.px, 0.5)); // 공통 확정 → 100%
+          if (fOpp && withRe) add3(tranche(d.bars, d.close, fOpp.i, fOpp.dir, fOpp.px, 1.0)); // 역진입
+        }
+        if (withRe) {
+          lad3bTotal += p3; lad3bWorst = Math.min(lad3bWorst, p3); if (c3) lad3bCut++;
+          v3bCase[cat] += p3;
+        } else {
+          lad3aTotal += p3; lad3aWorst = Math.min(lad3aWorst, p3); if (c3) lad3aCut++;
+        }
+      }
     }
 
     console.log(`\n════ 삼전 케이스 분해 — F(라이브) × 4봉 누적 순전진 ${tanA.toFixed(1)} · ${days.length}일 ════`);
@@ -162,6 +189,8 @@ async function main() {
     }
     console.log(`사다리 프로토타입 합(하닉 규칙 그대로): ${s1(ladTotal)}%p · 최악일 ${ladWorstAll.toFixed(2)}% · 컷일 ${ladCutDays}`);
     console.log(`v2(창선행 100% → F반대 확인 시 청산+F방향 100% 역진입): ${s1(lad2Total)}%p · 최악일 ${lad2Worst.toFixed(2)}% · 컷일 ${lad2CutDays}`);
+    console.log(`v3a(창 50% → F동의 100%·F반대 청산만): ${s1(lad3aTotal)}%p · 최악일 ${lad3aWorst.toFixed(2)}% · 컷일 ${lad3aCut}`);
+    console.log(`v3b(= v3a + F반대 시 100% 역진입): ${s1(lad3bTotal)}%p · 최악일 ${lad3bWorst.toFixed(2)}% · 컷일 ${lad3bCut} · 케이스 기여: 공통 ${s1(v3bCase["공통"])} · 이견 ${s1(v3bCase["이견"])} · 창만 ${s1(v3bCase["창만"])}`);
   }
   console.log(`\n참고: 삼전 현행 실운용(계층 20/30/50+10시 지연) +82.1%p · 창 1.0 단독 +82.0 · 1.2 단독 +98.5(전체 232일 기준).`);
   console.log(`사다리 규칙은 하닉 확정판의 축소(진행성·전진폭 단계 없음) — 개념 검증용 프로토타입.`);
