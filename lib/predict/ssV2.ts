@@ -27,14 +27,16 @@ const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 type Dir = 1 | -1;
 type CwJ = { i: number; t: number; dir: Dir; px: number };
 
-// 4봉 누적 순전진 스트림 (scripts/ss-cw4-pure-advance와 동일 산식 — 눈금 = unitArr)
-export function cumStream(bars: MinuteBar[], unit: number[], tanA: number): { i: number; to: "up" | "down"; px: number }[] {
+// n봉 누적 순전진 스트림 (scripts/ss-cw4-pure-advance·ss-cw-winsize-sweep와 동일 산식 — 눈금 = unitArr)
+// 주 기준 6봉 (사용자 확정 8/2 밤 3차: "6봉 시범·4/5봉 채점 모니터링" — v2 +105.4·컷일 88·첫판정 09:00)
+export function cumStream(bars: MinuteBar[], unit: number[], tanA: number, win = 4): { i: number; to: "up" | "down"; px: number }[] {
   const out: { i: number; to: "up" | "down"; px: number }[] = [];
+  const w = win - 1;
   let st: "none" | "up" | "down" = "none";
-  for (let t = 3; t < bars.length; t++) {
+  for (let t = w; t < bars.length; t++) {
     let judged: "up" | "down" | null = null;
     for (const dir of [1, -1] as const) {
-      if ((bmid(bars[t]) - bmid(bars[t - 3])) * dir >= tanA * unit[t - 3] * 3) { judged = dir === 1 ? "up" : "down"; break; }
+      if ((bmid(bars[t]) - bmid(bars[t - w])) * dir >= tanA * unit[t - w] * w) { judged = dir === 1 ? "up" : "down"; break; }
     }
     if (!judged) continue;
     if (st === "none" || judged !== st) { st = judged; out.push({ i: t, to: st, px: bars[t].close }); }
@@ -55,9 +57,9 @@ function tranche(bars: MinuteBar[], close: number, i0: number, dir: Dir, px: num
 }
 
 // 백테스트(ss-cw4-hier-cases v2)와 동일 채점 — 페이퍼 궤도 대조용
-export function simV2(bars: MinuteBar[], r10: number, close: number, tanA: number, fJ: CwJ | null): { pnl: number; cut: boolean } {
+export function simV2(bars: MinuteBar[], r10: number, close: number, tanA: number, fJ: CwJ | null, win = 4): { pnl: number; cut: boolean } {
   const unit = unitArr(bars, r10);
-  const trs = cumStream(bars, unit, tanA);
+  const trs = cumStream(bars, unit, tanA, win);
   const cw: CwJ | null = trs.length ? { i: trs[0].i, t: hhmmToMin(bars[trs[0].i].time), dir: (trs[0].to === "up" ? 1 : -1) as Dir, px: trs[0].px } : null;
   let pnl = 0, cut = false;
   const add = (r: { pnl: number; cut: boolean }) => { pnl += r.pnl; cut = cut || r.cut; };
@@ -81,7 +83,7 @@ type St = {
   stop1T?: string; revT?: string; revPx?: number; stop2T?: string;
   eodDone?: boolean;
 };
-type Score = { date: string; p10: number; p12: number; cut: boolean; note?: string };
+type Score = { date: string; p: number; p5: number; p4: number; p12: number; cut: boolean; note?: string };
 const DIR_KO = { up: "상승(레버 방향)", down: "하락(인버 방향)" } as const;
 
 export async function runSsV2Monitor(): Promise<void> {
@@ -114,7 +116,7 @@ export async function runSsV2Monitor(): Promise<void> {
     if (bars.length < 8) return;
 
     const unit = unitArr(bars, r10);
-    const trs = cumStream(bars, unit, NM.ssV2.tan);
+    const trs = cumStream(bars, unit, NM.ssV2.tan, NM.ssV2.win);
     const cw: CwJ | null = trs.length ? { i: trs[0].i, t: hhmmToMin(bars[trs[0].i].time), dir: (trs[0].to === "up" ? 1 : -1) as Dir, px: trs[0].px } : null;
     // 피셔F (삼전 라이브 cfg 그대로)
     const fCfg: FisherCfg = { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr };
@@ -135,7 +137,7 @@ export async function runSsV2Monitor(): Promise<void> {
     // 시범 시작 안내 (applyFrom 첫날 1회)
     if (live && today === NM.applyFrom && minuteOfDay <= hhmmToMin("09:30")) {
       await send("predict_ssv2_start", "medium",
-        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(4분 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶기존 [예측·삼전] 계층 문자는 대조용 (신모델 문자 우선)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: v2 +101.2%p·최악일 -3.0%·컷 이틀에 1회꼴. 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
+        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(6봉 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶기존 [예측·삼전] 계층 문자는 대조용 (신모델 문자 우선)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: 6봉 v2 +105.4%p·최악일 -3.0%·컷일 88 (4·5봉은 채점 병행). 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
     }
 
     if (cw && !fFirstDay) {
@@ -149,7 +151,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 진입 금지, 다음 문자 대기.` : "";
           const stopPx = cw.dir === 1 ? cw.px * (1 - STOP_PCT / 100) : cw.px * (1 + STOP_PCT / 100);
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶${cw.dir === 1 ? "레버리지" : "인버스"} ETF 100% 진입(초과 금지)·스탑 ETF -3%(본주 ${Math.round(stopPx).toLocaleString()}원)${preNote}${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 4분 누적 전진이 평소 흔들림×1.5 초과(모멘텀 판정). 이후 피셔F가 반대를 확인하면 전량 전환 문자 발송(이견일은 F가 옳음 — 74일 실측). 시범: 232일 +101.2%p.`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶${cw.dir === 1 ? "레버리지" : "인버스"} ETF 100% 진입(초과 금지)·스탑 ETF -3%(본주 ${Math.round(stopPx).toLocaleString()}원)${preNote}${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 6봉 누적 전진이 평소 흔들림의 2.5배 초과(모멘텀 판정). 이후 피셔F가 반대를 확인하면 전량 전환 문자 발송(이견일은 F가 옳음 실측). 시범: 232일 +105.4%p.`);
         }
       }
       // ② 정찰 레그 스탑
@@ -194,21 +196,22 @@ export async function runSsV2Monitor(): Promise<void> {
     // ⑤ 결산 (15:31 이후 1회, cmpFrom부터): 1.0·1.2 병행 채점 + 문자
     if (!st.eodDone && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
       const close = krx[krx.length - 1].close;
-      const r10v = simV2(bars, r10, close, NM.ssV2.tan, fJ);
-      const r12v = simV2(bars, r10, close, NM.ssV2.tanAlt, fJ);
+      const rMain = simV2(bars, r10, close, NM.ssV2.tan, fJ, NM.ssV2.win); // 주 기준 6봉
+      const r5 = simV2(bars, r10, close, NM.ssV2.tan, fJ, 5);
+      const r4 = simV2(bars, r10, close, NM.ssV2.tan, fJ, 4);
+      const r12v = simV2(bars, r10, close, NM.ssV2.tanAlt, fJ, NM.ssV2.win);
       st.eodDone = true;
       changed = true;
       try {
         const { data: scRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ssv2_scores").maybeSingle();
         const arr = (Array.isArray(scRow?.value) ? (scRow!.value as Score[]) : []).filter((s) => s.date !== today);
-        arr.push({ date: today, p10: Math.round(r10v.pnl * 100) / 100, p12: Math.round(r12v.pnl * 100) / 100, cut: r10v.cut, ...(fFirstDay ? { note: "F선행 관망" } : {}) });
+        arr.push({ date: today, p: Math.round(rMain.pnl * 100) / 100, p5: Math.round(r5.pnl * 100) / 100, p4: Math.round(r4.pnl * 100) / 100, p12: Math.round(r12v.pnl * 100) / 100, cut: rMain.cut, ...(fFirstDay ? { note: "F선행 관망" } : {}) });
         const kept = arr.slice(-120);
         await admin.from("ops_settings").upsert({ key: "predict_ssv2_scores", value: kept, updated_at: new Date().toISOString() }, { onConflict: "key" });
-        const s10 = kept.reduce((a, s) => a + s.p10, 0);
-        const s12 = kept.reduce((a, s) => a + s.p12, 0);
+        const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 창1.0판 ${pct(r10v.pnl)} · 1.2판 ${pct(r12v.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 1.0판 ${pct(s10)} · 1.2판 ${pct(s12)}. 백테스트 궤도 일당 +0.44%(1.0)·+0.43%(1.2) — 60일 채점 후 승격 판단. 산식: 창 판정가 기준(프리장 포함)·스탑 -1.5%·종가청산.`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 6봉(주기준) ${pct(rMain.pnl)} · 5봉 ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 6봉 ${pct(sum((s) => s.p))} · 5봉 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 6봉/1.2판 ${pct(sum((s) => s.p12))}. 백테스트 궤도 일당 +0.45%(6봉) — 60일 채점 후 승격·창 크기 재결정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

@@ -1,6 +1,7 @@
-// 삼전 신모델 라이브 모듈(ssV2.simV2) parity 검증 — 가동 전 확인 (2026-08-02 밤):
+// 삼전 신모델 라이브 모듈(ssV2.simV2) parity 검증 — 가동 전 확인 (2026-08-02 밤, 6봉 개정판):
 //   npx tsx scripts/ssv2-parity.ts
-// 기대값 (ss-cw4-hier-cases 백테스트): 창1.0 v2 +101.2%p · 1.2 +100.8%p (232일).
+// 기대값 (ss-cw-winsize-sweep 백테스트 232일): 6봉(주기준) +105.4·컷일 88 · 5봉 +102.2 · 4봉 +101.2.
+// 6봉/1.2판은 본 스크립트가 최초 실측 — 결과를 기록 기준으로 삼는다.
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
@@ -28,7 +29,7 @@ async function main() {
   const daily = (await fetchDailyPredict("005930", 500)).filter((b) => b.date < today);
   const C = PREDICT_CONFIG;
   const fCfg: FisherCfg = { offsetRangeRatio: C.earlyOffsetRatio, confirmMinutes: C.earlyConfirmMinutes, strongBreakRatio: C.ssStrongBreakRatio, reversalMinutes: C.streamReversalMinutes, earlyVolMult: C.earlyVol.mult, earlyVolUntil: C.earlyVol.until, confirmFromHHMM: C.confirmFromKr };
-  let n = 0, s10 = 0, s12 = 0, cut10 = 0;
+  let n = 0, s6 = 0, s5 = 0, s4 = 0, s12 = 0, cut6 = 0;
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`005930-${daily[i].date}.json`);
     const pre = rc(`005930NX-${daily[i].date}.json`);
@@ -40,11 +41,15 @@ async function main() {
     const fTrs = runFisher({ date: daily[i].date, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, fCfg).transitions ?? [];
     const fIdx = fTrs.length ? bars.findIndex((b) => b.time === fTrs[0].time) : -1;
     const fJ = fTrs.length && fIdx >= 0 ? { i: fIdx, t: tMin(fTrs[0].time), dir: (fTrs[0].to === "up" ? 1 : -1) as 1 | -1, px: fTrs[0].px } : null;
-    const r1 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tan, fJ);
-    const r2 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tanAlt, fJ);
-    s10 += r1.pnl; s12 += r2.pnl;
-    if (r1.cut) cut10++;
+    const W = C.newModel.ssV2.win;
+    const r6 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tan, fJ, W);
+    const r5 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tan, fJ, 5);
+    const r4 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tan, fJ, 4);
+    const r12 = simV2(bars, r10, daily[i].close, C.newModel.ssV2.tanAlt, fJ, W);
+    s6 += r6.pnl; s5 += r5.pnl; s4 += r4.pnl; s12 += r12.pnl;
+    if (r6.cut) cut6++;
   }
-  console.log(`${n}일: 창1.0 v2 ${s10 >= 0 ? "+" : ""}${s10.toFixed(1)}%p (기대 +101.2) · 1.2 ${s12 >= 0 ? "+" : ""}${s12.toFixed(1)}%p (기대 +100.8) · 컷일 ${cut10} (기대 99)`);
+  const f = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)}`;
+  console.log(`${n}일: 6봉(주기준) ${f(s6)}%p (기대 +105.4)·컷일 ${cut6} (기대 88) · 5봉 ${f(s5)} (기대 +102.2) · 4봉 ${f(s4)} (기대 +101.2) · 6봉/1.2 ${f(s12)} (신규 실측)`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
