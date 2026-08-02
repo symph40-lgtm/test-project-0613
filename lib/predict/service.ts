@@ -259,6 +259,9 @@ async function checkpointStream(
   let ssContBars: MinuteBar[] | null = null; // 08 연속창 — 효율 소진 경고용 (2026-07-26)
   let ssHistBars: PredictDailyBar[] = [];
   let ssFRe: string[] = [], ssMRe: string[] = []; // 삼전 F·M 재확인 시각 (사용자 지시 2026-08-01)
+  // 신모델 시범 게이트 (사용자 지시 2026-08-01~02 — config.newModel 근거): applyFrom(8/6)부터
+  // 하닉 F·M rebox + 지침 전환 + 삼전 M rebox(사용자 확정 8/2 밤 — 컷 66→59·판정일 190→218·+4.1).
+  const nmLive = PREDICT_CONFIG.newModel.applyFrom !== "" && today >= PREDICT_CONFIG.newModel.applyFrom;
   try {
     if (minuteOfDay >= hhmmToMin("08:25")) {
       const nowHHMMs = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
@@ -272,8 +275,10 @@ async function checkpointStream(
         const inCont = { date: today, dailyHistory: ssHist, openPx: ssCont[0].open, morning: ssCont, prevDayMinutes: null };
         // 삼전 강돌파 0.075 (사용자 승인 2026-07-25 — config.ssStrongBreakRatio 근거 참조, 하닉과 분리)
         // 장초반 크기 ×3 (사용자 승인 2026-07-29 — config.earlyVol, F 전용·M 적용은 실측 기각)
-        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
-        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr });
+        // 삼전 F rebox (사용자 확정 2026-08-03 새벽 "F·M 모두" — 신모델 검증자 F와 기준 통일, ss-f-rebox-sweep +18.0)
+        const f = runFisher(inCont, { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...(nmLive ? PREDICT_CONFIG.newModel.rebox : {}) });
+        // 삼전 M rebox (사용자 확정 2026-08-02 밤 — trail-vs-rebox-sweep: +80.6→+84.7·컷 66→59·판정 190→218일)
+        const m = runFisher(inCont, { offsetRangeRatio: 0.10, confirmMinutes: 8, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mMult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr, ...(nmLive ? PREDICT_CONFIG.newModel.rebox : {}) });
         // 삼전 고변동일 트레일 반전 (사용자 승인 2026-07-27 — config.ssTrail 근거 참조, 문턱 0.3 분리)
         const ssTrailOpts = isHighVolDay(ssHist)
           ? { trailRangeRatio: PREDICT_CONFIG.ssTrail.rangeRatio, trailConfirmMinutes: PREDICT_CONFIG.ssTrail.confirmMinutes }
@@ -438,9 +443,7 @@ async function checkpointStream(
       const hxReg = krx.filter((b) => b.time < nowHHMM2);
       let hxFo: ReturnType<typeof runFisher> | null = null;
       let hxMo: ReturnType<typeof runFisher> | null = null;
-      // 신모델 시범 (사용자 지시 2026-08-01 밤 — config.newModel 근거 참조): applyFrom부터
-      // 하닉 F 지침 사다리 전환·진행성 70% 증액·F·M 0930 OR rebox. 별다른 오더 없으면 계속.
-      const nmLive = PREDICT_CONFIG.newModel.applyFrom !== "" && today >= PREDICT_CONFIG.newModel.applyFrom;
+      // 신모델 시범 (사용자 지시 2026-08-01 밤): nmLive는 상단(삼전 블록 앞)에서 정의 — 하닉 F·M rebox·지침 전환에 공용
       let hxBo: ReturnType<typeof runFisher> | null = null;
       if (hxCont.length >= 20) {
         const inC = { date: today, dailyHistory: complete.slice(-120), openPx: hxCont[0].open, morning: hxCont, prevDayMinutes: null };
