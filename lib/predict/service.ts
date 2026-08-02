@@ -586,7 +586,7 @@ async function checkpointStream(
             // 실행만 보류 → 10:00 도달 문자에서 유지 확인 후 실행. 하닉은 즉시 진입 유지.
             : t.sym === "ss" && t.cur !== "none" && minuteOfDay < hhmmToMin(PREDICT_CONFIG.ssEntryDelayHHMM)
               ? `▶삼전은 10:00부터 진입 결정 — 지금은 관망, 10:00 문자에서 방향 유지 시 ${t.tier === "F" ? "1단계 20%" : t.tier === "M" ? "2단계 +30%p(누적 50%)" : "3단계 +50%p(누적 100%)"} 진입. 청산·전환 판단은 즉시 유효.`
-              : guideOf(t);
+              : guideOf(t) + (nmLive && t.sym === "ss" ? " ※삼전 신모델 시범 중 — [예측·삼전 신모델] 문자가 있으면 그쪽 우선, 이 문자는 대조용." : "");
         const stopLine = !stale && exhaustPct === null && t.sym === "hx" && t.cur !== "none" ? await etfStopLine(t.cur, ffStop) : "";
         try {
           await dispatchToChannels("signal", today, {
@@ -1056,6 +1056,14 @@ export async function runPredictService(): Promise<PredictRunResult> {
     await runCandleWindowMonitor();
   } catch (e) {
     console.error("[predict] 창판정 페이퍼 스트림 실패 (본 흐름 무관):", e);
+  }
+
+  // ⑫ 삼전 신모델 v2 스트림 (사용자 확정 2026-08-02 밤 — 8/3~5 검증 기록·결산, 8/6부터 시범 문자)
+  try {
+    const { runSsV2Monitor } = await import("./ssV2");
+    await runSsV2Monitor();
+  } catch (e) {
+    console.error("[predict] 삼전 신모델 스트림 실패 (본 흐름 무관):", e);
   }
 
   return result;
