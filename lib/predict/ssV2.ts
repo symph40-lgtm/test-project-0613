@@ -77,10 +77,23 @@ export function simV2(bars: MinuteBar[], r10: number, close: number, tanA: numbe
   return { pnl, cut };
 }
 
+// 신모델 검증자 F의 cfg — 삼전 라이브 F + 0930 rebox (사용자 제안 8/2 밤 "10시 이후 축적 OR" →
+// rebox 단독 스윕(ss-f-rebox-sweep)에서 09:30~45박스@09:45가 최적: F 단독 +61.9→+79.9·v2 +105.4→+112.8.
+// 10:00 전환은 심판 지연으로 v2 -5.2 열위. 하닉 F·M 시범과 동일 박스 — 시스템 일관).
+export function ssv2FisherCfg(): FisherCfg {
+  return {
+    offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes,
+    strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes,
+    earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until,
+    confirmFromHHMM: PREDICT_CONFIG.confirmFromKr,
+    ...PREDICT_CONFIG.newModel.rebox,
+  };
+}
+
 type St = {
   date: string;
   entryT?: string; entryDir?: "up" | "down"; entryPx?: number;
-  stop1T?: string; revT?: string; revPx?: number; stop2T?: string;
+  stop1T?: string; confT?: string; revT?: string; revPx?: number; stop2T?: string;
   eodDone?: boolean;
 };
 type Score = { date: string; p: number; p5: number; p4: number; p12: number; cut: boolean; note?: string };
@@ -118,9 +131,7 @@ export async function runSsV2Monitor(): Promise<void> {
     const unit = unitArr(bars, r10);
     const trs = cumStream(bars, unit, NM.ssV2.tan, NM.ssV2.win);
     const cw: CwJ | null = trs.length ? { i: trs[0].i, t: hhmmToMin(bars[trs[0].i].time), dir: (trs[0].to === "up" ? 1 : -1) as Dir, px: trs[0].px } : null;
-    // 피셔F (삼전 라이브 cfg 그대로)
-    const fCfg: FisherCfg = { offsetRangeRatio: PREDICT_CONFIG.earlyOffsetRatio, confirmMinutes: PREDICT_CONFIG.earlyConfirmMinutes, strongBreakRatio: PREDICT_CONFIG.ssStrongBreakRatio, reversalMinutes: PREDICT_CONFIG.streamReversalMinutes, earlyVolMult: PREDICT_CONFIG.earlyVol.mult, earlyVolUntil: PREDICT_CONFIG.earlyVol.until, confirmFromHHMM: PREDICT_CONFIG.confirmFromKr };
-    const fTrs = bars.length >= 20 ? (runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, fCfg).transitions ?? []) : [];
+    const fTrs = bars.length >= 20 ? (runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, ssv2FisherCfg()).transitions ?? []) : [];
     const fIdx = fTrs.length ? bars.findIndex((b) => b.time === fTrs[0].time) : -1;
     const fJ: CwJ | null = fTrs.length && fIdx >= 0 ? { i: fIdx, t: hhmmToMin(fTrs[0].time), dir: (fTrs[0].to === "up" ? 1 : -1) as Dir, px: fTrs[0].px } : null;
     const fFirstDay = fJ && cw && fJ.t < cw.t; // F 선행 희귀일 — 관망
@@ -137,7 +148,7 @@ export async function runSsV2Monitor(): Promise<void> {
     // 시범 시작 안내 (applyFrom 첫날 1회)
     if (live && today === NM.applyFrom && minuteOfDay <= hhmmToMin("09:30")) {
       await send("predict_ssv2_start", "medium",
-        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(6봉 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶기존 [예측·삼전] 계층 문자는 대조용 (신모델 문자 우선)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: 6봉 v2 +105.4%p·최악일 -3.0%·컷일 88 (4·5봉은 채점 병행). 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
+        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(6봉 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶기존 [예측·삼전] 계층 문자는 대조용 (신모델 문자 우선)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: 6봉 v2(F 0930 박스판) +112.8%p·최악일 -3.0%·컷일 84 (4·5봉은 채점 병행). 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
     }
 
     if (cw && !fFirstDay) {
@@ -151,7 +162,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 진입 금지, 다음 문자 대기.` : "";
           const stopPx = cw.dir === 1 ? cw.px * (1 - STOP_PCT / 100) : cw.px * (1 + STOP_PCT / 100);
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶${cw.dir === 1 ? "레버리지" : "인버스"} ETF 100% 진입(초과 금지)·스탑 ETF -3%(본주 ${Math.round(stopPx).toLocaleString()}원)${preNote}${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 6봉 누적 전진이 평소 흔들림의 2.5배 초과(모멘텀 판정). 이후 피셔F가 반대를 확인하면 전량 전환 문자 발송(이견일은 F가 옳음 실측). 시범: 232일 +105.4%p.`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶${cw.dir === 1 ? "레버리지" : "인버스"} ETF 100% 진입(초과 금지)·스탑 ETF -3%(본주 ${Math.round(stopPx).toLocaleString()}원)${preNote}${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 6봉 누적 전진이 평소 흔들림의 2.5배 초과(모멘텀 판정). 이후 피셔F(0930 박스판)가 동의하면 보유 확인 문자, 반대를 확인하면 전량 전환 문자 발송(이견일은 F가 옳음 실측). 시범: 232일 +112.8%p.`);
         }
       }
       // ② 정찰 레그 스탑
@@ -167,6 +178,14 @@ export async function runSsV2Monitor(): Promise<void> {
           }
         }
       }
+      // ②-b F 동의 확인 → 보유 지속 통지 (사용자 지시 8/2 밤 — 침묵 대신 검증 통과 문자)
+      if (st.entryT && fJ && fJ.dir === cw.dir && fJ.t > cw.t && !st.confT) {
+        st.confT = bars[fJ.i].time;
+        changed = true;
+        if (live) await send(`predict_ssv2_conf_${st.confT.replace(":", "")}`, "low",
+          `[예측·삼전 신모델] 검증 통과 — 피셔F 동의\n▶보유 지속 (종가 청산까지 추가 액션 없음·스탑 유효)\n무응답=보유\n----\n${st.confT} 피셔F가 같은 방향 확인 — 오늘은 전환 문자가 오지 않습니다(F 첫확인 소진). 공통일 실측: 129일 +207.5%p(이 모델 수익원의 전부).`);
+      }
+
       // ③ F 반대 확인 → 전량 전환 (역진입)
       if (st.entryT && fJ && fJ.dir !== cw.dir && fJ.t > cw.t && !st.revT) {
         st.revT = bars[fJ.i].time; st.revPx = fJ.px;
@@ -211,7 +230,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 6봉(주기준) ${pct(rMain.pnl)} · 5봉 ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 6봉 ${pct(sum((s) => s.p))} · 5봉 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 6봉/1.2판 ${pct(sum((s) => s.p12))}. 백테스트 궤도 일당 +0.45%(6봉) — 60일 채점 후 승격·창 크기 재결정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 6봉(주기준) ${pct(rMain.pnl)} · 5봉 ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 6봉 ${pct(sum((s) => s.p))} · 5봉 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 6봉/1.2판 ${pct(sum((s) => s.p12))}. 백테스트 궤도 일당 +0.49%(6봉·F 0930 박스판) — 60일 채점 후 승격·창 크기 재결정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

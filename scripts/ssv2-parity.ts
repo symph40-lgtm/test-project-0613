@@ -1,7 +1,7 @@
-// 삼전 신모델 라이브 모듈(ssV2.simV2) parity 검증 — 가동 전 확인 (2026-08-02 밤, 6봉 개정판):
+// 삼전 신모델 라이브 모듈(ssV2.simV2) parity 검증 — 가동 전 확인 (2026-08-02 밤, 6봉+F rebox 개정판):
 //   npx tsx scripts/ssv2-parity.ts
-// 기대값 (ss-cw-winsize-sweep 백테스트 232일): 6봉(주기준) +105.4·컷일 88 · 5봉 +102.2 · 4봉 +101.2.
-// 6봉/1.2판은 본 스크립트가 최초 실측 — 결과를 기록 기준으로 삼는다.
+// 기대값: 6봉(주기준·F 0930 rebox) +112.8·컷일 84 (ss-f-rebox-sweep). 5봉/4봉/6봉·1.2의 rebox판은
+// 본 스크립트가 최초 실측 — 결과를 채점 대조 기준으로 삼는다.
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
@@ -13,7 +13,7 @@ import { avgRange } from "../lib/predict/indicators";
 import { fetchDailyPredict } from "../lib/predict/data";
 import { runFisher, type FisherCfg } from "../lib/predict/models/fisher";
 import { PREDICT_CONFIG } from "../lib/predict/config";
-import { simV2 } from "../lib/predict/ssV2";
+import { simV2, ssv2FisherCfg } from "../lib/predict/ssV2";
 import type { MinuteBar } from "../lib/predict/types";
 
 const CACHE_DIR = resolve(process.cwd(), ".predict-cache");
@@ -28,7 +28,7 @@ async function main() {
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const daily = (await fetchDailyPredict("005930", 500)).filter((b) => b.date < today);
   const C = PREDICT_CONFIG;
-  const fCfg: FisherCfg = { offsetRangeRatio: C.earlyOffsetRatio, confirmMinutes: C.earlyConfirmMinutes, strongBreakRatio: C.ssStrongBreakRatio, reversalMinutes: C.streamReversalMinutes, earlyVolMult: C.earlyVol.mult, earlyVolUntil: C.earlyVol.until, confirmFromHHMM: C.confirmFromKr };
+  const fCfg: FisherCfg = ssv2FisherCfg(); // 라이브와 동일 (0930 rebox 포함)
   let n = 0, s6 = 0, s5 = 0, s4 = 0, s12 = 0, cut6 = 0;
   for (let i = 130; i < daily.length; i++) {
     const reg = rc(`005930-${daily[i].date}.json`);
@@ -50,6 +50,6 @@ async function main() {
     if (r6.cut) cut6++;
   }
   const f = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)}`;
-  console.log(`${n}일: 6봉(주기준) ${f(s6)}%p (기대 +105.4)·컷일 ${cut6} (기대 88) · 5봉 ${f(s5)} (기대 +102.2) · 4봉 ${f(s4)} (기대 +101.2) · 6봉/1.2 ${f(s12)} (신규 실측)`);
+  console.log(`${n}일: 6봉(주기준·rebox F) ${f(s6)}%p (기대 +112.8)·컷일 ${cut6} (기대 84) · 5봉 ${f(s5)} · 4봉 ${f(s4)} · 6봉/1.2 ${f(s12)} (rebox판 신규 실측 — 채점 기준)`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
