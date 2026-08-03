@@ -37,20 +37,23 @@ function unitArrL(bars: Raw[], r10: number): number[] {
     return Math.max(u * 0.5, 1e-9);
   });
 }
-function cumFirst(bars: Raw[], unit: number[], tanA: number, win: number): Tr | null {
+// fromMin: 판정 허용 시각 (프리장 확인 금지 — IEX 결측 왜곡 제거·소스 독립, 국장 confirmFrom 원리)
+function cumFirst(bars: Raw[], unit: number[], tanA: number, win: number, fromMin = 0): Tr | null {
   const w = win - 1;
   for (let t = w; t < bars.length; t++) {
+    if (bars[t].etMin < fromMin) continue;
     for (const dir of [1, -1] as const) {
       if ((bmid(bars[t]) - bmid(bars[t - w])) * dir >= tanA * unit[t - w] * w) return { i: t, t: bars[t].etMin, dir, px: bars[t].close };
     }
   }
   return null;
 }
-function cumStreamAll(bars: Raw[], unit: number[], tanA: number, win: number): Tr[] {
+function cumStreamAll(bars: Raw[], unit: number[], tanA: number, win: number, fromMin = 0): Tr[] {
   const out: Tr[] = [];
   const w = win - 1;
   let st: 0 | Dir = 0;
   for (let t = w; t < bars.length; t++) {
+    if (bars[t].etMin < fromMin) continue;
     let j: Dir | null = null;
     for (const dir of [1, -1] as const) {
       if ((bmid(bars[t]) - bmid(bars[t - w])) * dir >= tanA * unit[t - w] * w) { j = dir; break; }
@@ -80,6 +83,7 @@ async function main() {
     .map((q) => ({ date: (q.date instanceof Date ? q.date : new Date(q.date)).toISOString().slice(0, 10), open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume ?? 0 }));
 
   let n = 0, aPnl = 0, aLegs = 0, aCuts = 0, b6 = 0, cRes = 0, bias = 0;
+  let bWorst = 0, bCutDays = 0, bEntryDays = 0, bWins = 0;
   let fFirstN = 0, both = 0, common = 0, opp = 0;
   const fFirsts: number[] = [], cwFirsts: number[] = [];
   let last39A = 0, last39B = 0, last39C = 0;
@@ -138,22 +142,28 @@ async function main() {
 
     // B: 삼전식 v2 (1분 6봉 창 정찰 + F 심판)
     const unit = unitArrL(raw, r10);
-    const cw = cumFirst(raw, unit, 1.0, 6);
+    const cw = cumFirst(raw, unit, 1.0, 6, ET_OPEN);
     if (cw) cwFirsts.push(cw.t);
     const fJ = fTrs.length ? fTrs[0] : null;
     if (fJ && cw) { both++; if (fJ.t < cw.t) fFirstN++; if (fJ.dir === cw.dir) common++; else opp++; }
     let bDay = 0;
     if (cw && !(fJ && fJ.t < cw.t)) {
+      bEntryDays++;
       const fOpp = fJ && fJ.dir !== cw.dir ? fJ : null;
-      bDay += tranche(cw, 1, fOpp?.i, fOpp?.px);
-      if (fOpp) bDay += tranche(fOpp, 1);
+      const t1 = tranche(cw, 1, fOpp?.i, fOpp?.px);
+      bDay += t1;
+      let t2 = 0;
+      if (fOpp) { t2 = tranche(fOpp, 1); bDay += t2; }
+      if (t1 === -STOP || t2 === -STOP) bCutDays++;
+      if (bDay > 0) bWins++;
     }
     b6 += bDay;
+    bWorst = Math.min(bWorst, bDay);
 
     // C: 하닉식 (F 진입 → 창 전이 반대 시 전환)
     let cDay = 0;
     if (fJ) {
-      const cwTrs = cumStreamAll(raw, unit, 1.0, 6);
+      const cwTrs = cumStreamAll(raw, unit, 1.0, 6, ET_OPEN);
       const cwOpp = cwTrs.find((t) => t.t > fJ.t && t.dir !== fJ.dir) ?? null;
       cDay += tranche(fJ, 1, cwOpp?.i, cwOpp?.px);
       if (cwOpp) cDay += tranche(cwOpp, 1);
@@ -172,7 +182,7 @@ async function main() {
 
   console.log(`════ SOXX 1년 검증 — ${n}거래일 (${dates[0]} ~ ${dates[dates.length - 1]}) · Alpaca 1분봉·스탑 -${STOP}% ════`);
   console.log(`A 현행 미장 F(레그 회계):        ${s1(aPnl)}%p · 레그 ${aLegs}·컷 ${aCuts} · 첫확인중앙 ${fmtT(med(fFirsts))} ET`);
-  console.log(`B 삼전식 v2(1분 6봉 창+F심판):   ${s1(b6)}%p`);
+  console.log(`B 삼전식 v2(1분 6봉 창+F심판):   ${s1(b6)}%p · 진입 ${bEntryDays}일·승률 ${bEntryDays ? Math.round((100 * bWins) / bEntryDays) : 0}%·컷일 ${bCutDays}·최악일 ${bWorst.toFixed(2)}%`);
   console.log(`C 하닉식(F 진입→창 반대 전환):   ${s1(cRes)}%p`);
   console.log(`대조군(매일 정규장 시가 롱+스탑): ${s1(bias)}%p`);
   console.log(`\n[선후·케이스 — 1분 창6 vs F] 동시판정 ${both}일: F 선행 ${fFirstN}일(${both ? Math.round((100 * fFirstN) / both) : 0}%) · 창 첫판정중앙 ${fmtT(med(cwFirsts))} ET · 공통 ${common}·이견 ${opp}`);
