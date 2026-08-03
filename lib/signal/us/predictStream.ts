@@ -133,6 +133,29 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
   const etk = (hhmm: string) => `${hhmm} ET(한국 ${kstOf(hhmm)})`;
   const headKst = (head: string) => head.replace(/^(\d{2}:\d{2})/, (m) => `${m} ET(한국 ${kstOf(m)})`);
 
+  // SOXX 딥바이 알림 (사용자 확정 2026-08-03 "문자에 붙여줘" — scripts/us-dip-rebound-sweep 실측):
+  // 5일 종가 누적 낙폭 ≥15% → 다음날 시가 매수·1일 보유 = 10년 8회·승률 100%·평균 +5.8%(SOXL≈+17%)·
+  // 최악 0.0%. 표본 8회(≈15개월에 1회)라 자동 지침 아님 — 마감 후 정보성 통지로 한국 아침 주간거래
+  // 판단을 지원 (7/30 사용자 실전 +25%가 이 셀의 실례). 얕은 낙폭(-8~10%)은 에지 없음 실측.
+  try {
+    if (minuteOfDay >= ET_CLOSE + 5 && minuteOfDay <= 20 * 60) {
+      const dly = await fetchJudgeDaily(30);
+      const last = dly[dly.length - 1];
+      if (last && String(last.date) === today && dly.length >= 6) {
+        const ref = dly[dly.length - 6];
+        const drop = (last.close / ref.close - 1) * 100;
+        if (drop <= -15) {
+          await dispatchToChannels("signal", today, {
+            key: "uspredict_dipbuy",
+            severity: "high",
+            text: `[미국예측·SOXX 딥바이] 5일 누적 ${drop.toFixed(1)}% — 급락 반등 조건 도달\n▶내일 한국 아침 주간거래 매수 검토(자동 지침 아님 — 직접 판단)\n무응답=관망\n----\n오늘 종가 $${last.close.toFixed(2)} (5일 전 $${ref.close.toFixed(2)}). 실측(10년): 이 조건 후 다음날 시가 매수·1일 보유 8회 — 승률 100%·평균 +5.8%(SOXL≈+17%)·최악 0.0%. 표본 8회(약 15개월에 1회)의 정보성 통지 — 얕은 낙폭(-8~10%)은 에지 없음. 7/30 실전(+25%)이 이 유형.`,
+            smsSubject: "SOXX 딥바이",
+          });
+        }
+      }
+    }
+  } catch { /* 정보성 실패는 본 흐름 무관 */ }
+
   // ① 미채점 백필 (정규장 마감 후 소급 — 야후 5분봉 60일 보존)
   const { data: unscored } = await admin
     .from("us_predict_days")
