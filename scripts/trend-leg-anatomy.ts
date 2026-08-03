@@ -108,8 +108,9 @@ async function loadSoxx(): Promise<{ bars: Bar[]; r10Pct: number }[]> {
   const daily: PredictDailyBar[] = (r.quotes ?? [])
     .filter((q): q is typeof q & { open: number; high: number; low: number; close: number } => q.open != null && q.high != null && q.low != null && q.close != null)
     .map((q) => ({ date: (q.date instanceof Date ? q.date : new Date(q.date)).toISOString().slice(0, 10), open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume ?? 0 }));
-  const files = readdirSync(CACHE).filter((f) => /^SOXXA-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
-  const out: { bars: Bar[]; r10Pct: number }[] = [];
+  // 병합본(SOXXM — Alpaca+야후 결측 보강, 사용자 지시 8/3 밤) 우선
+  const files = readdirSync(CACHE).filter((f) => /^SOXXM-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
+  const out: { bars: Bar[]; r10Pct: number; date?: string }[] = [];
   for (const f of files) {
     const date = f.slice(6, 16);
     const hist = daily.filter((x) => x.date < date).slice(-60);
@@ -120,7 +121,7 @@ async function loadSoxx(): Promise<{ bars: Bar[]; r10Pct: number }[]> {
       .filter((b) => b.etMin >= 570 && b.etMin < 960)
       .map((b) => ({ t: b.etMin, open: b.open, high: b.high, low: b.low, close: b.close }));
     if (raw.length < 250) continue;
-    out.push({ bars: raw, r10Pct: (r10 / prev) * 100 });
+    out.push({ bars: raw, r10Pct: (r10 / prev) * 100, date });
   }
   return out;
 }
@@ -141,14 +142,15 @@ async function main() {
   const ss = await loadKr("005930");
   const sx = await loadSoxx();
   console.log(`════ 추세 레그 해부 — 정규장·지배 스윙 ≥0.8×r10% (하닉 ${hx.length}·삼전 ${ss.length}·SOXX ${sx.length}일 로드) ════`);
-  console.log(`\n[주 비교 — 5분봉 집계 (세 종목 동일 잣대·IEX 결측 영향 없음)]`);
-  report("하닉", hx, 5);
-  report("삼전", ss, 5);
-  report("SOXX", sx, 5);
-  console.log(`\n[참고 — 1분봉 (SOXX는 IEX 결측으로 효율·연속봉이 유리하게 왜곡될 수 있음)]`);
+  console.log(`\n[주 비교 — 1분봉 (사용자 지시: SOXX는 병합본 SOXXM — 최근 20일 완전·과거 정규장 97%)]`);
   report("하닉", hx, 1);
   report("삼전", ss, 1);
   report("SOXX", sx, 1);
+  report("SOXX(완전 병합 최근 20일)", sx.filter((d) => (d as { date?: string }).date !== undefined && (d as { date?: string }).date! >= "2026-07-06"), 1);
+  console.log(`\n[참고 — 5분봉 집계]`);
+  report("하닉", hx, 5);
+  report("삼전", ss, 5);
+  report("SOXX", sx, 5);
   console.log(`\n용어: 효율 = 순전진/경로합(1=일직선·낮을수록 노이즈) · 각도 = 봉당 전진을 자기 눈금으로 잰 기울기 ·`);
   console.log(`      색순도 = 레그 방향 봉 비율 · 최대되돌림 = 레그 진행 중 역행 최대폭(레그 크기 %) · 역색2련 = 반대색 2연속 이상 구간 수`);
 }
