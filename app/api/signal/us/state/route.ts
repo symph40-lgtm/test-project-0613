@@ -44,6 +44,11 @@ export async function GET(req: NextRequest) {
     // (19:55~20:15 ET = 08:55~09:15 KST 여름). 창 밖이면 함수가 즉시 반환. ⚠크론 KST 9~10시 필요.
     const daily = isWeekday ? await runUsDailyService().catch(() => null) : null;
 
+    // SOXX 신모델 v2 스트림 (사용자 지시 2026-08-03 밤) — 창1+F 심판·1박. 요일·시간 가드는 내부에서
+    // (아침 요약 flush는 주말 새벽 크론에서도 동작해야 하므로 isWeekday 밖).
+    const { runSoxxV2Monitor } = await import("@/lib/signal/us/soxxV2");
+    await runSoxxV2Monitor().catch(() => null);
+
     const tick = await collectUsTick();
     let stored = false;
     if (inSession && isWeekday) stored = await appendUsTick(tick).catch(() => false);

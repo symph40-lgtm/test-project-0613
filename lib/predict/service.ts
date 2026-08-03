@@ -1075,5 +1075,15 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 삼전 신모델 스트림 실패 (본 흐름 무관):", e);
   }
 
+  // ⑬ SOXX 신모델 v2 아침 요약 flush (사용자 지시 2026-08-03 밤 — 00~07시 KST 문자 금지분을
+  // 07시 이후 첫 크론에서 합산 발송. 미장 크론은 05:05 KST에 끝나 이 경로가 아침 운반체).
+  // 세션 판정 자체는 미장 크론(/api/signal/us/state)이 전담 — 여기선 시간 가드로 flush만 동작.
+  try {
+    const { runSoxxV2Monitor } = await import("@/lib/signal/us/soxxV2");
+    await runSoxxV2Monitor();
+  } catch (e) {
+    console.error("[predict] SOXX 신모델 스트림 실패 (본 흐름 무관):", e);
+  }
+
   return result;
 }
