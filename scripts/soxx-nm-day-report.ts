@@ -152,8 +152,8 @@ async function main() {
     } else { continue; }
     console.log(`  케이스: ${caseKo}`);
     if (live) {
-      console.log(`  현재가 ${lastPx.toFixed(2)} 기준 미실현 ${s2(pnl)}%${cut ? " (스탑 컷)" : ""} — SOXL/SOXS 3x 환산 ${s2(pnl * 3)}%`);
-      console.log(`  1박 자격: ${ovnOk ? "충족 (동의) — 취침 시 무행동 1박" : "미충족 — 취침 전 MOC 매도 예약 + 스탑 유지"}`);
+      console.log(`  현재가 ${lastPx.toFixed(2)} 기준 ${cut ? "확정" : "미실현"} ${s2(pnl)}%${cut ? " (스탑 컷)" : ""} — SOXL/SOXS 3x 환산 ${s2(pnl * 3)}%`);
+      console.log(`  1박 자격: ${cut ? "해당 없음 — 스탑으로 종료, 오늘 재진입 없음" : ovnOk ? "충족 (동의) — 취침 시 무행동 1박" : "미충족 — 취침 전 MOC 매도 예약 + 스탑 유지"}`);
     } else {
       const next = dIdx.find((x) => x > date);
       const nOpen = next ? dBy.get(next)!.open : null;
