@@ -15,7 +15,10 @@ import { loadAfterPerf } from "./store";
 import type { MinuteBar, Verdict } from "./types";
 
 const AH = PREDICT_CONFIG.after;
-const V_KO: Record<Verdict, string> = { leverage: "상방(본주 매수)", inverse: "하방(관망·청산)", none: "추세없음" };
+// 액션 지시형 라벨 (사용자 지시 2026-08-04 새벽 "정보가 아니라 직접 취할 액션 위주로") — 애프터장은
+// ETF 미거래라 하방의 액션은 '매수 금지·보유 롱 청산'뿐임을 라벨 자체에 명시.
+// ⚠현재 애프터 문자는 신모델 전용 정책(smsNewModelOnly)으로 발송 억제 상태 — 재가동 대비 문구만 정비.
+const V_KO: Record<Verdict, string> = { leverage: "상방(▶본주 소액 매수)", inverse: "하방(▶신규 매수 금지·보유 롱 청산)", none: "추세없음(▶행동 없음)" };
 const hhmmToMin = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 
 type AfterRev = { at: string; checkpoint?: string; verdict: Verdict; strength: number };

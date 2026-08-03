@@ -4,6 +4,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSms } from "@/lib/sms";
 import { sendEmail } from "@/lib/email";
+import { PREDICT_CONFIG } from "@/lib/predict/config";
 
 export type ChannelAlert = {
   key: string;
@@ -67,6 +68,17 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
 //   판정 '기록'은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
 const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|us_(move|swing)_.*|ebrief_.*)$/;
 
+// ── 신모델 전용 발송 (사용자 지시 2026-08-04 새벽 "앞으로는 최종 신모델만 문자 보내줘, 헷갈리지 않게"):
+// 예측 계열 키(predict_/uspredict_/pdaily_) 중 최종 신모델과 사용자 확정 독립 채널만 발송.
+// 억제 대상: 계층 전이(predict_tr_·uspredict_tr_)·진행경보(prog5/prog2)·애프터(predict_ah_·ss_ah·uspredict_ah)·
+// rev9·재확인·recut·보유확인·성능·TOP10(predict_tr_etf)·일봉스윙(pdaily_) 등 — 판정·채점·기록은 전부 계속,
+// '문자'만 신모델 채널로 일원화. 비예측 계열(금리 rate2y_·수급 flow_·급변 move_ 등)은 이 게이트 무관.
+// 해제 = config.smsNewModelOnly false. 허용: 하닉 창판정(predict_cw_)·신모델 비교/시작(predict_nm_)·
+// 삼전 v2(predict_ssv2_)·SOXX v2(uspredict_v2_)·딥바이(uspredict_dipbuy, 사용자 확정 8/3)·
+// 실시간 버튼 응답(predict_now_)·결정 통지(predict_promote).
+const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_/;
+const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote)/;
+
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
   date: string, // KST 거래일 (YYYY-MM-DD) — 이 날짜 기준 1일 1회 중복 방지
@@ -80,6 +92,7 @@ export async function dispatchToChannels(
   opts?: { dedupHours?: number },
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
+  if (PREDICT_CONFIG.smsNewModelOnly && NM_ONLY_SCOPE.test(alert.key) && !NM_ONLY_ALLOW.test(alert.key)) return 0; // 신모델 전용 (2026-08-04)
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
   if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지

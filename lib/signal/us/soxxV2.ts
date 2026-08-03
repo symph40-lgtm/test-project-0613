@@ -200,7 +200,8 @@ export async function runSoxxV2Monitor(): Promise<void> {
     const kst = new Date(Date.now() + 9 * 3600e3);
     const kstMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
     const kstOffset = ((kstMin - etMin) + 1440) % 1440; // ET→KST 분 오프셋 (서머타임 자동)
-    const live = NM.applyFrom !== "" && todayEt >= NM.applyFrom;
+    const applyFrom = NM.soxxApplyFrom !== "" ? NM.soxxApplyFrom : NM.applyFrom; // SOXX 조기 시작 (8/4)
+    const live = applyFrom !== "" && todayEt >= applyFrom;
     const quiet = kstMin < 7 * 60; // 한국 00:00~07:00 — SMS 금지 (사용자 지시 8/3 밤)
 
     const admin = createAdminClient();
@@ -246,7 +247,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
     }
 
     // 시범 시작 안내 (applyFrom 첫 세션 09:25~09:40 ET)
-    if (live && todayEt === NM.applyFrom && etMin <= 580) {
+    if (live && todayEt === applyFrom && etMin <= 580) {
       await send("uspredict_v2_start", "medium",
         `[SOXX 신모델] 오늘 세션부터 시범 시행\n▶SOXX 매매는 이 문자 기준 — 창1(1분 6봉 모멘텀) 또는 F(피셔) 중 먼저 온 신호로 진입\n▶상방 ${SY.leverage}·하방 ${SY.inverse} (3x) · 스탑 SOXX -2%(ETF -6%)\n▶한국 00~07시엔 문자 없음 — 아침 요약으로 합산 (모니터링은 계속)\n----\n근거 245일: 통합 +114.4%p·최악일 -4.1%(SOXX). 동의일만 1박(다음 세션 시가 청산), 이견·무판정일은 종가(MOC) 청산. 취침(23:30) 지침 문자로 마감.`, undefined);
     }
