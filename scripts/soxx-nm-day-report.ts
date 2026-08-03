@@ -16,7 +16,10 @@ import { runFisher } from "../lib/predict/models/fisher";
 import type { MinuteBar, PredictDailyBar } from "../lib/predict/types";
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
-const ET_OPEN = 570, ET_CLOSE = 960, ET_PRE = 420, STOP = 2.0;
+const ET_OPEN = 570, ET_CLOSE = 960, STOP = 2.0;
+// --pre=HHMM: F 창 시작 시각 변경 실험용 (기본 07:00 — 확정 사양. 예: --pre=0400 프리마켓 개시부터)
+const preArg = process.argv.find((a) => a.startsWith("--pre="));
+const ET_PRE = preArg ? parseInt(preArg.slice(6, 8), 10) * 60 + parseInt(preArg.slice(8, 10), 10) : 420;
 const CACHE = resolve(process.cwd(), ".predict-cache");
 const s2 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
 const fmtT = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -66,7 +69,7 @@ async function main() {
   const nowP = Object.fromEntries(etFmt.formatToParts(new Date()).map((x) => [x.type, x.value]));
   const todayEt = `${nowP.year}-${nowP.month}-${nowP.day}`;
   const nowEtMin = parseInt(nowP.hour === "24" ? "0" : nowP.hour, 10) * 60 + parseInt(nowP.minute, 10);
-  const dates = process.argv.slice(2).map((a) => (a === "today" ? todayEt : a));
+  const dates = process.argv.slice(2).filter((a) => !a.startsWith("--")).map((a) => (a === "today" ? todayEt : a));
   if (!dates.length) { console.log("사용법: npx tsx scripts/soxx-nm-day-report.ts <YYYY-MM-DD|today> ..."); return; }
 
   const rD = await yf.chart("SOXX", { period1: new Date(Date.now() - 200 * 86400e3), interval: "1d" });
