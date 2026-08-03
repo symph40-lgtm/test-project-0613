@@ -148,7 +148,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: "uspredict_dipbuy",
             severity: "high",
-            text: `[미국예측·SOXX 딥바이] 5일 누적 ${drop.toFixed(1)}% — 급락 반등 조건 도달\n▶오늘 아침 주간거래(또는 오늘 밤 미국 개장가)에 SOXL 매수 검토 — 오늘 밤 미국 세션 반등이 과녁, 내일 아침 청산\n무응답=관망 (자동 지침 아님 — 직접 판단)\n----\n어젯밤 미국 종가 $${last.close.toFixed(2)} (5일 전 $${ref.close.toFixed(2)}). 실측(10년 8회): 승률 100%·평균 SOXX +5.8%(SOXL≈+17%)·최악 0.0%. 표본 8회(약 15개월에 1회) 정보성 통지 — 얕은 낙폭(-8~10%)은 에지 없음. 7/30 실전(SOXL +25%)이 이 유형.`,
+            text: `[미국예측·SOXX 딥바이] 5일 누적 ${drop.toFixed(1)}% — 급락후 급등 조건 도달\n▶오늘 아침 주간거래(또는 오늘 밤 미국 개장가)에 SOXL 매수 검토 — 오늘 밤 미국 세션 반등이 목표, 내일 아침 청산\n무응답=관망 (자동 지침 아님 — 직접 판단)\n----\n어젯밤 미국 종가 $${last.close.toFixed(2)} (5일 전 $${ref.close.toFixed(2)}). 실측(10년 8회): 승률 100%·평균 SOXX +5.8%(SOXL≈+17%)·최악 0.0%. 표본 8회(약 15개월에 1회) 정보성 통지 — 얕은 낙폭(-8~10%)은 에지 없음. 7/30 실전(SOXL +25%)이 이 유형.`,
             smsSubject: "SOXX 딥바이",
           });
         }
