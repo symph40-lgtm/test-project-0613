@@ -63,8 +63,12 @@ function to5m(bars: SoxxBar[]): SoxxBar[] {
   return [...map.values()].sort((a, b) => a.etMin - b.etMin);
 }
 
-// 하루 판정 — 창1(정규장 1분 6봉·tan1.0) + F(07:00~ 5분봉 피셔 첫 전환, 시각 = 확인봉 종료 분)
-export function judgeSoxxDay(date: string, raw: SoxxBar[], hist: PredictDailyBar[], r10: number): { c1: SoxxJ | null; fJ: SoxxJ | null } {
+// 하루 판정 — 창1(정규장 1분 6봉·tan1.0) + F(07:00~ 5분봉 피셔 첫 전환, 시각 = 확인봉 종료 분).
+// rebox: 프리장(07시) OR을 정규장에 그대로 쓰는 문제(사용자 지적 8/4 — 진폭 괴리)의 교정 —
+// 09:30~45 박스 완성 후 앵커만 교체·상태 승계 (하닉·삼전 채택 방식). 245일 +114.4→+117.8%p·
+// 최악/컷 불변·F 판정 변화 15일 (scripts/soxx-f-rebox-sweep.ts. 10:00 재박스 +116.2 열위).
+// ⚠07시 창 자체는 유지 — 04~07시는 박봉·역예측(models.ts ET_PRE_START 실측), 정규장 새 창은 -2.5 붕괴.
+export function judgeSoxxDay(date: string, raw: SoxxBar[], hist: PredictDailyBar[], r10: number, rebox?: { reboxHHMM: string; reboxMinutes: number } | null): { c1: SoxxJ | null; fJ: SoxxJ | null } {
   const unit = soxxUnitArr(raw, r10);
   const win = PREDICT_CONFIG.newModel.soxxV2.win - 1; // 6봉 = 5칸
   const tan = PREDICT_CONFIG.newModel.soxxV2.tan;
@@ -80,7 +84,7 @@ export function judgeSoxxDay(date: string, raw: SoxxBar[], hist: PredictDailyBar
   if (b5.length >= 5) {
     const morning: MinuteBar[] = b5.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const fOut = runFisher({ date, dailyHistory: hist, openPx: b5[0].open, morning, prevDayMinutes: null },
-      { orMinutes: 3, offsetRangeRatio: 0.05, confirmMinutes: 1, reversalMinutes: 1, strongBreakRatio: 0.1 });
+      { orMinutes: 3, offsetRangeRatio: 0.05, confirmMinutes: 1, reversalMinutes: 1, strongBreakRatio: 0.1, ...(rebox ?? {}) });
     const trs = fOut.transitions ?? [];
     if (trs.length) {
       const k5 = b5.findIndex((b) => b.time === trs[0].time);
@@ -180,7 +184,12 @@ type St = {
   ovn?: { date: string; dir: 1 | -1; px: number; notify?: boolean } | null;
   pendingAm?: string[]; // 00:00~07:00 KST 이벤트 — 아침 요약 문자용
 };
-type ScoreRow = { date: string; p: number; pRe: number; cut: boolean; kind: "cw" | "f" | "none"; ovn: boolean; pend?: boolean; base?: number; dir?: 1 | -1 };
+// p·pRe = rebox판(주기준) 수정안·역진입판 / pV0 = 무rebox 대조 (사용자 지적 8/4 후 rebox 채택 —
+// 60일 페이퍼로 rebox 우위(+3.4) 라이브 재현 확인용). pend*는 1박일 다음 세션 시가 확정용.
+type ScoreRow = {
+  date: string; p: number; pRe: number; pV0: number; cut: boolean; kind: "cw" | "f" | "none"; ovn: boolean;
+  pend?: boolean; base?: number; dir?: 1 | -1; pendV0?: boolean; baseV0?: number; dirV0?: 1 | -1;
+};
 const DIR_KO = { up: `상승(${SY.leverage} 3x)`, down: `하락(${SY.inverse} 3x)` } as const;
 
 export async function runSoxxV2Monitor(): Promise<void> {
@@ -250,12 +259,18 @@ export async function runSoxxV2Monitor(): Promise<void> {
       try {
         const { data: scRow } = await admin.from("ops_settings").select("value").eq("key", "uspredict_v2_scores").maybeSingle();
         const arr = Array.isArray(scRow?.value) ? (scRow!.value as ScoreRow[]) : [];
-        const row = arr.find((s) => s.date === st.ovn!.date && s.pend);
-        if (row && row.base && row.dir) {
-          const ovnP = ((open - row.base) / row.base) * 100 * row.dir;
-          row.p = Math.round(ovnP * 100) / 100;
-          row.pRe = Math.round(ovnP * 100) / 100; // 동의일 — 두 판 동일
-          row.pend = false;
+        const row = arr.find((s) => s.date === st.ovn!.date && (s.pend || s.pendV0));
+        if (row) {
+          if (row.pend && row.base && row.dir) {
+            const ovnP = ((open - row.base) / row.base) * 100 * row.dir;
+            row.p = Math.round(ovnP * 100) / 100;
+            row.pRe = Math.round(ovnP * 100) / 100; // 비이견일 — 두 판 동일
+            row.pend = false;
+          }
+          if (row.pendV0 && row.baseV0 && row.dirV0) {
+            row.pV0 = Math.round(((open - row.baseV0) / row.baseV0) * 100 * row.dirV0 * 100) / 100;
+            row.pendV0 = false;
+          }
           await admin.from("ops_settings").upsert({ key: "uspredict_v2_scores", value: arr.slice(-120), updated_at: new Date().toISOString() }, { onConflict: "key" });
         }
       } catch { /* 채점 확정 실패 무시 */ }
@@ -267,8 +282,8 @@ export async function runSoxxV2Monitor(): Promise<void> {
         `1박 청산 ${etToKstLabel(reg[0].etMin, kstOffset)} SOXX ${pct(gain)}`);
     }
 
-    // ② 판정
-    const { c1, fJ } = judgeSoxxDay(todayEt, raw, hist, r10);
+    // ② 판정 — 주기준 = 0930 rebox판 (사용자 지적 8/4 "프리장 OR을 정규장에 그대로?" → 스윕 +3.4 우위)
+    const { c1, fJ } = judgeSoxxDay(todayEt, raw, hist, r10, NM.rebox);
     const fFirst = fJ && (!c1 || fJ.t < c1.t);
     const first = fFirst ? fJ : c1;
     const lastPx = raw.length ? raw[raw.length - 1].close : null;
@@ -377,6 +392,9 @@ export async function runSoxxV2Monitor(): Promise<void> {
     if (!st.eodDone && etMin >= 961 && reg.length > 0) {
       const close = reg[reg.length - 1].close;
       const sc = scoreSoxxDay(raw, c1, fJ, close, null);
+      // 무rebox 대조판 (rebox 채택 8/4 — 라이브 페이퍼로 +3.4 우위 재현 확인용)
+      const jV0 = judgeSoxxDay(todayEt, raw, hist, r10, null);
+      const scV0 = scoreSoxxDay(raw, jV0.c1, jV0.fJ, close, null);
       st.eodDone = true;
       if (sc.ovn && sc.base && sc.dir) {
         // 취침(10:30 ET = 23:30 KST) 이전 동의 = 무행동 1박 상태 → 다음 세션 청산 문자 발송.
@@ -388,13 +406,18 @@ export async function runSoxxV2Monitor(): Promise<void> {
       try {
         const { data: scRow } = await admin.from("ops_settings").select("value").eq("key", "uspredict_v2_scores").maybeSingle();
         const arr = (Array.isArray(scRow?.value) ? (scRow!.value as ScoreRow[]) : []).filter((s) => s.date !== todayEt);
-        arr.push({ date: todayEt, p: Math.round(sc.p * 100) / 100, pRe: Math.round(sc.pRe * 100) / 100, cut: sc.cut, kind: sc.kind, ovn: sc.ovn, ...(sc.ovn ? { pend: true, base: sc.base ?? undefined, dir: sc.dir ?? undefined } : {}) });
+        arr.push({
+          date: todayEt, p: Math.round(sc.p * 100) / 100, pRe: Math.round(sc.pRe * 100) / 100,
+          pV0: Math.round(scV0.p * 100) / 100, cut: sc.cut, kind: sc.kind, ovn: sc.ovn,
+          ...(sc.ovn ? { pend: true, base: sc.base ?? undefined, dir: sc.dir ?? undefined } : {}),
+          ...(scV0.ovn ? { pendV0: true, baseV0: scV0.base ?? undefined, dirV0: scV0.dir ?? undefined } : {}),
+        });
         const kept = arr.slice(-120);
         await admin.from("ops_settings").upsert({ key: "uspredict_v2_scores", value: kept, updated_at: new Date().toISOString() }, { onConflict: "key" });
         const sum = (f: (s: ScoreRow) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("uspredict_v2_eod", "low",
-          `[SOXX 신모델 결산] ${phase} — 오늘 수정안 ${pct(sc.p)} · 역진입판 ${pct(sc.pRe)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 수정안 ${pct(sum((s) => s.p))} · 역진입판 ${pct(sum((s) => s.pRe))}. 백테스트 궤도 일당 +0.47%(SOXX·3x 환산 +1.4%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·수수료 미차감(편도 0.07%).`,
+          `[SOXX 신모델 결산] ${phase} — 오늘 수정안 ${pct(sc.p)} · 역진입판 ${pct(sc.pRe)} · 무rebox판 ${pct(scV0.p)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 수정안(rebox) ${pct(sum((s) => s.p))} · 역진입판 ${pct(sum((s) => s.pRe))} · 무rebox ${pct(sum((s) => s.pV0 ?? s.p))}. 백테스트 궤도 일당 +0.48%(SOXX·3x 환산 +1.4%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·수수료 미차감(편도 0.07%).`,
           `결산 수정안 ${pct(sc.p)}${sc.ovn ? " (1박 중)" : ""}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
