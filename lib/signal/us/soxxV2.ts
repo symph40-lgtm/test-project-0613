@@ -107,7 +107,10 @@ export type SoxxScore = {
 
 // 하루 채점 — 수정안(p)·역진입판(pRe). nextOpen이 null이면 1박 자격일도 일단 종가로 계산(pend).
 // protect: 인버스 진입 레그 한정 이익 보호 청산 (config.newModel.soxxV2.protect — 8/4 채택, 스윕 +130.9).
-export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null, close: number, nextOpen: number | null, protect = false): SoxxScore {
+// preEntry: F 프리장 확인 시 확인가 즉시 진입·스탑은 정규장부터 (사용자 지시 8/5 "프리장 직접 매수" —
+// soxx-pre-entry-sweep 246일: 개장가 대기 +130.9 → 확인가 진입+정규장 스탑 +141.6·컷 32·최악 불변.
+// 프리장 스탑 포함은 +126.3 열위 — 프리장 구간은 스탑 없음이 사양).
+export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null, close: number, nextOpen: number | null, protect = false, preEntry = false): SoxxScore {
   const reg = raw.filter((b) => b.etMin >= SOXX_ET_OPEN);
   if ((!c1 && !fJ) || !reg.length) return { p: 0, pRe: 0, cut: false, kind: "none", ovn: false, base: null, dir: null, protT: null };
   const PR = PREDICT_CONFIG.newModel.soxxV2.protect;
@@ -116,7 +119,7 @@ export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null,
   let protectOn = protect; // pRe(역진입판 대조)는 보호 없이 계산 — 패스별 토글
   const tranche = (j: SoxxJ, exitPx: number, forceI?: number, forcePx?: number): { pnl: number; base: number } => {
     let i0 = j.i, px = j.px;
-    if (raw[j.i].etMin < SOXX_ET_OPEN) { i0 = raw.findIndex((b) => b.etMin >= SOXX_ET_OPEN); px = reg[0].open; }
+    if (!preEntry && raw[j.i].etMin < SOXX_ET_OPEN) { i0 = raw.findIndex((b) => b.etMin >= SOXX_ET_OPEN); px = reg[0].open; }
     if (i0 < 0 || (forceI !== undefined && forceI <= i0)) return { pnl: 0, base: px };
     const s = SOXX_STOP_PCT / 100;
     const lim = forceI ?? raw.length;
@@ -190,7 +193,7 @@ async function fetchSoxx1m(dateEt: string): Promise<SoxxBar[]> {
       const p = Object.fromEntries(etFmt.formatToParts(d).map((x) => [x.type, x.value]));
       if (`${p.year}-${p.month}-${p.day}` !== dateEt) continue;
       const etMin = parseInt(p.hour === "24" ? "0" : p.hour, 10) * 60 + parseInt(p.minute, 10);
-      if (etMin < SOXX_ET_PRE || etMin >= SOXX_ET_CLOSE) continue;
+      if (etMin < 240 || etMin >= SOXX_ET_CLOSE) continue; // 04:00부터 수집 (프리장 브리핑용 — 판정 입력은 호출부에서 07:00~로 재필터)
       out.push({ etMin, time: fmtT(etMin), open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume ?? 0 });
     }
   } catch { /* 야후 실패 — 빈 배열 (이번 호출 생략) */ }
@@ -202,6 +205,7 @@ type St = {
   entryT?: string; entryDir?: "up" | "down"; entryPx?: number; entryKind?: "cw" | "f";
   confT?: string; oppT?: string; revT?: string; revPx?: number; stopT?: string;
   protT?: string; // 이익 보호 청산 (인버스 한정 — 8/4 채택)
+  preBriefDone?: boolean; // 프리장 개시 브리핑 (17:30 KST — 8/5 지시)
   bedDone?: boolean; eodDone?: boolean;
   // 1박 보유 (다음 세션 시가 청산 대기). notify=false는 취침(23:30 KST) 후 늦은 동의 —
   // 실무는 이미 MOC 매도 상태라 청산 문자 생략, 채점만 사양(1박)대로 확정 (컷오프 Δ≈0 실측 c32f232)
@@ -250,12 +254,11 @@ export async function runSoxxV2Monitor(): Promise<void> {
       await save();
     }
 
-    // 세션 작업 창: ET 평일 07:05~16:10 (사용자 지시 8/4 밤 "프리장에서도 문자 받기를 원해" — F 창 시작
-    // 07:00부터 감시. 실제 프리장 실시간 수신은 cron-job.org 호출 시작을 22:25→20:00 KST로 당겨야 완성 —
-    // 크론이 22:25 시작이면 종전처럼 22:25 일괄 소급 감지로 동작. 07:00 이전(04~07 ET)은 박봉·역예측
-    // 실측으로 판정 자체가 없음 — 확장 안 함)
+    // 세션 작업 창: ET 평일 04:30~16:10 (사용자 지시 8/5 "17:30부터 모니터" — 04:30 ET=17:30 KST).
+    // 04:30~07:00은 프리장 개시 브리핑·시세 관찰만 — 판정(F 창)은 07:00부터 원칙 유지(04~07시 박봉·
+    // 역예측 실측, 방향 오판 5/19일). 실시간 수신은 cron-job.org 호출 시작을 17:30 KST로 당겨야 완성.
     const etDow = new Date(`${todayEt}T12:00:00Z`).getUTCDay();
-    if (etDow < 1 || etDow > 5 || etMin < 425 || etMin > 970) { if (changed) await save(); return; }
+    if (etDow < 1 || etDow > 5 || etMin < 270 || etMin > 970) { if (changed) await save(); return; }
 
     const dailyBars = await fetchJudgeDaily(140);
     const hist = dailyBars.filter((b) => b.date < todayEt).slice(-60);
@@ -264,7 +267,8 @@ export async function runSoxxV2Monitor(): Promise<void> {
     // 완성봉만 판정 (8/4 실사고 교정: 22:30:33 크론이 30초짜리 09:30 진행중 봉으로 창1 '하락' 오판 →
     // 가짜 전환 문자. 확정 데이터는 09:34 상승 동의. 백테스트=완성봉 원칙을 라이브에도 강제 —
     // 현재 분(etMin)의 봉은 아직 미완성이라 제외)
-    const raw = (await fetchSoxx1m(todayEt)).filter((b) => b.etMin < etMin);
+    const rawAll = (await fetchSoxx1m(todayEt)).filter((b) => b.etMin < etMin); // 04:00~ (브리핑용)
+    const raw = rawAll.filter((b) => b.etMin >= SOXX_ET_PRE); // 판정 입력은 07:00~ 원칙 유지
     const reg = raw.filter((b) => b.etMin >= SOXX_ET_OPEN);
     // 커버리지 가드 — 결손 데이터 오판정 방지 (정규장 경과분의 60% 미만이면 생략)
     const expectReg = Math.min(etMin, SOXX_ET_CLOSE) - SOXX_ET_OPEN - 1;
@@ -274,6 +278,19 @@ export async function runSoxxV2Monitor(): Promise<void> {
     if (st.date !== todayEt) {
       st = { date: todayEt, ovn: st.ovn ?? null, pendingAm: st.pendingAm ?? [] };
       changed = true;
+    }
+
+    // ⓪b 프리장 개시 브리핑 (사용자 지시 8/5 "17:30부터 모니터해줘" — 04:30~07:00 ET는 판정이 없는
+    // 저유동 구간이라 상황판·1박 보유 안내만. 판정 문자는 F 창이 열리는 20:00부터)
+    if (live && etMin >= 270 && etMin < SOXX_ET_PRE && !st.preBriefDone && rawAll.length > 0) {
+      st.preBriefDone = true;
+      changed = true;
+      const px = rawAll[rawAll.length - 1].close;
+      const prevC = hist[hist.length - 1].close;
+      const gap = ((px - prevC) / prevC) * 100;
+      const ovnLine = st.ovn ? `\n▶1박 보유 ${st.ovn.dir === 1 ? SY.leverage : SY.inverse}: 22:30(한국) 개장 시가 매도 예정 — 그때까지 자동감시 유지` : "";
+      await send("uspredict_v2_pre", "low",
+        `[SOXX 신모델] 프리장 개시 브리핑\n▶행동 없음 — 모델 판정은 한국 20:00(F 창 개시)부터 문자로 지시${ovnLine}\n무응답=대기\n----\n전일 종가 ${prevC.toFixed(2)} → 프리장 ${px.toFixed(2)} (${pct(gap)}). 04:30~07:00 ET(한국 17:30~20:00)는 저유동 구간 — 판정 무효 실측(방향 오판 5/19일), 시세 참고만.`);
     }
 
     // 시범 시작 안내 (applyFrom 첫 세션 09:25~09:40 ET)
@@ -322,7 +339,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
     // ②a 진입 — 먼저 온 신호 100% (F 프리장 확인은 09:30 개장가)
     if (first && !st.entryT) {
       const isPre = raw[first.i].etMin < SOXX_ET_OPEN;
-      const entryPx = isPre ? (reg[0]?.open ?? first.px) : first.px;
+      const entryPx = first.px; // 프리장 확인도 확인가 진입 (8/5 채택 — 개장가 대기 대비 +10.7%p)
       st.entryT = fmtT(first.t); st.entryDir = first.dir === 1 ? "up" : "down"; st.entryPx = entryPx; st.entryKind = fFirst ? "f" : "cw";
       changed = true;
       if (live) {
@@ -333,8 +350,11 @@ export async function runSoxxV2Monitor(): Promise<void> {
         // 오탐지·'진입 금지' 오지시(8/4 밤 실사고). 개장 이후 감지만 진짜 지연.
         const lag = etMin - Math.max(first.t, SOXX_ET_OPEN);
         const lagNote = lag >= 30 ? `\n⚠지연 통지(판정 ${st.entryT} ET, ${lag}분 경과) — 진입 금지, 다음 문자 대기` : "";
+        const stopLine = isPre
+          ? `자동감시는 22:30(한국) 개장 후 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) — 프리장 구간은 스탑 없음(프리장 스탑은 실측 -15.3%p 열위)`
+          : `자동감시 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) = ETF 약 -6%에 자동매도`;
         await send(`uspredict_v2_entry_${st.entryT.replace(":", "")}`, "high",
-          `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% ${isPre && etMin < SOXX_ET_OPEN ? "22:30(한국) 개장가로 매수 예약" : "지금 즉시 매수"} (초과 금지)\n▶② 자동감시 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) = ETF 약 -6%에 자동매도\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 245일 +114.4%p·컷은 예정 비용(-2%).`,
+          `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% 지금 즉시 매수${isPre ? " (프리장 직접 매수)" : ""} (초과 금지)\n▶② ${stopLine}\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 246일 +141.6%p·컷은 예정 비용(-2%).`,
           `진입 ${st.entryT} ET ${DIR_KO[st.entryDir]}`);
       }
     }
@@ -376,12 +396,6 @@ export async function runSoxxV2Monitor(): Promise<void> {
           `[SOXX 신모델] F 이견 — 보유는 유지, 1박만 금지\n▶① 지금 매도하지 않습니다 — 보유·자동감시(-2%) 유지\n▶② 오늘 1박 금지: 취침 전 MOC(종가) 매도 예약 걸고 취침\n무응답=보유 후 종가 청산\n----\n${etToKstLabel(fJ.t, kstOffset)} F 반대 확인. SOXX 실측(a24f012): 이견일 낮 청산·역진입은 잡음 손해(Δ-3.2/-2.4) — F 반대의 가치는 1박 금지 문지기(최악 -7.7→-4.1). 삼전과 반대 구조.`,
           `F 이견 ${st.oppT} ET — 1박 금지`);
       }
-    }
-
-    // 프리장 F 확인일 진입가 보정 — 실제 진입은 09:30 개장가 (백테스트 tranche와 동일 기준)
-    if (st.entryT && st.entryKind === "f" && st.entryPx && reg.length > 0) {
-      const eMin = parseInt(st.entryT.slice(0, 2), 10) * 60 + parseInt(st.entryT.slice(3, 5), 10);
-      if (eMin < SOXX_ET_OPEN && st.entryPx !== reg[0].open) { st.entryPx = reg[0].open; changed = true; }
     }
 
     // ②d 스탑·이익 보호 감시 — 현재 레그 (창1선행·F선행 공용, 전환 후엔 전환 레그).
@@ -447,7 +461,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
     // ④ 결산 (16:01 ET 이후 1회 = 한국 05:01 — 문자 억제 창이라 이메일+아침 요약으로 전달)
     if (!st.eodDone && etMin >= 961 && reg.length > 0) {
       const close = reg[reg.length - 1].close;
-      const sc = scoreSoxxDay(raw, c1, fJ, close, null, true); // 주기준 = rebox + 인버 보호 (8/4 채택)
+      const sc = scoreSoxxDay(raw, c1, fJ, close, null, true, true); // 주기준 = rebox + 인버 보호 + 프리장 확인가 진입 (8/5 채택)
       const scNP = scoreSoxxDay(raw, c1, fJ, close, null, false); // 보호 없음 대조
       // 무rebox 대조판 (rebox 채택 8/4 — 라이브 페이퍼로 +3.4 우위 재현 확인용, 보호 없음)
       const jV0 = judgeSoxxDay(todayEt, raw, hist, r10, null);
