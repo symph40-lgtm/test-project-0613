@@ -250,9 +250,12 @@ export async function runSoxxV2Monitor(): Promise<void> {
       await save();
     }
 
-    // 세션 작업 창: ET 평일 09:25~16:10 (크론 커버 22:25~05:05 KST와 일치 — F 프리장 확인은 09:25 감지 시 개장가 지침)
+    // 세션 작업 창: ET 평일 07:05~16:10 (사용자 지시 8/4 밤 "프리장에서도 문자 받기를 원해" — F 창 시작
+    // 07:00부터 감시. 실제 프리장 실시간 수신은 cron-job.org 호출 시작을 22:25→20:00 KST로 당겨야 완성 —
+    // 크론이 22:25 시작이면 종전처럼 22:25 일괄 소급 감지로 동작. 07:00 이전(04~07 ET)은 박봉·역예측
+    // 실측으로 판정 자체가 없음 — 확장 안 함)
     const etDow = new Date(`${todayEt}T12:00:00Z`).getUTCDay();
-    if (etDow < 1 || etDow > 5 || etMin < 565 || etMin > 970) { if (changed) await save(); return; }
+    if (etDow < 1 || etDow > 5 || etMin < 425 || etMin > 970) { if (changed) await save(); return; }
 
     const dailyBars = await fetchJudgeDaily(140);
     const hist = dailyBars.filter((b) => b.date < todayEt).slice(-60);
