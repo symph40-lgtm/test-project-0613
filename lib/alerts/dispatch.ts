@@ -76,7 +76,9 @@ const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vre
 // 해제 = config.smsNewModelOnly false. 허용: 하닉 창판정(predict_cw_)·신모델 비교/시작(predict_nm_)·
 // 삼전 v2(predict_ssv2_)·SOXX v2(uspredict_v2_)·딥바이(uspredict_dipbuy, 사용자 확정 8/3)·
 // 실시간 버튼 응답(predict_now_)·결정 통지(predict_promote).
-const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_/;
+// usdaily_(미국 일봉 스윙 지침)도 범위에 포함 (8/4 실측 — 첫날 08:55 "[미국일봉] 내일 지침"이 키 명명
+// 차이로 게이트를 빠져나옴. SOXX 지침 채널이 신모델 v2와 이원화되면 혼란이라 억제).
+const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_|^usdaily_/;
 const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote)/;
 
 export async function dispatchToChannels(
