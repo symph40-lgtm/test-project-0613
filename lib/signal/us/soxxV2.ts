@@ -258,7 +258,10 @@ export async function runSoxxV2Monitor(): Promise<void> {
     const hist = dailyBars.filter((b) => b.date < todayEt).slice(-60);
     if (hist.length < 11) { if (changed) await save(); return; }
     const r10 = hist.slice(-10).reduce((a, b) => a + (b.high - b.low), 0) / 10;
-    const raw = await fetchSoxx1m(todayEt);
+    // 완성봉만 판정 (8/4 실사고 교정: 22:30:33 크론이 30초짜리 09:30 진행중 봉으로 창1 '하락' 오판 →
+    // 가짜 전환 문자. 확정 데이터는 09:34 상승 동의. 백테스트=완성봉 원칙을 라이브에도 강제 —
+    // 현재 분(etMin)의 봉은 아직 미완성이라 제외)
+    const raw = (await fetchSoxx1m(todayEt)).filter((b) => b.etMin < etMin);
     const reg = raw.filter((b) => b.etMin >= SOXX_ET_OPEN);
     // 커버리지 가드 — 결손 데이터 오판정 방지 (정규장 경과분의 60% 미만이면 생략)
     const expectReg = Math.min(etMin, SOXX_ET_CLOSE) - SOXX_ET_OPEN - 1;
@@ -426,12 +429,14 @@ export async function runSoxxV2Monitor(): Promise<void> {
       changed = true;
       const ovnOk = !!st.confT && !st.stopT && !st.protT;
       const holding = !st.stopT && !st.protT;
-      const gain = lastPx !== null && st.entryPx ? ((lastPx - (st.revPx ?? st.entryPx)) / (st.revPx ?? st.entryPx)) * 100 * (st.revT ? (c1?.dir ?? 1) : st.entryDir === "up" ? 1 : -1) : null;
+      const legDirBed: 1 | -1 = st.revT ? (c1?.dir ?? 1) : st.entryDir === "up" ? 1 : -1;
+      const nmBed = legDirBed === 1 ? SY.leverage : SY.inverse; // 보유 종목명 명시 (사용자 지적 8/4 밤 — 표기 없어 혼란)
+      const gain = lastPx !== null && st.entryPx ? ((lastPx - (st.revPx ?? st.entryPx)) / (st.revPx ?? st.entryPx)) * 100 * legDirBed : null;
       await send("uspredict_v2_bed", "medium",
         ovnOk
-          ? `[SOXX 신모델] 취침 지침 — 무행동 1박\n▶① 아무것도 하지 않고 취침 (매도 예약 걸지 않음)\n▶② 자동감시(-2%)만 유지 — 주간거래 포함 24시간 감시 가능 종목\n▶③ 내일 22:30(한국) 개장 시가 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 취침 컷오프 실측: 23:00~01:00 어디서 끊어도 손실 없음(c32f232).`
+          ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동감시(-2%)만 유지 — 주간거래 포함 24시간 감시 가능 종목\n▶③ 내일 22:30(한국) 개장 시가 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 취침 컷오프 실측: 23:00~01:00 어디서 끊어도 손실 없음(c32f232).`
           : holding
-            ? `[SOXX 신모델] 취침 지침 — 오늘은 종가 청산\n▶① 취침 전 MOC(종가) 매도 예약 설정\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
+            ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} MOC(종가) 매도 예약 설정 (새로 사는 것 아님)\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
             : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (${st.protT ? "이익 보호 청산" : "스탑"}으로 종료된 날)\n----\n오늘 매매 종료.`,
         undefined);
     }
