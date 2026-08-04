@@ -79,7 +79,11 @@ const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vre
 // usdaily_(미국 일봉 스윙 지침)도 범위에 포함 (8/4 실측 — 첫날 08:55 "[미국일봉] 내일 지침"이 키 명명
 // 차이로 게이트를 빠져나옴. SOXX 지침 채널이 신모델 v2와 이원화되면 혼란이라 억제).
 const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_|^usdaily_/;
-const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote)/;
+// 하닉 F 판정(predict_tr_hxF_)·하닉 F 진행성(predict_prog5_hxF_)은 하닉 최종 신모델(4단 사다리)의
+// 1·2단계 운반 채널이라 허용 (8/4 실측 교정 — 첫날 09:31 F 인버 판정 문자가 차단됐음. 사다리 =
+// F30% → 진행성 70% → 창동의 100%이므로 F가 침묵하면 신모델 1단계가 죽는다). 하닉 M/본·삼전 계층·
+// TOP10은 신모델 세트 밖 — 계속 억제.
+const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote|predict_tr_hxF_|predict_prog5_hxF_)/;
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
