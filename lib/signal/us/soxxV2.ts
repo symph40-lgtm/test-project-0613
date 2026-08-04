@@ -322,7 +322,10 @@ export async function runSoxxV2Monitor(): Promise<void> {
       if (live) {
         const nm = first.dir === 1 ? SY.leverage : SY.inverse;
         const stopPx = first.dir === 1 ? entryPx * (1 - SOXX_STOP_PCT / 100) : entryPx * (1 + SOXX_STOP_PCT / 100);
-        const lag = etMin - first.t;
+        // 지연은 '실행 가능 시점' 기준 (8/4 실전 교정): F 프리장 확인(예: 07:49)은 진입이 어차피 09:30
+        // 개장가라, 크론 시작(09:25 ET=22:25 KST) 감지 통지는 제때임 — 판정 시각 기준으로 재면 96분
+        // 오탐지·'진입 금지' 오지시(8/4 밤 실사고). 개장 이후 감지만 진짜 지연.
+        const lag = etMin - Math.max(first.t, SOXX_ET_OPEN);
         const lagNote = lag >= 30 ? `\n⚠지연 통지(판정 ${st.entryT} ET, ${lag}분 경과) — 진입 금지, 다음 문자 대기` : "";
         await send(`uspredict_v2_entry_${st.entryT.replace(":", "")}`, "high",
           `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% ${isPre && etMin < SOXX_ET_OPEN ? "22:30(한국) 개장가로 매수 예약" : "지금 즉시 매수"} (초과 금지)\n▶② 자동감시 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) = ETF 약 -6%에 자동매도\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 245일 +114.4%p·컷은 예정 비용(-2%).`,
