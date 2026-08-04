@@ -107,9 +107,10 @@ export async function dispatchToChannels(
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
   if (PREDICT_CONFIG.smsNewModelOnly && NM_ONLY_SCOPE.test(alert.key)) {
-    if (!NM_ONLY_ALLOW.test(alert.key) && !NM_REF_ALLOW.test(alert.key)) return 0; // 신모델 전용 (2026-08-04)
+    const refOk = PREDICT_CONFIG.smsLegacyRef && NM_REF_ALLOW.test(alert.key); // 참고 채널 — smsLegacyRef로만 on/off
+    if (!NM_ONLY_ALLOW.test(alert.key) && !refOk) return 0; // 신모델 전용 (2026-08-04)
     // 실전/참고 제목 구분 (사용자 지시 2026-08-04 저녁) — 본문 첫 줄의 [채널명]과 별개로 제목에서 즉시 판별
-    if (NM_REF_ALLOW.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
+    if (refOk) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델)·${nmInstrument(alert.key)}` };
   }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
