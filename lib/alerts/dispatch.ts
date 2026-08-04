@@ -84,6 +84,14 @@ const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_|^usdaily_/;
 // F30% → 진행성 70% → 창동의 100%이므로 F가 침묵하면 신모델 1단계가 죽는다). 하닉 M/본·삼전 계층·
 // TOP10은 신모델 세트 밖 — 계속 억제.
 const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote|predict_tr_hxF_|predict_prog5_hxF_)/;
+// '참고(기존모델)' 병행 발송 (사용자 지시 2026-08-04 저녁 "당분간 삼전 M/본·하닉 M/본·SOXX M/본도
+// 보내줘, 제목으로 구분하면 헷갈리지 않지"): 기존 계층의 M·본 문자는 발송하되 제목을 참고(기존모델)로,
+// 신모델 채널은 실전(신모델)로 교체해 실전/참고를 제목에서 즉시 구분. F 계층(삼전 ssF·미장 F)은
+// 신모델 심판 F와 중복 혼란이라 계속 억제 (하닉 F만 사다리 1단계라 실전 소속).
+const NM_REF_ALLOW = /^predict_tr_(hxM|hxB|ssM|ssB)_|^uspredict_tr_[MB]_/;
+const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
+const nmInstrument = (key: string): string =>
+  key.startsWith("uspredict_") ? "SOXX" : /^predict_(ssv2_|tr_ss)/.test(key) ? "삼전" : "하닉";
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
@@ -98,7 +106,12 @@ export async function dispatchToChannels(
   opts?: { dedupHours?: number },
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
-  if (PREDICT_CONFIG.smsNewModelOnly && NM_ONLY_SCOPE.test(alert.key) && !NM_ONLY_ALLOW.test(alert.key)) return 0; // 신모델 전용 (2026-08-04)
+  if (PREDICT_CONFIG.smsNewModelOnly && NM_ONLY_SCOPE.test(alert.key)) {
+    if (!NM_ONLY_ALLOW.test(alert.key) && !NM_REF_ALLOW.test(alert.key)) return 0; // 신모델 전용 (2026-08-04)
+    // 실전/참고 제목 구분 (사용자 지시 2026-08-04 저녁) — 본문 첫 줄의 [채널명]과 별개로 제목에서 즉시 판별
+    if (NM_REF_ALLOW.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
+    else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델)·${nmInstrument(alert.key)}` };
+  }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
   if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지
