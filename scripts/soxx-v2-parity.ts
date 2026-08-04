@@ -27,7 +27,7 @@ async function main() {
   const dBy = new Map(daily.map((b) => [b.date, b]));
 
   const files = readdirSync(CACHE).filter((f) => /^SOXXM-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
-  let n = 0, nCw = 0, nF = 0, pCw = 0, pF = 0, pReCw = 0, pReF = 0, worst = 0, cuts = 0, ovnN = 0, pRebox = 0;
+  let n = 0, nCw = 0, nF = 0, pCw = 0, pF = 0, pReCw = 0, pReF = 0, worst = 0, cuts = 0, ovnN = 0, pRebox = 0, pProt = 0;
   for (const f of files) {
     const date = f.slice(6, 16);
     const rawAll = JSON.parse(readFileSync(resolve(CACHE, f), "utf8")) as SoxxBar[];
@@ -49,12 +49,14 @@ async function main() {
     worst = Math.min(worst, sc.p);
     const jR = judgeSoxxDay(date, raw, hist, r10, { reboxHHMM: "09:30", reboxMinutes: 15 }); // 라이브 주기준 (8/4 채택)
     pRebox += scoreSoxxDay(raw, jR.c1, jR.fJ, reg[reg.length - 1].close, nextOpen).p;
+    pProt += scoreSoxxDay(raw, jR.c1, jR.fJ, reg[reg.length - 1].close, nextOpen, true).p; // rebox+인버 보호 (8/4 채택 주기준)
   }
   console.log(`════ SOXX v2 parity (SOXXM ${n}일) ════`);
   console.log(`창1 선행 ${nCw}일: 수정안 ${s1(pCw)}%p (기준 +78.2/186일) · 역진입판 ${s1(pReCw)} (기준 +73.1)`);
   console.log(`F 선행  ${nF}일: E1 1박 ${s1(pF)}%p (기준 +36.2/59일)`);
   console.log(`통합: 수정안 ${s1(pCw + pF)}%p (기준 +114.4) · 역진입판 ${s1(pReCw + pReF)} (기준 +109.3)`);
-  console.log(`rebox판(라이브 주기준): ${s1(pRebox)}%p (기준 +117.8 — soxx-f-rebox-sweep)`);
+  console.log(`rebox판: ${s1(pRebox)}%p (245일 기준 +117.8 — soxx-f-rebox-sweep. 캐시 증가 시 당일분만큼 이동)`);
+  console.log(`rebox+인버보호(라이브 주기준): ${s1(pProt)}%p (246일 기준 +130.9 — soxx-open-protect-sweep C·T0.9)`);
   console.log(`컷 ${cuts}일 · 1박 ${ovnN}일 · 최악일 ${worst.toFixed(2)}% (기준 -4.1)`);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

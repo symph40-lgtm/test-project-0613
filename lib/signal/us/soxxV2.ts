@@ -102,39 +102,61 @@ export function judgeSoxxDay(date: string, raw: SoxxBar[], hist: PredictDailyBar
 export type SoxxScore = {
   p: number; pRe: number; cut: boolean; kind: "cw" | "f" | "none";
   ovn: boolean; base: number | null; dir: 1 | -1 | null; // 1박 확정용 (다음 세션 시가로 p 재계산)
+  protT: number | null; // 이익 보호 청산 발동 시각 (etMin) — protect=true일 때만
 };
 
 // 하루 채점 — 수정안(p)·역진입판(pRe). nextOpen이 null이면 1박 자격일도 일단 종가로 계산(pend).
-export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null, close: number, nextOpen: number | null): SoxxScore {
+// protect: 인버스 진입 레그 한정 이익 보호 청산 (config.newModel.soxxV2.protect — 8/4 채택, 스윕 +130.9).
+export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null, close: number, nextOpen: number | null, protect = false): SoxxScore {
   const reg = raw.filter((b) => b.etMin >= SOXX_ET_OPEN);
-  if ((!c1 && !fJ) || !reg.length) return { p: 0, pRe: 0, cut: false, kind: "none", ovn: false, base: null, dir: null };
+  if ((!c1 && !fJ) || !reg.length) return { p: 0, pRe: 0, cut: false, kind: "none", ovn: false, base: null, dir: null, protT: null };
+  const PR = PREDICT_CONFIG.newModel.soxxV2.protect;
   let cut = false;
+  let protT: number | null = null;
+  let protectOn = protect; // pRe(역진입판 대조)는 보호 없이 계산 — 패스별 토글
   const tranche = (j: SoxxJ, exitPx: number, forceI?: number, forcePx?: number): { pnl: number; base: number } => {
     let i0 = j.i, px = j.px;
     if (raw[j.i].etMin < SOXX_ET_OPEN) { i0 = raw.findIndex((b) => b.etMin >= SOXX_ET_OPEN); px = reg[0].open; }
     if (i0 < 0 || (forceI !== undefined && forceI <= i0)) return { pnl: 0, base: px };
     const s = SOXX_STOP_PCT / 100;
     const lim = forceI ?? raw.length;
+    let ext = px; // 유리 극값 (보호 규칙용)
     for (let k = i0 + 1; k < lim; k++) {
-      if (raw[k].etMin < SOXX_ET_OPEN) continue;
-      if (j.dir === 1 ? raw[k].low <= px * (1 - s) : raw[k].high >= px * (1 + s)) { cut = true; return { pnl: -SOXX_STOP_PCT, base: px }; }
+      const b = raw[k];
+      if (b.etMin < SOXX_ET_OPEN) continue;
+      if (j.dir === 1 ? b.low <= px * (1 - s) : b.high >= px * (1 + s)) { cut = true; return { pnl: -SOXX_STOP_PCT, base: px }; }
+      if (protectOn && j.dir === -1) {
+        ext = Math.min(ext, b.low);
+        const armGain = ((px - ext) / px) * 100;
+        if (b.etMin <= PR.untilEt && armGain >= PR.arm) {
+          const retr = ((b.close - ext) / px) * 100;
+          if (retr >= PR.trail) { protT = b.etMin; return { pnl: ((px - b.close) / px) * 100, base: px }; }
+        }
+      }
     }
     return { pnl: (((forceI !== undefined ? (forcePx ?? close) : exitPx) - px) / px) * 100 * j.dir, base: px };
   };
   const fFirst = fJ && (!c1 || fJ.t < c1.t);
   if (fFirst && fJ) {
-    // F 선행일 E1 — 수정안·역진입판 동일 (전환은 이 케이스의 확정 규칙)
+    // F 선행일 E1 — 보호 제외 시 수정안·역진입판 동일 (전환은 이 케이스의 확정 규칙)
     const oppC = c1 && c1.dir !== fJ.dir ? c1 : null;
     const ovnOk = !oppC;
     const exitPx = ovnOk && nextOpen !== null ? nextOpen : close;
     const a = tranche(fJ, exitPx, oppC?.i, oppC?.px);
     const b = oppC ? tranche(oppC, close) : null;
     const p = a.pnl + (b?.pnl ?? 0);
+    const cutMain = cut;
+    const protMain = protT;
+    // pRe = 보호 없는 판 (대조)
+    cut = false; protT = null; protectOn = false;
+    const aN = tranche(fJ, exitPx, oppC?.i, oppC?.px);
+    const pRe = aN.pnl + (oppC ? tranche(oppC, close).pnl : 0);
+    cut = cutMain; protT = protMain;
     const lastBase = b ? b.base : a.base;
     const lastDir = oppC ? oppC.dir : fJ.dir;
-    return { p, pRe: p, cut, kind: "f", ovn: ovnOk && !cut, base: lastBase, dir: lastDir };
+    return { p, pRe, cut: cutMain, kind: "f", ovn: ovnOk && !cutMain && protT === null, base: lastBase, dir: lastDir, protT };
   }
-  if (!c1) return { p: 0, pRe: 0, cut: false, kind: "none", ovn: false, base: null, dir: null };
+  if (!c1) return { p: 0, pRe: 0, cut: false, kind: "none", ovn: false, base: null, dir: null, protT: null };
   // 창1 선행일 — 수정안: F 반대여도 낮 보유 유지(스탑만), 1박 자격 = 비이견(동의+무판정 — F확인 ≥ 창1·
   // 동시각 포함 기준). "동의만"으로 좁히면 -2.5%p (4d220ca 기준 +78.2의 정의 = 비이견, 사용자 확인
   // c8c84f5 "비이견 전부 1박 유지"). 실무 취침 문자는 안전하게 동의 확인일만 무행동 1박(c32f232) —
@@ -145,12 +167,13 @@ export function scoreSoxxDay(raw: SoxxBar[], c1: SoxxJ | null, fJ: SoxxJ | null,
   const a = tranche(c1, exitPx);
   const p = a.pnl;
   const cutMain = cut;
-  // 역진입판 (병행 채점 대조): F 반대 시 청산 + F 방향 100% 역진입, 양 레그 종가·1박 자격 동일(비이견)
-  cut = false;
+  const protMain = protT;
+  // 역진입판 (병행 채점 대조): F 반대 시 청산 + F 방향 100% 역진입, 양 레그 종가·1박 자격 동일(비이견)·보호 없음
+  cut = false; protT = null; protectOn = false;
   const aRe = tranche(c1, exitPx, fOpp?.i, fOpp?.px);
   const pRe = aRe.pnl + (fOpp ? tranche(fOpp, close).pnl : 0);
-  cut = cutMain;
-  return { p, pRe, cut: cutMain, kind: "cw", ovn: ovnOk && !cutMain, base: a.base, dir: c1.dir };
+  cut = cutMain; protT = protMain;
+  return { p, pRe, cut: cutMain, kind: "cw", ovn: ovnOk && !cutMain && protT === null, base: a.base, dir: c1.dir, protT };
 }
 
 // ── 라이브 스트림 ──────────────────────────────────────────────────────────
@@ -178,6 +201,7 @@ type St = {
   date: string; // ET 세션일
   entryT?: string; entryDir?: "up" | "down"; entryPx?: number; entryKind?: "cw" | "f";
   confT?: string; oppT?: string; revT?: string; revPx?: number; stopT?: string;
+  protT?: string; // 이익 보호 청산 (인버스 한정 — 8/4 채택)
   bedDone?: boolean; eodDone?: boolean;
   // 1박 보유 (다음 세션 시가 청산 대기). notify=false는 취침(23:30 KST) 후 늦은 동의 —
   // 실무는 이미 MOC 매도 상태라 청산 문자 생략, 채점만 사양(1박)대로 확정 (컷오프 Δ≈0 실측 c32f232)
@@ -187,7 +211,7 @@ type St = {
 // p·pRe = rebox판(주기준) 수정안·역진입판 / pV0 = 무rebox 대조 (사용자 지적 8/4 후 rebox 채택 —
 // 60일 페이퍼로 rebox 우위(+3.4) 라이브 재현 확인용). pend*는 1박일 다음 세션 시가 확정용.
 type ScoreRow = {
-  date: string; p: number; pRe: number; pV0: number; cut: boolean; kind: "cw" | "f" | "none"; ovn: boolean;
+  date: string; p: number; pRe: number; pV0: number; pNP?: number; cut: boolean; kind: "cw" | "f" | "none"; ovn: boolean;
   pend?: boolean; base?: number; dir?: 1 | -1; pendV0?: boolean; baseV0?: number; dirV0?: 1 | -1;
 };
 const DIR_KO = { up: `상승(${SY.leverage} 3x)`, down: `하락(${SY.inverse} 3x)` } as const;
@@ -249,7 +273,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
     // 시범 시작 안내 (applyFrom 첫 세션 09:25~09:40 ET)
     if (live && todayEt === applyFrom && etMin <= 580) {
       await send("uspredict_v2_start", "medium",
-        `[SOXX 신모델] 오늘 세션부터 시범 시행\n▶SOXX 매매는 이 문자 기준 — 창1(1분 6봉 모멘텀) 또는 F(피셔) 중 먼저 온 신호로 진입\n▶상방 ${SY.leverage}·하방 ${SY.inverse} (3x) · 스탑 SOXX -2%(ETF -6%)\n▶한국 00~07시엔 문자 없음 — 아침 요약으로 합산 (모니터링은 계속)\n----\n근거 245일: 통합 +114.4%p·최악일 -4.1%(SOXX). 동의일만 1박(다음 세션 시가 청산), 이견·무판정일은 종가(MOC) 청산. 취침(23:30) 지침 문자로 마감.`, undefined);
+        `[SOXX 신모델] 오늘 세션부터 시범 시행\n▶SOXX 매매는 이 문자 기준 — 창1(1분 6봉 모멘텀) 또는 F(피셔) 중 먼저 온 신호로 진입\n▶상방 ${SY.leverage}·하방 ${SY.inverse} (3x) · 스탑 SOXX -2%(ETF -6%)\n▶인버스 진입일: 이익 +1% 후 되돌림 0.9%면 '이익 보호 청산' 문자 — 즉시 매도 (8/3 기브백 교정 규칙)\n▶한국 00~07시엔 문자 없음 — 아침 요약으로 합산 (모니터링은 계속)\n----\n근거 246일: 통합(보호 포함) +130.9%p·최악일 -4.08%(SOXX). 비이견일 1박(다음 세션 시가 청산)·이견일 종가(MOC) 청산. 취침(23:30) 지침 문자로 마감.`, undefined);
     }
 
     // ① 1박 청산 — 전 세션 이월분을 개장 시가로 (22:30 KST — 정상 발송 시간)
@@ -351,23 +375,43 @@ export async function runSoxxV2Monitor(): Promise<void> {
       if (eMin < SOXX_ET_OPEN && st.entryPx !== reg[0].open) { st.entryPx = reg[0].open; changed = true; }
     }
 
-    // ②d 스탑 감시 — 현재 레그 (창1선행·F선행 공용, 전환 후엔 전환 레그)
-    if (st.entryT && st.entryPx && !st.stopT && lastPx !== null) {
+    // ②d 스탑·이익 보호 감시 — 현재 레그 (창1선행·F선행 공용, 전환 후엔 전환 레그).
+    // 보호(8/4 채택): 인버스 레그 한정 — 미실현 +arm% 무장 후 유리 극값에서 trail% 되돌림 시 청산(~10:30 ET)
+    if (st.entryT && st.entryPx && !st.stopT && !st.protT && lastPx !== null) {
       const legDir: 1 | -1 = st.revT ? (c1?.dir ?? 1) : st.entryDir === "up" ? 1 : -1;
       const legPx = st.revT ? (st.revPx ?? st.entryPx) : st.entryPx;
       const legT = st.revT ?? st.entryT;
+      const PR = NM.soxxV2.protect;
       const i0 = raw.findIndex((b) => b.time === legT || b.etMin >= parseInt(legT.slice(0, 2), 10) * 60 + parseInt(legT.slice(3, 5), 10));
       if (i0 >= 0) {
         const s = SOXX_STOP_PCT / 100;
+        let ext = legPx;
         for (let k = i0 + 1; k < raw.length; k++) {
-          if (raw[k].etMin < SOXX_ET_OPEN) continue;
-          if (legDir === 1 ? raw[k].low <= legPx * (1 - s) : raw[k].high >= legPx * (1 + s)) {
-            st.stopT = raw[k].time;
+          const b = raw[k];
+          if (b.etMin < SOXX_ET_OPEN) continue;
+          if (legDir === 1 ? b.low <= legPx * (1 - s) : b.high >= legPx * (1 + s)) {
+            st.stopT = b.time;
             changed = true;
             if (live) await send(`uspredict_v2_stop_${st.stopT.replace(":", "")}`, "medium",
-              `[SOXX 신모델] 스탑 도달\n▶자동매도 체결 확인만 — 오늘 다시 매수하지 않습니다 (1박도 없음)\n무응답=현행 유지\n----\n${etToKstLabel(raw[k].etMin, kstOffset)} 진입가 대비 SOXX -2%(ETF -6%). 컷일 21/245(8.6%) — 예정 비용.`,
+              `[SOXX 신모델] 스탑 도달\n▶자동매도 체결 확인만 — 오늘 다시 매수하지 않습니다 (1박도 없음)\n무응답=현행 유지\n----\n${etToKstLabel(b.etMin, kstOffset)} 진입가 대비 SOXX -2%(ETF -6%). 컷일 33/246(13%) — 예정 비용.`,
               `스탑 ${st.stopT} ET`);
             break;
+          }
+          if (legDir === -1) {
+            ext = Math.min(ext, b.low);
+            const armGain = ((legPx - ext) / legPx) * 100;
+            if (b.etMin <= PR.untilEt && armGain >= PR.arm) {
+              const retr = ((b.close - ext) / legPx) * 100;
+              if (retr >= PR.trail) {
+                st.protT = b.time;
+                changed = true;
+                const gain = ((legPx - b.close) / legPx) * 100;
+                if (live) await send(`uspredict_v2_prot_${st.protT.replace(":", "")}`, "high",
+                  `[SOXX 신모델] 이익 보호 청산 — 인버스 되돌림\n▶① 보유 ${SY.inverse} 전량 지금 즉시 매도\n▶② 오늘 재매수·1박 없음 — 이후 '전환' 문자가 오면 그 지침만 예외\n무응답=매도\n----\n${etToKstLabel(b.etMin, kstOffset)} 저점(${ext.toFixed(2)}) 대비 +${PR.trail}% 반등 — 확보 이익 SOXX ${pct(gain)}(3x ≈ ${pct(gain * 3)}). 인버스 진입일 이익 반납이 기브백의 79%(26/33일) — 보호 실측 +130.9%p(기준 +116.5). 상승 진입일엔 미적용(보유 우위).`,
+                  `이익 보호 청산 ${st.protT} ET SOXX ${pct(gain)}`);
+                break;
+              }
+            }
           }
         }
       }
@@ -377,23 +421,24 @@ export async function runSoxxV2Monitor(): Promise<void> {
     if (live && !st.bedDone && kstMin >= 23 * 60 + 30 && st.entryT) {
       st.bedDone = true;
       changed = true;
-      const ovnOk = !!st.confT && !st.stopT;
-      const holding = !st.stopT;
+      const ovnOk = !!st.confT && !st.stopT && !st.protT;
+      const holding = !st.stopT && !st.protT;
       const gain = lastPx !== null && st.entryPx ? ((lastPx - (st.revPx ?? st.entryPx)) / (st.revPx ?? st.entryPx)) * 100 * (st.revT ? (c1?.dir ?? 1) : st.entryDir === "up" ? 1 : -1) : null;
       await send("uspredict_v2_bed", "medium",
         ovnOk
           ? `[SOXX 신모델] 취침 지침 — 무행동 1박\n▶① 아무것도 하지 않고 취침 (매도 예약 걸지 않음)\n▶② 자동감시(-2%)만 유지 — 주간거래 포함 24시간 감시 가능 종목\n▶③ 내일 22:30(한국) 개장 시가 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 취침 컷오프 실측: 23:00~01:00 어디서 끊어도 손실 없음(c32f232).`
           : holding
             ? `[SOXX 신모델] 취침 지침 — 오늘은 종가 청산\n▶① 취침 전 MOC(종가) 매도 예약 설정\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
-            : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (스탑으로 종료된 날)\n----\n오늘 매매 종료.`,
+            : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (${st.protT ? "이익 보호 청산" : "스탑"}으로 종료된 날)\n----\n오늘 매매 종료.`,
         undefined);
     }
 
     // ④ 결산 (16:01 ET 이후 1회 = 한국 05:01 — 문자 억제 창이라 이메일+아침 요약으로 전달)
     if (!st.eodDone && etMin >= 961 && reg.length > 0) {
       const close = reg[reg.length - 1].close;
-      const sc = scoreSoxxDay(raw, c1, fJ, close, null);
-      // 무rebox 대조판 (rebox 채택 8/4 — 라이브 페이퍼로 +3.4 우위 재현 확인용)
+      const sc = scoreSoxxDay(raw, c1, fJ, close, null, true); // 주기준 = rebox + 인버 보호 (8/4 채택)
+      const scNP = scoreSoxxDay(raw, c1, fJ, close, null, false); // 보호 없음 대조
+      // 무rebox 대조판 (rebox 채택 8/4 — 라이브 페이퍼로 +3.4 우위 재현 확인용, 보호 없음)
       const jV0 = judgeSoxxDay(todayEt, raw, hist, r10, null);
       const scV0 = scoreSoxxDay(raw, jV0.c1, jV0.fJ, close, null);
       st.eodDone = true;
@@ -409,7 +454,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
         const arr = (Array.isArray(scRow?.value) ? (scRow!.value as ScoreRow[]) : []).filter((s) => s.date !== todayEt);
         arr.push({
           date: todayEt, p: Math.round(sc.p * 100) / 100, pRe: Math.round(sc.pRe * 100) / 100,
-          pV0: Math.round(scV0.p * 100) / 100, cut: sc.cut, kind: sc.kind, ovn: sc.ovn,
+          pV0: Math.round(scV0.p * 100) / 100, pNP: Math.round(scNP.p * 100) / 100, cut: sc.cut, kind: sc.kind, ovn: sc.ovn,
           ...(sc.ovn ? { pend: true, base: sc.base ?? undefined, dir: sc.dir ?? undefined } : {}),
           ...(scV0.ovn ? { pendV0: true, baseV0: scV0.base ?? undefined, dirV0: scV0.dir ?? undefined } : {}),
         });
@@ -418,7 +463,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
         const sum = (f: (s: ScoreRow) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("uspredict_v2_eod", "low",
-          `[SOXX 신모델 결산] ${phase} — 오늘 수정안 ${pct(sc.p)} · 역진입판 ${pct(sc.pRe)} · 무rebox판 ${pct(scV0.p)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 수정안(rebox) ${pct(sum((s) => s.p))} · 역진입판 ${pct(sum((s) => s.pRe))} · 무rebox ${pct(sum((s) => s.pV0 ?? s.p))}. 백테스트 궤도 일당 +0.48%(SOXX·3x 환산 +1.4%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·수수료 미차감(편도 0.07%).`,
+          `[SOXX 신모델 결산] ${phase} — 오늘 ${pct(sc.p)}${sc.protT !== null ? "(이익 보호 발동)" : ""} · 보호없음 ${pct(scNP.p)} · 역진입판 ${pct(sc.pRe)} · 무rebox ${pct(scV0.p)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${st.protT ? `·보호 ${st.protT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준(보호) ${pct(sum((s) => s.p))} · 보호없음 ${pct(sum((s) => s.pNP ?? s.p))} · 역진입판 ${pct(sum((s) => s.pRe))} · 무rebox ${pct(sum((s) => s.pV0 ?? s.p))}. 백테스트 궤도 일당 +0.53%(SOXX·3x 환산 +1.6%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·수수료 미차감(편도 0.07%).`,
           `결산 수정안 ${pct(sc.p)}${sc.ovn ? " (1박 중)" : ""}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
