@@ -24,7 +24,8 @@ const s2 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
 
 type Day = { date: string; raw: SoxxBar[]; reg: SoxxBar[]; close: number; nextOpen: number | null; c1: SoxxJ | null; fJ: SoxxJ | null };
 
-function simDay(d: Day, preEntry: boolean, preStop = true): { p: number; cut: boolean; preN: boolean } {
+// preStopPct: 프리장 구간 전용 스탑(SOXX %) — null이면 프리장 스탑 없음(현행 사양). 정규장은 항상 -2%.
+function simDay(d: Day, preEntry: boolean, preStop = true, preStopPct: number | null = null): { p: number; cut: boolean; preN: boolean } {
   const { raw } = d;
   const fFirst = d.fJ && (!d.c1 || d.fJ.t < d.c1.t);
   const first = fFirst ? d.fJ : d.c1;
@@ -42,8 +43,11 @@ function simDay(d: Day, preEntry: boolean, preStop = true): { p: number; cut: bo
     let ext = px;
     for (let k = i0 + 1; k < lim; k++) {
       const b = raw[k];
-      if (b.etMin < SOXX_ET_OPEN && !(isPre && preEntry && preStop)) continue; // 프리장 스탑 감시는 preStop 변형만
-      if (j.dir === 1 ? b.low <= px * (1 - s) : b.high >= px * (1 + s)) { cutAny = true; return -STOP; }
+      const inPreBar = b.etMin < SOXX_ET_OPEN;
+      if (inPreBar && !(isPre && preEntry && (preStop || preStopPct !== null))) continue;
+      const sEff = inPreBar && preStopPct !== null ? preStopPct / 100 : s; // 프리장 전용 스탑 폭
+      if (inPreBar && !preStop && preStopPct === null) continue;
+      if (j.dir === 1 ? b.low <= px * (1 - sEff) : b.high >= px * (1 + sEff)) { cutAny = true; return -sEff * 100; }
       if (j.dir === -1 && b.etMin >= SOXX_ET_OPEN) {
         ext = Math.min(ext, b.low);
         const armGain = ((px - ext) / px) * 100;
@@ -89,15 +93,18 @@ async function main() {
     const next = dIdx.find((x) => x > date);
     days.push({ date, raw, reg, close: reg[reg.length - 1].close, nextOpen: next ? dBy.get(next)!.open : null, c1, fJ });
   }
-  const variants: [string, boolean, boolean][] = [
-    ["현행 (개장가 대기)              ", false, true],
-    ["프리장 진입 + 프리장 스탑       ", true, true],
-    ["프리장 진입 + 스탑 정규장부터   ", true, false],
+  const variants: [string, boolean, boolean, number | null][] = [
+    ["현행 (개장가 대기)                  ", false, true, null],
+    ["프리장 진입 + 프리장 스탑 -2%       ", true, true, null],
+    ["프리장 진입 + 스탑 정규장부터(사양) ", true, false, null],
+    ["프리장 진입 + 프리장 스탑 -3.0%     ", true, false, 3.0],
+    ["프리장 진입 + 프리장 스탑 -1.33%(SOXL-4)", true, false, 1.33],
+    ["프리장 진입 + 프리장 스탑 -1.0%     ", true, false, 1.0],
   ];
-  for (const [label, preEntry, preStop] of variants) {
+  for (const [label, preEntry, preStop, preStopPct] of variants) {
     let tot = 0, cutN = 0, worst = 0, preN = 0;
     for (const d of days) {
-      const r = simDay(d, preEntry, preStop);
+      const r = simDay(d, preEntry, preStop, preStopPct);
       tot += r.p; if (r.cut) cutN++; worst = Math.min(worst, r.p); if (r.preN) preN++;
     }
     console.log(`${label}: ${s1(tot)}%p · 최악 ${worst.toFixed(2)} · 컷 ${cutN}일 · 프리장 진입 ${preN}일 / ${days.length}일`);
