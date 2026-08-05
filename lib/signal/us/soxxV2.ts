@@ -289,19 +289,35 @@ export async function runSoxxV2Monitor(): Promise<void> {
           const px = q.postMarketPrice ?? q.preMarketPrice ?? q.regularMarketPrice;
           const prevC = q.regularMarketPreviousClose ?? null;
           if (px) {
-            // 전환(rev) 레그 방향 = 원 진입의 반대 (이 블록은 판정(c1) 계산 전에 실행됨)
-            const legDir: 1 | -1 = st.ovn ? st.ovn.dir : st.revT ? (st.entryDir === "up" ? -1 : 1) : st.entryDir === "up" ? 1 : -1;
-            const legPx = st.ovn ? st.ovn.px : (st.revPx ?? st.entryPx ?? px);
-            const nm = legDir === 1 ? SY.leverage : SY.inverse;
-            const g = ((px - legPx) / legPx) * 100 * legDir;
-            const gC = prevC !== null ? ((px - prevC) / prevC) * 100 * legDir : null;
-            const hot = g >= 5 || (gC !== null && gC >= 5); // 급등 상태 — 사용자 관찰 경고
-            const dis = (legPx * (legDir === 1 ? 0.95 : 1.05)).toFixed(2);
+            // 레그별 분리 표기 (8/5 밤 실사고 교정: 어제 1박 SOXL + 오늘 신규 SOXS 병존 구간에서
+            // "보유 SOXL 유지" 한 줄만 나가 SOXS 지침과 모순처럼 읽힘 — 두 레그를 각각 명시)
+            const legs: string[] = [];
+            let gMax = -Infinity;
+            if (st.ovn) {
+              const nmO = st.ovn.dir === 1 ? SY.leverage : SY.inverse;
+              const gO = ((px - st.ovn.px) / st.ovn.px) * 100 * st.ovn.dir;
+              gMax = Math.max(gMax, gO);
+              legs.push(`[어제 1박 ${nmO}] 22:30(한국) 개장 시가 전량 매도 예정 — 그때까지 보유 · 재난선 SOXX ${(st.ovn.px * (st.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2)} (현재 ${pct(gO)})`);
+            }
+            const intraday = !!st.entryT && !st.stopT && !st.protT;
+            if (intraday) {
+              // 전환(rev) 레그 방향 = 원 진입의 반대 (이 블록은 판정(c1) 계산 전에 실행됨)
+              const dirI: 1 | -1 = st.revT ? (st.entryDir === "up" ? -1 : 1) : st.entryDir === "up" ? 1 : -1;
+              const pxI = st.revPx ?? st.entryPx ?? px;
+              const nmI = dirI === 1 ? SY.leverage : SY.inverse;
+              const gI = ((px - pxI) / pxI) * 100 * dirI;
+              gMax = Math.max(gMax, gI);
+              const stopI = (pxI * (dirI === 1 ? 0.98 : 1.02)).toFixed(2);
+              legs.push(`[오늘 ${nmI}] 보유 유지 (현재 ${pct(gI)}) — ${hit[2] === "2220" ? `개장 직후 자동스탑설정: SOXX ${stopI}(-2%)` : `자동스탑설정 SOXX ${stopI} 유지`}`);
+            }
+            if (!legs.length) legs.push("보유 없음 — 행동 없음");
+            const gC = prevC !== null ? Math.abs(((px - prevC) / prevC) * 100) : null;
+            const hot = gMax >= 5; // 급등 상태 — 사용자 관찰 경고
             st.ovnChk = [...(st.ovnChk ?? []), code];
             changed = true;
             await send(`uspredict_v2_chg_${hit[2]}`, hot ? "medium" : "low",
-              `[SOXX 신모델] 세션 전환 예고 — ${hit[3]}\n▶규칙: 보유 ${nm} 유지${st.ovn ? " — 22:30(한국) 개장 시가 전량 매도 예정" : ""} · 재난선 SOXX ${dis}\n${hot ? `▶⚠급등 상태(${pct(Math.max(g, gC ?? g))})에서 세션 전환 — 관찰상 하락 취약 구간(가설·검증 전). 이익을 지키려면 지금 시장가 매도(재량·기록상 규칙 이탈)\n` : "▶재량으로 끊으려면: 지금 시장가 매도 (기록상 규칙 이탈)\n"}무응답=보유\n----\n현재 SOXX ${px.toFixed(2)} — 진입가(${legPx.toFixed(2)}) 대비 ${pct(g)}${gC !== null ? ` · 전일 종가 대비 ${pct(gC)}` : ""} (3x ≈ ${pct(g * 3)}). 전환-하락 가설은 밤 분봉(BAQ) 30~60일 축적 후 실측 판정 — 그 전까지 시가 청산이 검증 사양(1박 기여 +53.3%p/246일).`,
-              `세션 전환 예고 ${hit[2]} SOXX ${pct(g)}`, hit[4]);
+              `[SOXX 신모델] 세션 전환 예고 — ${hit[3]}\n${legs.map((l) => `▶${l}`).join("\n")}\n${hot ? `▶⚠급등 상태(${pct(gMax)})에서 세션 전환 — 관찰상 하락 취약 구간(가설·검증 전). 이익을 지키려면 지금 시장가 매도(재량·기록상 규칙 이탈)\n` : ""}무응답=위 규칙대로\n----\n현재 SOXX ${px.toFixed(2)}${gC !== null ? ` · 전일 종가 대비 ${prevC !== null && px >= prevC ? "+" : "-"}${gC.toFixed(2)}%` : ""}. 전환-하락 가설은 밤 분봉(BAQ) 축적 후 실측 판정 — 그 전까지 시가 청산이 검증 사양(1박 기여 +53.3%p/246일).`,
+              `세션 전환 예고 ${hit[2]}`, hit[4]);
             await save();
           }
         } catch { /* 시세 실패 — 다음 분에 재시도 (기록 미저장) */ }
