@@ -547,14 +547,14 @@ async function checkpointStream(
         const nmHx = nmLive && t.sym === "hx"; // 신모델 시범: 하닉 F만 사다리 지침 (M·본 문자는 기존 계층 유지)
         if (t.cur === "none") return "▶해당 단계 비중 축소·청산 검토.";
         if (t.prev !== "none" && t.prev !== t.cur) {
-          if (nmHx) return `▶① 보유 포지션 전량 매도 ▶② 반대 방향 ETF를 계좌의 30%만 매수(초과 금지·1단계부터 다시) ▶③ 자동감시 ETF -${fisherEtf(t.sym)}% 재설정.`;
+          if (nmHx) return `▶① 보유 포지션 전량 매도 ▶② 반대 방향 ETF를 계좌의 30%만 매수(초과 금지·1단계부터 다시) ▶③ 자동스탑설정 ETF -${fisherEtf(t.sym)}% 재설정.`;
           return `▶방향 반전 — 기존 포지션 청산 후 반대 방향 1단계(비중 20% 초과 금지)부터.`;
         }
         const sp = fisherEtf(t.sym);
         if (t.tier === "F") {
           if (nmHx) {
             const e = t.cur === "leverage" ? PREDICT_CONFIG.etf.leverage : PREDICT_CONFIG.etf.inverse;
-            return `▶① ${e.name}(${e.code})를 계좌의 30%만 매수 (초과 금지) ▶② 매수 직후 자동감시 설정: ETF -${sp}% ▶③ 5분 뒤 진행확인 문자가 70% 증액 여부 지시 (신모델 시범).`;
+            return `▶① ${e.name}(${e.code})를 계좌의 30%만 매수 (초과 금지) ▶② 매수 직후 자동스탑설정 설정: ETF -${sp}% ▶③ 5분 뒤 진행확인 문자가 70% 증액 여부 지시 (신모델 시범).`;
           }
           return `▶1단계: 비중 20%만 진입(초과 금지 — 비중 엄수가 총이익의 원천)·스탑 ETF -${sp}%. 피셔M 중간확인 대기.`;
         }
@@ -713,7 +713,7 @@ async function checkpointStream(
             severity: ok ? "low" : "medium",
             // 상단=액션만·하단=부연 (사용자 지시 2026-08-01 2차)
             text: ok
-              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인]\n${pc.key === "hxF" && nmLive ? "▶같은 ETF를 계좌의 40%p 추가 매수 → 누적 70% (상한 엄수·초과 금지 — 신모델 2단. 추가분도 자동감시 동일 설정)" : "▶유지 (비중 변경 없음)"}\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
+              ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인]\n${pc.key === "hxF" && nmLive ? "▶같은 ETF를 계좌의 40%p 추가 매수 → 누적 70% (상한 엄수·초과 금지 — 신모델 2단. 추가분도 자동스탑설정 동일 설정)" : "▶유지 (비중 변경 없음)"}\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
               : `[예측·${pc.symKo} ${pc.tierKo} 진행경보]\n▶해당 단계 비중 축소 검토\n무응답=유지\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad}.`,
             smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
           });

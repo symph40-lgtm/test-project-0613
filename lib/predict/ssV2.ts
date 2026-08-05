@@ -165,7 +165,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const lagNote = lag >= 30 ? `\n⚠지연 통지(확인 ${st.entryT}, ${lag}분 경과) — 위 ①② 실행 금지, 다음 문자 대기` : "";
           const stopPx = cw.dir === 1 ? cw.px * (1 - STOP_PCT / 100) : cw.px * (1 + STOP_PCT / 100);
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동감시 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 시범: 232일 +115.4%p(5봉 rebox판).`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동스탑설정 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 시범: 232일 +115.4%p(5봉 rebox판).`);
         }
       }
       // ② 정찰 레그 스탑
@@ -186,7 +186,7 @@ export async function runSsV2Monitor(): Promise<void> {
         st.confT = bars[fJ.i].time;
         changed = true;
         if (live) await send(`predict_ssv2_conf_${st.confT.replace(":", "")}`, "low",
-          `[예측·삼전 신모델] 검증 통과 — 피셔F 동의\n▶행동 없음 — 보유한 ETF를 그대로 둡니다 (매도 금지)\n▶매도 시각: 오늘 15:30 종가 (그 전에 자동감시 -3% 닿으면 거기서 종료)\n무응답=보유\n----\n${st.confT} 피셔F가 같은 방향 확인 — 오늘은 전환 문자가 더 오지 않습니다. 공통일 실측: 129일 +207.5%p(이 모델 수익원의 전부).`);
+          `[예측·삼전 신모델] 검증 통과 — 피셔F 동의\n▶행동 없음 — 보유한 ETF를 그대로 둡니다 (매도 금지)\n▶매도 시각: 오늘 15:30 종가 (그 전에 자동스탑설정 -3% 닿으면 거기서 종료)\n무응답=보유\n----\n${st.confT} 피셔F가 같은 방향 확인 — 오늘은 전환 문자가 더 오지 않습니다. 공통일 실측: 129일 +207.5%p(이 모델 수익원의 전부).`);
       }
 
       // ③ F 반대 확인 → 전량 전환 (역진입)
@@ -199,7 +199,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const newNm = fJ.dir === 1 ? "삼전 레버리지 ETF" : "삼전 인버스 ETF";
           const lagNote = lag >= 30 ? `\n⚠지연 통지(확인 ${st.revT}, ${lag}분 경과) — 위 ①~③ 실행 금지, 관망` : "";
           await send(`predict_ssv2_rev_${st.revT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] 전환 — 피셔F 반대 확인\n▶① 보유 중인 ${oldNm} ETF 전량 즉시 매도 (이미 스탑으로 매도됐다면 ②로)\n▶② 곧바로 ${newNm}를 계좌 배정액의 100% 매수 (초과 금지)\n▶③ 새 자동감시 설정: 매수가 기준 ETF -3%. 매도는 15:30 종가${lagNote}\n무응답=전환\n----\n${st.revT} ${fJ.px.toLocaleString()}원 — 신중한 피셔F가 반대를 확인. 이견일 74일 실측: 창 방향 전패·F 방향 +18.2%p 회수.`);
+            `[예측·삼전 신모델] 전환 — 피셔F 반대 확인\n▶① 보유 중인 ${oldNm} ETF 전량 즉시 매도 (이미 스탑으로 매도됐다면 ②로)\n▶② 곧바로 ${newNm}를 계좌 배정액의 100% 매수 (초과 금지)\n▶③ 새 자동스탑설정 설정: 매수가 기준 ETF -3%. 매도는 15:30 종가${lagNote}\n무응답=전환\n----\n${st.revT} ${fJ.px.toLocaleString()}원 — 신중한 피셔F가 반대를 확인. 이견일 74일 실측: 창 방향 전패·F 방향 +18.2%p 회수.`);
         }
       }
       // ④ 역진입 레그 스탑
