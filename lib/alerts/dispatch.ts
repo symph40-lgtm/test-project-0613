@@ -68,30 +68,17 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
 //   판정 '기록'은 계속 쌓임 — 해제는 이 정규식만 비우면 된다.
 const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vrebound_long|rev_up|rev_down)(_cancel)?|us_(move|swing)_.*|ebrief_.*)$/;
 
-// ── 신모델 전용 발송 (사용자 지시 2026-08-04 새벽 "앞으로는 최종 신모델만 문자 보내줘, 헷갈리지 않게"):
-// 예측 계열 키(predict_/uspredict_/pdaily_) 중 최종 신모델과 사용자 확정 독립 채널만 발송.
-// 억제 대상: 계층 전이(predict_tr_·uspredict_tr_)·진행경보(prog5/prog2)·애프터(predict_ah_·ss_ah·uspredict_ah)·
-// rev9·재확인·recut·보유확인·성능·TOP10(predict_tr_etf)·일봉스윙(pdaily_) 등 — 판정·채점·기록은 전부 계속,
-// '문자'만 신모델 채널로 일원화. 비예측 계열(금리 rate2y_·수급 flow_·급변 move_ 등)은 이 게이트 무관.
-// 해제 = config.smsNewModelOnly false. 허용: 하닉 창판정(predict_cw_)·신모델 비교/시작(predict_nm_)·
-// 삼전 v2(predict_ssv2_)·SOXX v2(uspredict_v2_)·딥바이(uspredict_dipbuy, 사용자 확정 8/3)·
-// 실시간 버튼 응답(predict_now_)·결정 통지(predict_promote).
-// usdaily_(미국 일봉 스윙 지침)도 범위에 포함 (8/4 실측 — 첫날 08:55 "[미국일봉] 내일 지침"이 키 명명
-// 차이로 게이트를 빠져나옴. SOXX 지침 채널이 신모델 v2와 이원화되면 혼란이라 억제).
-const NM_ONLY_SCOPE = /^(us)?predict_|^pdaily_|^usdaily_/;
-// 하닉 F 판정(predict_tr_hxF_)·하닉 F 진행성(predict_prog5_hxF_)은 하닉 최종 신모델(4단 사다리)의
-// 1·2단계 운반 채널이라 허용 (8/4 실측 교정 — 첫날 09:31 F 인버 판정 문자가 차단됐음. 사다리 =
-// F30% → 진행성 70% → 창동의 100%이므로 F가 침묵하면 신모델 1단계가 죽는다). 하닉 M/본·삼전 계층·
-// TOP10은 신모델 세트 밖 — 계속 억제.
-const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|uspredict_dipbuy|predict_now_|predict_promote|predict_tr_hxF_|predict_prog5_hxF_)/;
-// '참고(기존모델)' 병행 발송 (사용자 지시 2026-08-04 저녁 "당분간 삼전 M/본·하닉 M/본·SOXX M/본도
-// 보내줘, 제목으로 구분하면 헷갈리지 않지"): 기존 계층의 M·본 문자는 발송하되 제목을 참고(기존모델)로,
-// 신모델 채널은 실전(신모델)로 교체해 실전/참고를 제목에서 즉시 구분. F 계층(삼전 ssF·미장 F)은
-// 신모델 심판 F와 중복 혼란이라 계속 억제 (하닉 F만 사다리 1단계라 실전 소속).
-// usdaily_(미국 일봉 스윙)도 참고 채널로 재개 (사용자 8/5 저녁 "일봉 예측 문자 안 오는데" — 8/4 차단분 복원).
-// 애프터장(predict_ah_ 하이닉스·predict_ss_ah 삼성전자)도 참고 복원 (8/5 밤 — 하이닉스 애프터 -3.7% 급락을
-// 판정하고도 침묵한 실사고. 라벨은 액션형 정비 완료 상태·신모델은 종가 청산이라 정보 채널로만)
-const NM_REF_ALLOW = /^predict_tr_(hxM|hxB|ssM|ssB)_|^uspredict_tr_[MB]_|^usdaily_|^predict_ah_|^predict_ss_ah/;
+// ── 신모델 '대체 채널'만 차단 (사용자 정정 2026-08-06: "문자 보내지 말라는 것은 신모델 적용에 따른
+// 기존 모델 부분만 — 기존 문자 전체가 아니라"): 신모델(하이닉스 사다리·삼성전자 v2·SOXX v2)이 대체한
+// 장중 판정 채널만 차단하고, 신모델과 무관한 기존 문자(미국일봉·애프터장·TOP10·갭 경보·상태·성능·
+// 딥바이 등)는 원래대로 발송. 판정·채점·기록은 전 스트림 계속. 비예측 계열(금리·수급·급변)은 무관.
+// 차단(대체분): 하이닉스 M/본 계층·삼성전자 계층 F/M/본·미장(SOXX) 계층 F/M/본·진행경보(prog5 —
+// 하닉 F분은 사다리 2단계라 실전 유지)·재확인·rev9·recut·미장 prog2. 하닉 F(predict_tr_hxF_)는
+// 사다리 1단계 운반 채널이라 실전 발송 (8/4 실사고 교정).
+// smsLegacyRef=true면 대체분을 차단 대신 '참고(기존모델)' 제목으로 병행 발송 (8/4 저녁 방식).
+const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_)|^uspredict_(tr_|prog2_|rev9_|recut_)/;
+// 참고 제목 대상 (신모델과 무관하지만 구모델 산출물 표시): 미국일봉·애프터장
+const NM_REF_SUBJECT = /^usdaily_|^predict_ah_|^predict_ss_ah/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
 // 제목 종목명은 정식 명칭 (사용자 지시 2026-08-05 저녁 — 하닉→하이닉스·삼전→삼성전자)
 const nmInstrument = (key: string): string =>
@@ -110,11 +97,11 @@ export async function dispatchToChannels(
   opts?: { dedupHours?: number },
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
-  if (PREDICT_CONFIG.smsNewModelOnly && NM_ONLY_SCOPE.test(alert.key)) {
-    const refOk = PREDICT_CONFIG.smsLegacyRef && NM_REF_ALLOW.test(alert.key); // 참고 채널 — smsLegacyRef로만 on/off
-    if (!NM_ONLY_ALLOW.test(alert.key) && !refOk) return 0; // 신모델 전용 (2026-08-04)
-    // 실전/참고 제목 구분 (사용자 지시 2026-08-04 저녁) — 본문 첫 줄의 [채널명]과 별개로 제목에서 즉시 판별
-    if (refOk) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
+  if (PREDICT_CONFIG.smsNewModelOnly) {
+    if (NM_REPLACED.test(alert.key)) {
+      if (!PREDICT_CONFIG.smsLegacyRef) return 0; // 신모델 대체 채널 차단 (2026-08-06 정정 범위)
+      alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
+    } else if (NM_REF_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델)·${nmInstrument(alert.key)}` };
   }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
