@@ -21,6 +21,7 @@ function judge(rows: AlertRow[], prefix: string, label: string): [boolean, strin
   if (!a) return [false, `⚠${label}: 발송 기록 없음 (게이트 차단 또는 서비스 오류 — 세션 점검 필요)`];
   const ch = a.message?.channels ?? [];
   if (ch.some((c) => c === "sms:ok")) return [true, `✓${label}`];
+  if (ch.some((c) => c === "sms:retry-ok")) return [true, `✓${label} (1차 실패 → 재시도 성공)`];
   if (ch.some((c) => c === "sms:quiet")) return [true, `✓${label} (00~07시 정책 — 이메일·아침요약 대체)`];
   if (ch.some((c) => c === "sms:fail")) return [false, `⚠${label}: SMS 발송 실패 (Solapi 오류 — 잔액·번호 확인)`];
   return [true, `✓${label} (이메일)`];

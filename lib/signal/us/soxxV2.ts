@@ -222,6 +222,7 @@ type St = {
   // 1박 보유 (다음 세션 시가 청산 대기). notify=false는 취침(23:30 KST) 후 늦은 동의 —
   // 실무는 이미 MOC 매도 상태라 청산 문자 생략, 채점만 사양(1박)대로 확정 (컷오프 Δ≈0 실측 c32f232)
   ovn?: { date: string; dir: 1 | -1; px: number; notify?: boolean } | null;
+  ovnChk?: string[]; // 1박 세션 전환 체크포인트 발송 기록 (사용자 지시 8/6 새벽 "장 바뀌는 순간 재점검")
   pendingAm?: string[]; // 00:00~07:00 KST 이벤트 — 아침 요약 문자용
 };
 // p·pRe = rebox판(주기준) 수정안·역진입판 / pV0 = 무rebox 대조 (사용자 지적 8/4 후 rebox 채택 —
@@ -266,6 +267,40 @@ export async function runSoxxV2Monitor(): Promise<void> {
       await save();
     }
 
+    // ⓪c 1박 세션 전환 체크포인트 (사용자 지시 8/6 새벽 "장이 바뀌는 순간에 다시 점검해줘야 해" —
+    // 8/5 실사고: 정규장 막판~블루오션 하락으로 1박 이익 전량 반납, 통지 공백). 마감(05:05)·
+    // 애프터 마감/블루오션 개시(09:05)·F창 개시(20:05)에 1박 보유 상태·수치·선택지 통지.
+    // 밤 조기청산 '규칙'은 밤 경로 데이터(BAQ 수집 개시) 30~60일 축적 후 실측 판정 — 그 전까지 정보+재량.
+    if (st.ovn && live) {
+      const kstDate = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      const CHK: [number, number, string, string][] = [
+        [5 * 60 + 1, 5 * 60 + 25, "0505", "정규장 마감 — 1박 밤 구간 진입"],
+        [9 * 60 + 1, 9 * 60 + 25, "0905", "애프터 마감·블루오션(한국 낮) 개시"],
+        [20 * 60 + 1, 20 * 60 + 25, "2005", "프리장 F 창 개시 — 22:30 청산 임박"],
+      ];
+      const hit = CHK.find(([a, b]) => kstMin >= a && kstMin <= b);
+      const code = hit ? `${kstDate}-${hit[2]}` : null;
+      if (hit && code && !(st.ovnChk ?? []).includes(code)) {
+        try {
+          const q = await yf.quote(SY.judge);
+          const px = q.postMarketPrice ?? q.preMarketPrice ?? q.regularMarketPrice;
+          const prevC = q.regularMarketPreviousClose ?? null;
+          if (px) {
+            const nm = st.ovn.dir === 1 ? SY.leverage : SY.inverse;
+            const g = ((px - st.ovn.px) / st.ovn.px) * 100 * st.ovn.dir;
+            const gC = prevC !== null ? ((px - prevC) / prevC) * 100 * st.ovn.dir : null;
+            const dis = (st.ovn.px * (st.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2);
+            st.ovnChk = [...(st.ovnChk ?? []), code];
+            changed = true;
+            await send(`uspredict_v2_ovnchk_${hit[2]}`, g < 0 || (gC !== null && gC <= -1.5) ? "medium" : "low",
+              `[SOXX 신모델] 1박 점검 — ${hit[3]}\n▶규칙: 보유 ${nm} 유지 — 오늘 22:30(한국) 개장 시가 전량 매도 · 재난선 SOXX ${dis} 유지\n▶규칙 밖 재량으로 끊으려면: 지금 시장가 매도 (기록상 규칙 이탈로 남습니다)\n무응답=보유\n----\n현재 SOXX ${px.toFixed(2)} — 진입가(${st.ovn.px.toFixed(2)}) 대비 ${pct(g)}${gC !== null ? ` · 전일 종가 대비 ${pct(gC)}` : ""} (3x ≈ ${pct(g * 3)}). 밤 조기청산 규칙은 밤 분봉 30~60일 축적 후 실측 판정 예정 — 그 전까지 시가 청산이 검증 사양(246일 1박 기여 +53.3%p).`,
+              `1박 점검 ${hit[3]} SOXX ${pct(g)}`);
+            await save();
+          }
+        } catch { /* 시세 실패 — 다음 분에 재시도 (ovnChk 미기록) */ }
+      }
+    }
+
     // 세션 작업 창: ET 평일 04:30~16:10 (사용자 지시 8/5 "17:30부터 모니터" — 04:30 ET=17:30 KST).
     // 04:30~07:00은 프리장 개시 브리핑·시세 관찰만 — 판정(F 창)은 07:00부터 원칙 유지(04~07시 박봉·
     // 역예측 실측, 방향 오판 5/19일). 실시간 수신은 cron-job.org 호출 시작을 17:30 KST로 당겨야 완성.
@@ -300,7 +335,8 @@ export async function runSoxxV2Monitor(): Promise<void> {
       const px = rawAll[rawAll.length - 1].close;
       const prevC = hist[hist.length - 1].close;
       const gap = ((px - prevC) / prevC) * 100;
-      const ovnLine = st.ovn ? `\n▶1박 보유 ${st.ovn.dir === 1 ? SY.leverage : SY.inverse}: 22:30(한국) 개장 시가 매도 예정 — 그때까지 자동감시 유지` : "";
+      const ovnG = st.ovn ? ((px - st.ovn.px) / st.ovn.px) * 100 * st.ovn.dir : null;
+      const ovnLine = st.ovn ? `\n▶1박 보유 ${st.ovn.dir === 1 ? SY.leverage : SY.inverse}: 현재 ${ovnG !== null ? pct(ovnG) : "—"}(진입가 ${st.ovn.px.toFixed(2)} 대비) — 22:30(한국) 개장 시가 전량 매도 예정 · 재난선 SOXX ${(st.ovn.px * (st.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2)} 유지` : "";
       await send("uspredict_v2_pre", "low",
         `[SOXX 신모델] 프리장 개시 브리핑\n▶행동 없음 — 모델 판정은 한국 20:00(F 창 개시)부터 문자로 지시${ovnLine}\n무응답=대기\n----\n전일 종가 ${prevC.toFixed(2)} → 프리장 ${px.toFixed(2)} (${pct(gap)}). 04:30~07:00 ET(한국 17:30~20:00)는 저유동 구간 — 판정 무효 실측(방향 오판 5/19일), 시세 참고만.`);
     }

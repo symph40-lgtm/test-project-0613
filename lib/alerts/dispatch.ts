@@ -161,17 +161,23 @@ export async function dispatchToChannels(
   for (const [userId, ch] of byUser) {
     if (alreadyByUser.has(userId)) continue;
     const results: string[] = [];
+    let smsFailed = false;
     if (ch.sms && alert.suppressSms) {
       results.push("sms:quiet"); // 조용 시간 — 문자 억제 (이메일은 발송)
     } else if (ch.sms) {
-      const r = await sendSms({ to: ch.sms, text: textWithTime, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
-      results.push(`sms:${r.ok ? "ok" : "fail"}`);
+      // 발송 후 확인 절차 (사용자 지시 2026-08-06 새벽 "보내고 나서 제대로 보낸 것인지 확인"):
+      // 실패 시 즉시 1회 재시도 → 그래도 실패면 이메일 강제 대체 + 기록(11:00 발송 감사가 집계·통지)
+      let r = await sendSms({ to: ch.sms, text: textWithTime, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
+      if (!r.ok) {
+        r = await sendSms({ to: ch.sms, text: textWithTime, subject: alert.smsSubject }).catch(() => ({ ok: false as const, error: "예외" }));
+        results.push(`sms:${r.ok ? "retry-ok" : "fail"}`);
+      } else results.push("sms:ok");
       if (r.ok) sent++;
+      else { smsFailed = true; console.error(`[dispatch] SMS 2회 실패 — 이메일 대체: ${alert.key}`); }
     }
     // 이메일 절감 (사용자 지정 2026-07-13: "이메일은 지금보다 1/3로") — 심각도 high와 브리핑류만
-    // 발송. 실측 5일 167건 중 high 63건(38%) ≈ 1/3. 조용 시간(suppressSms)엔 이메일이 유일한
-    // 채널이므로 심각도와 무관하게 발송.
-    const emailOk = alert.severity === "high" || triggerKey === "intraday_summary" || alert.suppressSms === true;
+    // 발송. 조용 시간(suppressSms)·SMS 실패 대체 시엔 심각도와 무관하게 발송.
+    const emailOk = alert.severity === "high" || triggerKey === "intraday_summary" || alert.suppressSms === true || smsFailed;
     if (ch.email && !emailOk) {
       results.push("email:cut"); // 절감 규칙으로 미발송
     } else if (ch.email) {
