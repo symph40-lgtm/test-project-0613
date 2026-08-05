@@ -289,7 +289,8 @@ export async function runSoxxV2Monitor(): Promise<void> {
           const px = q.postMarketPrice ?? q.preMarketPrice ?? q.regularMarketPrice;
           const prevC = q.regularMarketPreviousClose ?? null;
           if (px) {
-            const legDir: 1 | -1 = st.ovn ? st.ovn.dir : st.revT ? ((c1?.dir ?? 1) as 1 | -1) : st.entryDir === "up" ? 1 : -1;
+            // 전환(rev) 레그 방향 = 원 진입의 반대 (이 블록은 판정(c1) 계산 전에 실행됨)
+            const legDir: 1 | -1 = st.ovn ? st.ovn.dir : st.revT ? (st.entryDir === "up" ? -1 : 1) : st.entryDir === "up" ? 1 : -1;
             const legPx = st.ovn ? st.ovn.px : (st.revPx ?? st.entryPx ?? px);
             const nm = legDir === 1 ? SY.leverage : SY.inverse;
             const g = ((px - legPx) / legPx) * 100 * legDir;
