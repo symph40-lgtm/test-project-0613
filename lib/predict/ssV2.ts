@@ -150,7 +150,7 @@ export async function runSsV2Monitor(): Promise<void> {
     // 시범 시작 안내 (applyFrom 첫날 1회)
     if (live && today === NM.applyFrom && minuteOfDay <= hhmmToMin("09:30")) {
       await send("predict_ssv2_start", "medium",
-        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(6봉 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶기존 [예측·삼전] 계층 문자는 대조용 (신모델 문자 우선)\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: 6봉 v2(F 0930 박스판) +112.8%p·최악일 -3.0%·컷일 84 (4·5봉은 채점 병행). 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
+        `[예측·삼전 신모델] 오늘부터 시범 시행\n▶삼전 매매는 이 문자 기준 — 창(${NM.ssV2.win}봉 모멘텀) 판정 진입 → 피셔F 반대 확인 시 전량 전환\n▶중단하려면 회신 — 별도 오더 없으면 계속(사용자 지시 8/2)\n----\n8/3~5 페이퍼 검증 후 예정 시행. 근거 232일: 5봉 v2(F 0930 박스판) +115.4%p (6봉 +112.8은 대조 채점 — 사용자 전환 8/5). 스탑 ETF -3%(본주 -1.5%)·당일청산. 창 전환 신호는 무시(실측 노이즈) — 전환은 F 반대 확인만.`);
     }
 
     if (cw && !fFirstDay) {
@@ -165,7 +165,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const lagNote = lag >= 30 ? `\n⚠지연 통지(확인 ${st.entryT}, ${lag}분 경과) — 위 ①② 실행 금지, 다음 문자 대기` : "";
           const stopPx = cw.dir === 1 ? cw.px * (1 - STOP_PCT / 100) : cw.px * (1 + STOP_PCT / 100);
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동감시 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 6봉 누적 전진이 평소 흔들림의 2.5배 초과(모멘텀 판정). 시범: 232일 +112.8%p.`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동감시 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 시범: 232일 +115.4%p(5봉 rebox판).`);
         }
       }
       // ② 정찰 레그 스탑
@@ -220,8 +220,8 @@ export async function runSsV2Monitor(): Promise<void> {
     // ⑤ 결산 (15:31 이후 1회, cmpFrom부터): 1.0·1.2 병행 채점 + 문자
     if (!st.eodDone && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
       const close = krx[krx.length - 1].close;
-      const rMain = simV2(bars, r10, close, NM.ssV2.tan, fJ, NM.ssV2.win); // 주 기준 6봉
-      const r5 = simV2(bars, r10, close, NM.ssV2.tan, fJ, 5);
+      const rMain = simV2(bars, r10, close, NM.ssV2.tan, fJ, NM.ssV2.win); // 주 기준 5봉 (8/5 사용자 지시)
+      const r5 = simV2(bars, r10, close, NM.ssV2.tan, fJ, 6); // ⚠p5 저장칸은 8/5부터 '6봉 대조' 값 (필드명 유지 — 이력 호환)
       const r4 = simV2(bars, r10, close, NM.ssV2.tan, fJ, 4);
       const r12v = simV2(bars, r10, close, NM.ssV2.tanAlt, fJ, NM.ssV2.win);
       st.eodDone = true;
@@ -235,7 +235,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 6봉(주기준) ${pct(rMain.pnl)} · 5봉 ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 6봉 ${pct(sum((s) => s.p))} · 5봉 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 6봉/1.2판 ${pct(sum((s) => s.p12))}. 백테스트 궤도 일당 +0.49%(6봉·F 0930 박스판) — 60일 채점 후 승격·창 크기 재결정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

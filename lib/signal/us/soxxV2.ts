@@ -41,6 +41,18 @@ const etToKstLabel = (etMin: number, offsetMin: number) => {
   return `${fmtT(etMin)} ET(한국 ${fmtT(k)})`;
 };
 
+// ETF 환산 스탑가 힌트 (사용자 지시 8/5 밤 "문자대로 할 테니 정량·명확하게") — 발송 시점 ETF 시세로
+// SOXX 스탑 거리(×3)를 환산한 근사 가격. 시세 실패 시 빈 문자열 (본문 % 기준은 항상 존재).
+async function etfStopHint(ticker: string, soxxNow: number, soxxStop: number): Promise<string> {
+  try {
+    const q = await yf.quote(ticker);
+    const px = q.regularMarketPrice ?? q.preMarketPrice ?? q.postMarketPrice;
+    if (!px || !soxxNow) return "";
+    const etfStop = px * (1 - 3 * Math.abs(soxxNow - soxxStop) / soxxNow);
+    return ` = ${ticker} 약 $${etfStop.toFixed(2)}`;
+  } catch { return ""; }
+}
+
 // 눈금 — 백테스트 unitArrL과 동일 (직전 30봉 평균폭 × 0.5, 초기 구간은 10일 일봉폭 폴백)
 export function soxxUnitArr(bars: SoxxBar[], fallback: number): number[] {
   const rng = bars.map((b) => b.high - b.low);
@@ -352,9 +364,10 @@ export async function runSoxxV2Monitor(): Promise<void> {
         // 오탐지·'진입 금지' 오지시(8/4 밤 실사고). 개장 이후 감지만 진짜 지연.
         const lag = etMin - Math.max(first.t, SOXX_ET_OPEN);
         const lagNote = lag >= 30 ? `\n⚠지연 통지(판정 ${st.entryT} ET, ${lag}분 경과) — 진입 금지, 다음 문자 대기` : "";
+        const etfHint = await etfStopHint(nm, entryPx, stopPx);
         const stopLine = isPre
-          ? `자동감시는 22:30(한국) 개장 후 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) — 프리장 구간은 스탑 없음(프리장 스탑은 실측 -15.3%p 열위)`
-          : `자동감시 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) = ETF 약 -6%에 자동매도`;
+          ? `자동감시는 22:30(한국) 개장 후 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint} — 프리장 구간은 스탑 없음(프리장 스탑은 실측 -15.3%p 열위)`
+          : `자동감시 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint} (매수가 대비 ETF -6%)에 전량 자동매도`;
         await send(`uspredict_v2_entry_${st.entryT.replace(":", "")}`, "high",
           `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% 지금 즉시 매수${isPre ? " (프리장 직접 매수)" : ""} (초과 금지)\n▶② ${stopLine}\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 246일 +141.6%p·컷은 예정 비용(-2%).`,
           `진입 ${st.entryT} ET ${DIR_KO[st.entryDir]}`);
@@ -378,7 +391,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
         st.confT = fmtT(c1.t);
         changed = true;
         if (live) await send(`uspredict_v2_conf_${st.confT.replace(":", "")}`, "low",
-          `[SOXX 신모델] 검증 통과 — 창1 동의 (1박 자격)\n▶행동 없음 — 보유 유지 (매도 금지)\n▶오늘 밤 청산 안 함: 취침 시 무행동 1박, 내일 22:30(한국) 시가 매도\n▶자동감시: 낮 -2% → 마감(05:00) 전 재난선 SOXX -5%(3x -15%)로 넓혀 유지 — 밤 통상 변동 미발동\n무응답=보유\n----\n${etToKstLabel(c1.t, kstOffset)} 창1 동의. 동의일 1박 실측: +55.1→+75.2%p (오버나이트 갭이 변동의 절반 — 3276ae7). 밤 재난선 근거: 백테스트는 밤 스탑 없이 시가 청산(최악 -4.08%) — 낮 폭을 밤에 두면 애프터 급락·회복 경로에 컷(8/5 실사고).`,
+          `[SOXX 신모델] 검증 통과 — 창1 동의 (1박 자격)\n▶행동 없음 — 보유 유지 (매도 금지)\n▶오늘 밤 청산 안 함: 취침 시 무행동 1박, 내일 22:30(한국) 시가 매도\n▶자동감시: 낮 -2% → 마감(05:00) 전 재난선 SOXX ${st.entryPx ? (st.entryPx * (fJ.dir === 1 ? 0.95 : 1.05)).toFixed(2) : "-5%"}(진입가 -5%, 3x -15%)로 변경 — 밤 통상 변동 미발동\n무응답=보유\n----\n${etToKstLabel(c1.t, kstOffset)} 창1 동의. 동의일 1박 실측: +55.1→+75.2%p (오버나이트 갭이 변동의 절반 — 3276ae7). 밤 재난선 근거: 백테스트는 밤 스탑 없이 시가 청산(최악 -4.08%) — 낮 폭을 밤에 두면 애프터 급락·회복 경로에 컷(8/5 실사고).`,
           `동의 확인 ${st.confT} ET — 1박 자격`);
       }
     }
@@ -389,13 +402,13 @@ export async function runSoxxV2Monitor(): Promise<void> {
         st.confT = fmtT(fJ.t);
         changed = true;
         if (live) await send(`uspredict_v2_conf_${st.confT.replace(":", "")}`, "low",
-          `[SOXX 신모델] 검증 통과 — F 동의 (1박 자격)\n▶행동 없음 — 보유 유지 (매도 금지)\n▶오늘 밤 청산 안 함: 취침 시 무행동 1박, 내일 22:30(한국) 시가 매도\n▶자동감시: 낮 -2% → 마감(05:00) 전 재난선 SOXX -5%(3x -15%)로 넓혀 유지 — 밤 통상 변동 미발동\n무응답=보유\n----\n${etToKstLabel(fJ.t, kstOffset)} F 동의(동시각 포함 기준). 수익 엔진 = 동의일 113일 당일 +88.0·1박 +105.5%p (c8c84f5).`,
+          `[SOXX 신모델] 검증 통과 — F 동의 (1박 자격)\n▶행동 없음 — 보유 유지 (매도 금지)\n▶오늘 밤 청산 안 함: 취침 시 무행동 1박, 내일 22:30(한국) 시가 매도\n▶자동감시: 낮 -2% → 마감(05:00) 전 재난선 SOXX ${st.entryPx ? (st.entryPx * (c1.dir === 1 ? 0.95 : 1.05)).toFixed(2) : "-5%"}(진입가 -5%, 3x -15%)로 변경 — 밤 통상 변동 미발동\n무응답=보유\n----\n${etToKstLabel(fJ.t, kstOffset)} F 동의(동시각 포함 기준). 수익 엔진 = 동의일 113일 당일 +88.0·1박 +105.5%p (c8c84f5).`,
           `동의 확인 ${st.confT} ET — 1박 자격`);
       } else {
         st.oppT = fmtT(fJ.t);
         changed = true;
         if (live) await send(`uspredict_v2_opp_${st.oppT.replace(":", "")}`, "medium",
-          `[SOXX 신모델] F 이견 — 보유는 유지, 1박만 금지\n▶① 지금 매도하지 않습니다 — 보유·자동감시(-2%) 유지\n▶② 오늘 1박 금지: 취침 전 MOC(종가) 매도 예약 걸고 취침\n무응답=보유 후 종가 청산\n----\n${etToKstLabel(fJ.t, kstOffset)} F 반대 확인. SOXX 실측(a24f012): 이견일 낮 청산·역진입은 잡음 손해(Δ-3.2/-2.4) — F 반대의 가치는 1박 금지 문지기(최악 -7.7→-4.1). 삼전과 반대 구조.`,
+          `[SOXX 신모델] F 이견 — 보유는 유지, 1박만 금지\n▶① 지금 매도하지 않습니다 — 보유·자동감시(-2%) 유지\n▶② 오늘 1박 금지: 취침 전 보유 전량 MOC(종가) 매도 예약 — MOC 미지원 증권사(NH 등)면 LOC 매도 지정가 ${lastPx !== null ? (lastPx * 0.9).toFixed(2) : "현재가 -10%"} 이하(사실상 종가 체결)\n무응답=보유 후 종가 청산\n----\n${etToKstLabel(fJ.t, kstOffset)} F 반대 확인. SOXX 실측(a24f012): 이견일 낮 청산·역진입은 잡음 손해(Δ-3.2/-2.4) — F 반대의 가치는 1박 금지 문지기(최악 -7.7→-4.1). 삼전과 반대 구조.`,
           `F 이견 ${st.oppT} ET — 1박 금지`);
       }
     }
@@ -453,9 +466,9 @@ export async function runSoxxV2Monitor(): Promise<void> {
       const gain = lastPx !== null && st.entryPx ? ((lastPx - (st.revPx ?? st.entryPx)) / (st.revPx ?? st.entryPx)) * 100 * legDirBed : null;
       await send("uspredict_v2_bed", "medium",
         ovnOk
-          ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동감시를 재난선 SOXX -5%(3x -15%)로 넓혀 유지 (주간거래 포함) — 낮 폭(-2%)을 밤에 두면 애프터 급락·회복 경로에 컷(8/5 실사고)\n▶③ 내일 22:30(한국) 개장 시가 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 밤 스탑 없는 시가 청산이 백테스트 사양(최악 -4.08%) — 재난선은 통계 밖 붕괴 차단용.`
+          ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동감시를 재난선 SOXX ${st.entryPx ? ((st.revPx ?? st.entryPx) * (legDirBed === 1 ? 0.95 : 1.05)).toFixed(2) : ""}(진입가 -5%, 3x -15%)로 변경 후 취침 (주간거래 포함) — 낮 폭(-2%)은 애프터 급락·회복 경로에 컷(8/5 실사고)\n▶③ 내일 22:30(한국) 개장 시가 전량 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 밤 스탑 없는 시가 청산이 백테스트 사양(최악 -4.08%) — 재난선은 통계 밖 붕괴 차단용.`
           : holding
-            ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} MOC(종가) 매도 예약 설정 (새로 사는 것 아님)\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
+            ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} 전량 MOC(종가) 매도 예약 (새로 사는 것 아님) — MOC 미지원(NH 등)이면 LOC 매도 지정가 ${lastPx !== null ? (lastPx * 0.9).toFixed(2) : "현재가 -10%"} 이하\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
             : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (${st.protT ? "이익 보호 청산" : "스탑"}으로 종료된 날)\n----\n오늘 매매 종료.`,
         undefined);
     }
