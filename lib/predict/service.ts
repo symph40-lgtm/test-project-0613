@@ -1075,6 +1075,14 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 삼전 신모델 스트림 실패 (본 흐름 무관):", e);
   }
 
+  // ⑮ 대가 모델 분야별 보완 모니터 (사용자 지시 2026-08-06 — 승격 기준 충족 시 결정 통지)
+  try {
+    const { runModelComplementMonitor } = await import("./modelComplement");
+    await runModelComplementMonitor();
+  } catch (e) {
+    console.error("[predict] 보완 모니터 실패 (본 흐름 무관):", e);
+  }
+
   // ⑭ 매일 11:00 문자 발송 감사 (사용자 지시 2026-08-05 밤 — 삼전·하닉·SOXX 문자 누락 여부·원인 통지)
   try {
     const { runDailySmsAudit } = await import("@/lib/alerts/dailyAudit");
