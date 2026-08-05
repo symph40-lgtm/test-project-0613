@@ -251,10 +251,11 @@ export async function runSoxxV2Monitor(): Promise<void> {
     let st: St = prevRaw ?? { date: todayEt };
     let changed = false;
     const save = async () => { await admin.from("ops_settings").upsert({ key: "uspredict_v2_state", value: st, updated_at: new Date().toISOString() }, { onConflict: "key" }); };
-    const send = async (key: string, severity: "low" | "medium" | "high", text: string, amLine?: string): Promise<void> => {
+    // forceSms: 00~07 금지창 예외 (사용자 명시 지시 8/6 — 세션 전환 10분 전 경보는 04:50에도 SMS)
+    const send = async (key: string, severity: "low" | "medium" | "high", text: string, amLine?: string, forceSms = false): Promise<void> => {
       try {
-        await dispatchToChannels("signal", todayEt, { key, severity, text, smsSubject: "SOXX 신모델", suppressSms: quiet }, undefined, undefined, { dedupHours: 16 });
-        if (quiet && amLine) { st.pendingAm = [...(st.pendingAm ?? []), amLine]; changed = true; }
+        await dispatchToChannels("signal", todayEt, { key, severity, text, smsSubject: "SOXX 신모델", suppressSms: quiet && !forceSms }, undefined, undefined, { dedupHours: 16 });
+        if (quiet && !forceSms && amLine) { st.pendingAm = [...(st.pendingAm ?? []), amLine]; changed = true; }
       } catch { /* 발송 실패 무시 */ }
     };
 
@@ -267,16 +268,18 @@ export async function runSoxxV2Monitor(): Promise<void> {
       await save();
     }
 
-    // ⓪c 1박 세션 전환 체크포인트 (사용자 지시 8/6 새벽 "장이 바뀌는 순간에 다시 점검해줘야 해" —
-    // 8/5 실사고: 정규장 막판~블루오션 하락으로 1박 이익 전량 반납, 통지 공백). 마감(05:05)·
-    // 애프터 마감/블루오션 개시(09:05)·F창 개시(20:05)에 1박 보유 상태·수치·선택지 통지.
-    // 밤 조기청산 '규칙'은 밤 경로 데이터(BAQ 수집 개시) 30~60일 축적 후 실측 판정 — 그 전까지 정보+재량.
-    if (st.ovn && live) {
+    // ⓪c 세션 전환 10분 전 경보 (사용자 지시 8/6 "장이 바뀌기 10분 전에 문자 — 블루오션·프리·정규·애프터".
+    // 배경 가설: 급등(+5%) 상태에서 세션 전환 시 하락 취약 — 8/4 밤·8/5 프리장 실사례. 가설은 BAQ 분봉
+    // 축적 후 실측 검증 예정, 그 전까지 정보+재량 선택지 제공). 포지션(1박 또는 당일 보유) 있을 때만.
+    // 04:50은 00~07 금지창이지만 명시 지시로 SMS 예외(forceSms).
+    const intradayHolding = !!st.entryT && !st.stopT && !st.protT && !st.eodDone;
+    if ((st.ovn || intradayHolding) && live) {
       const kstDate = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-      const CHK: [number, number, string, string][] = [
-        [5 * 60 + 1, 5 * 60 + 25, "0505", "정규장 마감 — 1박 밤 구간 진입"],
-        [9 * 60 + 1, 9 * 60 + 25, "0905", "애프터 마감·블루오션(한국 낮) 개시"],
-        [20 * 60 + 1, 20 * 60 + 25, "2005", "프리장 F 창 개시 — 22:30 청산 임박"],
+      const CHK: [number, number, string, string, boolean][] = [
+        [4 * 60 + 50, 4 * 60 + 59, "0450", "10분 후 05:00 정규장 마감·애프터 개시", true],
+        [8 * 60 + 50, 8 * 60 + 59, "0850", "10분 후 09:00 블루오션(한국 낮) 개시", false],
+        [16 * 60 + 50, 16 * 60 + 59, "1650", "10분 후 17:00 프리장 개시", false],
+        [22 * 60 + 20, 22 * 60 + 29, "2220", "10분 후 22:30 정규장 개장", false],
       ];
       const hit = CHK.find(([a, b]) => kstMin >= a && kstMin <= b);
       const code = hit ? `${kstDate}-${hit[2]}` : null;
@@ -286,18 +289,21 @@ export async function runSoxxV2Monitor(): Promise<void> {
           const px = q.postMarketPrice ?? q.preMarketPrice ?? q.regularMarketPrice;
           const prevC = q.regularMarketPreviousClose ?? null;
           if (px) {
-            const nm = st.ovn.dir === 1 ? SY.leverage : SY.inverse;
-            const g = ((px - st.ovn.px) / st.ovn.px) * 100 * st.ovn.dir;
-            const gC = prevC !== null ? ((px - prevC) / prevC) * 100 * st.ovn.dir : null;
-            const dis = (st.ovn.px * (st.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2);
+            const legDir: 1 | -1 = st.ovn ? st.ovn.dir : st.revT ? ((c1?.dir ?? 1) as 1 | -1) : st.entryDir === "up" ? 1 : -1;
+            const legPx = st.ovn ? st.ovn.px : (st.revPx ?? st.entryPx ?? px);
+            const nm = legDir === 1 ? SY.leverage : SY.inverse;
+            const g = ((px - legPx) / legPx) * 100 * legDir;
+            const gC = prevC !== null ? ((px - prevC) / prevC) * 100 * legDir : null;
+            const hot = g >= 5 || (gC !== null && gC >= 5); // 급등 상태 — 사용자 관찰 경고
+            const dis = (legPx * (legDir === 1 ? 0.95 : 1.05)).toFixed(2);
             st.ovnChk = [...(st.ovnChk ?? []), code];
             changed = true;
-            await send(`uspredict_v2_ovnchk_${hit[2]}`, g < 0 || (gC !== null && gC <= -1.5) ? "medium" : "low",
-              `[SOXX 신모델] 1박 점검 — ${hit[3]}\n▶규칙: 보유 ${nm} 유지 — 오늘 22:30(한국) 개장 시가 전량 매도 · 재난선 SOXX ${dis} 유지\n▶규칙 밖 재량으로 끊으려면: 지금 시장가 매도 (기록상 규칙 이탈로 남습니다)\n무응답=보유\n----\n현재 SOXX ${px.toFixed(2)} — 진입가(${st.ovn.px.toFixed(2)}) 대비 ${pct(g)}${gC !== null ? ` · 전일 종가 대비 ${pct(gC)}` : ""} (3x ≈ ${pct(g * 3)}). 밤 조기청산 규칙은 밤 분봉 30~60일 축적 후 실측 판정 예정 — 그 전까지 시가 청산이 검증 사양(246일 1박 기여 +53.3%p).`,
-              `1박 점검 ${hit[3]} SOXX ${pct(g)}`);
+            await send(`uspredict_v2_chg_${hit[2]}`, hot ? "medium" : "low",
+              `[SOXX 신모델] 세션 전환 예고 — ${hit[3]}\n▶규칙: 보유 ${nm} 유지${st.ovn ? " — 22:30(한국) 개장 시가 전량 매도 예정" : ""} · 재난선 SOXX ${dis}\n${hot ? `▶⚠급등 상태(${pct(Math.max(g, gC ?? g))})에서 세션 전환 — 관찰상 하락 취약 구간(가설·검증 전). 이익을 지키려면 지금 시장가 매도(재량·기록상 규칙 이탈)\n` : "▶재량으로 끊으려면: 지금 시장가 매도 (기록상 규칙 이탈)\n"}무응답=보유\n----\n현재 SOXX ${px.toFixed(2)} — 진입가(${legPx.toFixed(2)}) 대비 ${pct(g)}${gC !== null ? ` · 전일 종가 대비 ${pct(gC)}` : ""} (3x ≈ ${pct(g * 3)}). 전환-하락 가설은 밤 분봉(BAQ) 30~60일 축적 후 실측 판정 — 그 전까지 시가 청산이 검증 사양(1박 기여 +53.3%p/246일).`,
+              `세션 전환 예고 ${hit[2]} SOXX ${pct(g)}`, hit[4]);
             await save();
           }
-        } catch { /* 시세 실패 — 다음 분에 재시도 (ovnChk 미기록) */ }
+        } catch { /* 시세 실패 — 다음 분에 재시도 (기록 미저장) */ }
       }
     }
 
