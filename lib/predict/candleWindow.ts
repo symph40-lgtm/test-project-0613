@@ -233,12 +233,16 @@ export async function runCandleWindowMonitor(): Promise<void> {
       fetchNxtPremarket(CODE, ymd),
       fetchDayMinutes(CODE, ymd, "153000").then((b) => b ?? fetchTodayMinutes(CODE, "153000")),
     ]);
-    const krx = krxRaw ?? [];
+    // 전일 봉·미완성 봉 차단 (8/5 실사고: 08:30 크론에 KIS 당일 분봉 폴백이 전일 09:01~ 봉을 반환 →
+    // 어제 가격으로 유령 스탑 문자. 현재 시각 이후 타임스탬프 봉 = 오늘 것일 수 없음 → 전부 제거,
+    // 현재 분 봉은 미완성이라 제외 — SOXX 완성봉 원칙(de6093d)과 동일)
+    const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+    const krx = (krxRaw ?? []).filter((b) => b.time < nowHHMM);
     // 커버리지 가드 (checkpointStream 이식 — 결손 호출로 오판정 방지)
     const expectKrx = Math.min(minuteOfDay, hhmmToMin("15:30")) - 9 * 60 - 1;
     if (expectKrx > 10 && krx.length < expectKrx * 0.8) return;
     if (minuteOfDay >= hhmmToMin("09:05") && krx.length > 10 && (pre?.length ?? 0) < 40) return;
-    const bars = [...(pre ?? []), ...krx];
+    const bars = [...(pre ?? []).filter((b) => b.time < nowHHMM), ...krx];
     if (bars.length < 8) return;
 
     const trs = candleJudgeStream(bars, unitArr(bars, r10));

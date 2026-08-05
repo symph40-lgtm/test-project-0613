@@ -120,12 +120,14 @@ export async function runSsV2Monitor(): Promise<void> {
       fetchNxtPremarket(CODE, ymd),
       fetchDayMinutes(CODE, ymd, "153000").then((b) => b ?? fetchTodayMinutes(CODE, "153000")),
     ]);
-    const krx = krxRaw ?? [];
+    // 전일 봉·미완성 봉 차단 (8/5 하이닉스 유령 스탑 실사고와 동일 취약점 — candleWindow 주석 참조)
+    const nowHHMM = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+    const krx = (krxRaw ?? []).filter((b) => b.time < nowHHMM);
     // 커버리지 가드 (candleWindow와 동일 — 결손 호출로 오판정 방지)
     const expectKrx = Math.min(minuteOfDay, hhmmToMin("15:30")) - 9 * 60 - 1;
     if (expectKrx > 10 && krx.length < expectKrx * 0.8) return;
     if (minuteOfDay >= hhmmToMin("09:05") && krx.length > 10 && (pre?.length ?? 0) < 40) return;
-    const bars = [...(pre ?? []), ...krx];
+    const bars = [...(pre ?? []).filter((b) => b.time < nowHHMM), ...krx];
     if (bars.length < 8) return;
 
     const unit = unitArr(bars, r10);

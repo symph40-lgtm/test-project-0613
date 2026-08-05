@@ -64,6 +64,14 @@ export default async function OpsPage() {
         ) : null}
       </div>
 
+      {/* ①a 신모델 현황 (사용자 지시 2026-08-05 밤 — 삼전·하닉·SOXX 최신 모델 웹 확인) */}
+      <a href="/newmodel" className="mb-3 flex items-center justify-between rounded-[18px] border border-hairline bg-canvas p-5 hover:bg-pearl/40">
+        <span>
+          <span className="block text-[14px] font-semibold">신모델 현황 →</span>
+          <span className="block text-[12px] text-ink-48">하이닉스 사다리 · 삼성전자 v2 · SOXX v2 — 오늘 상태·누적 채점</span>
+        </span>
+      </a>
+
       {/* ①b 피셔 실시간 — 독립 페이지로 승격 (사용자 지시 2026-07-25), 여기선 바로가기만 */}
       <a href="/fisher" className="mb-3 flex items-center justify-between rounded-[18px] border border-hairline bg-canvas p-5 hover:bg-pearl/40">
         <span>
