@@ -16,7 +16,7 @@ type SsState = { date?: string; entryT?: string; entryDir?: "up" | "down"; entry
 type SsScore = { date: string; p: number; p5: number; p4: number; p12: number; cut: boolean; note?: string };
 type UsState = {
   date?: string; entryT?: string; entryDir?: "up" | "down"; entryPx?: number; entryKind?: "cw" | "f";
-  confT?: string; oppT?: string; revT?: string; stopT?: string; protT?: string;
+  confT?: string; oppT?: string; revT?: string; revPx?: number; stopT?: string; protT?: string;
   ovn?: { date: string; dir: 1 | -1; px: number } | null;
 };
 type UsScore = { date: string; p: number; pRe: number; pV0: number; pNP?: number; cut: boolean; kind: string; ovn: boolean; pend?: boolean };
@@ -78,6 +78,66 @@ export default async function NewModelPage() {
   const usSc = (val<UsScore[]>("uspredict_v2_scores") ?? []);
   const usUpdated = byKey.get("uspredict_v2_state")?.updated_at as string | undefined;
 
+  // ── 지금 할 액션 + 오늘 문자 타임라인 (사용자 지시 8/5 밤 "당일 문자 정리 + 지금 어떤 액션인지 위에")
+  const kstNow = new Date(Date.now() + 9 * 3600e3);
+  const kstMin = kstNow.getUTCHours() * 60 + kstNow.getUTCMinutes();
+  const kstToday = kstNow.toISOString().slice(0, 10);
+
+  const usNm = (d?: "up" | "down" | 1 | -1) => (d === "up" || d === 1 ? "SOXL" : "SOXS");
+  let soxxAction = "판정 대기 — 진입 문자가 오면 그대로 실행 (F 창은 한국 20:00 개시)";
+  if (usSt?.ovn) {
+    const dis = (usSt.ovn.px * (usSt.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2);
+    soxxAction = `1박 보유 중 (${usNm(usSt.ovn.dir)}) → 22:30 개장 시가에 전량 매도 (문자 예정) · 그때까지 자동감시 재난선 SOXX ${dis}`;
+  } else if (usSt?.entryT && (usSt.stopT || usSt.protT)) {
+    soxxAction = `오늘 세션 매매 종료 (${usSt.protT ? "이익 보호 청산" : "스탑"}) — 행동 없음, 다음 세션 문자 대기`;
+  } else if (usSt?.entryT && usSt.entryPx) {
+    const dir = usSt.revT ? undefined : usSt.entryDir;
+    const px = usSt.revPx ?? usSt.entryPx;
+    const stop = (px * (dir === "up" ? 0.98 : 1.02)).toFixed(2);
+    const tail = usSt.confT ? "1박 자격 — 취침 시 무행동, 재난선으로 전환은 취침 문자 참조" : usSt.oppT ? "1박 금지 — 취침 전 MOC(또는 LOC 저가) 매도 예약" : "동의/이견 문자 대기";
+    soxxAction = `보유 ${usNm(usSt.entryDir)} 유지 — 자동감시 SOXX ${stop} · ${tail}`;
+  }
+
+  const krAction = (st: { date?: string; entryT?: string; entryDir?: "up" | "down" } | null, cutT?: string, name?: string): string => {
+    if (!st || st.date !== kstToday || !st.entryT) return "오늘 판정 없음 — 행동 없음";
+    if (cutT) return `스탑 종료(${cutT}) — 행동 없음, 내일 문자 대기`;
+    if (kstMin >= 15 * 60 + 30) return "장 마감(종가 청산) — 행동 없음, 내일 문자 대기";
+    return `${st.entryDir === "up" ? "레버" : "인버"} 보유 유지 — 15:30 종가 전량 매도 (전환·스탑 문자 오면 그 지침 우선)`;
+  };
+  const hxAction = krAction(cwSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (cwSt as { cutT?: string })?.cutT);
+  const ssAction = krAction(ssSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (ssSt as { stop1T?: string })?.stop1T);
+
+  // 오늘(KST) 발송 문자 타임라인
+  const { data: todayAlerts } = await admin
+    .from("alerts").select("created_at, message")
+    .gte("created_at", new Date(`${kstToday}T00:00:00+09:00`).toISOString())
+    .order("created_at", { ascending: true });
+  const LABELS: [RegExp, string][] = [
+    [/^uspredict_v2_entry/, "SOXX 진입"], [/^uspredict_v2_conf/, "SOXX 동의(1박 자격)"], [/^uspredict_v2_opp/, "SOXX 이견(1박 금지)"],
+    [/^uspredict_v2_rev/, "SOXX 전환"], [/^uspredict_v2_stop/, "SOXX 스탑"], [/^uspredict_v2_prot/, "SOXX 이익 보호"],
+    [/^uspredict_v2_ovn/, "SOXX 1박 청산"], [/^uspredict_v2_bed/, "SOXX 취침 지침"], [/^uspredict_v2_eod/, "SOXX 결산"],
+    [/^uspredict_v2_am/, "SOXX 아침 요약"], [/^uspredict_v2_pre/, "SOXX 프리장 브리핑"], [/^uspredict_v2_start/, "SOXX 시범 시작"],
+    [/^predict_cw_entry/, "하이닉스 창판정 진입"], [/^predict_cw_cut/, "하이닉스 창판정 스탑"], [/^predict_cw_flip/, "하이닉스 창판정 전환"],
+    [/^predict_cw_eod/, "하이닉스 창판정 결산"], [/^predict_nm_cmp/, "하이닉스 신모델 비교"], [/^predict_nm_start/, "하이닉스 시범 시작"],
+    [/^predict_tr_hxF/, "하이닉스 F 판정"], [/^predict_prog5_hxF/, "하이닉스 진행성"],
+    [/^predict_ssv2_entry/, "삼성전자 진입"], [/^predict_ssv2_rev/, "삼성전자 전환"], [/^predict_ssv2_stop/, "삼성전자 스탑"],
+    [/^predict_ssv2_conf/, "삼성전자 동의"], [/^predict_ssv2_eod/, "삼성전자 결산"], [/^predict_ssv2_start/, "삼성전자 시범 시작"],
+    [/^nm_audit/, "발송 점검"], [/^morning_/, "아침 브리핑"],
+  ];
+  const seen = new Set<string>();
+  const timeline: { t: string; label: string; head: string }[] = [];
+  for (const r of todayAlerts ?? []) {
+    const m = r.message as { alertKey?: string; text?: string } | null;
+    const k = m?.alertKey ?? "";
+    if (!k || seen.has(k)) continue;
+    const lab = LABELS.find(([re]) => re.test(k));
+    if (!lab) continue; // 신모델·점검 계열만
+    seen.add(k);
+    const kst = new Date(new Date(r.created_at as string).getTime() + 9 * 3600e3).toISOString().slice(11, 16);
+    const head = (m?.text ?? "").split("\n").slice(0, 2).join(" ").slice(0, 90);
+    timeline.push({ t: kst, label: lab[1], head });
+  }
+
   // SOXX 오늘 타임라인 문자열 (ET 표기 — 문자와 동일)
   const usTimeline: string[] = [];
   if (usSt?.entryT) usTimeline.push(`${usSt.entryT} ET ${usSt.entryKind === "f" ? "F 확인" : "창1 판정"} 진입 $${usSt.entryPx?.toFixed(2) ?? "—"}`);
@@ -94,6 +154,33 @@ export default async function NewModelPage() {
         실전(신모델) 문자와 같은 원천 데이터입니다 — 매분 크론이 갱신합니다. 매매 기준은 항상{" "}
         <b>실전(신모델) 문자</b>이고, 이 화면은 확인용입니다.
       </p>
+
+      {/* ⓪ 지금 할 액션 (최상단 — 사용자 지시 8/5 밤) */}
+      <div className="mb-4 rounded-[18px] border-2 border-guard/40 bg-canvas p-5">
+        <p className="mb-2 text-[15px] font-semibold">지금 할 액션 <span className="text-[11px] font-normal text-ink-48">({kstToday} {`${String(Math.floor(kstMin / 60)).padStart(2, "0")}:${String(kstMin % 60).padStart(2, "0")}`} KST 기준)</span></p>
+        <Row label="SOXX" value={<b>{soxxAction}</b>} />
+        <Row label="하이닉스" value={hxAction} />
+        <Row label="삼성전자" value={ssAction} />
+        <p className="mt-2 text-[11px] text-ink-48">새 문자가 오면 항상 문자 지침이 이 화면보다 우선입니다.</p>
+      </div>
+
+      {/* ⓪b 오늘 문자 타임라인 */}
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+        <p className="mb-2 text-[14px] font-semibold">오늘 발송된 문자 ({timeline.length}건)</p>
+        {timeline.length === 0 ? (
+          <p className="text-[13px] text-ink-48">아직 없음</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {timeline.map((x) => (
+              <li key={`${x.t}${x.label}`} className="text-[13px]">
+                <span className="mr-2 font-mono text-[12px] text-ink-48">{x.t}</span>
+                <b>{x.label}</b>
+                <span className="ml-2 text-[12px] text-ink-48">{x.head}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {/* SOXX v2 */}
       <Card title="SOXX 신모델 v2" badge="시범 중 (8/4~)">

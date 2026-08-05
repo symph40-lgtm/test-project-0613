@@ -408,7 +408,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
         st.oppT = fmtT(fJ.t);
         changed = true;
         if (live) await send(`uspredict_v2_opp_${st.oppT.replace(":", "")}`, "medium",
-          `[SOXX 신모델] F 이견 — 보유는 유지, 1박만 금지\n▶① 지금 매도하지 않습니다 — 보유·자동감시(-2%) 유지\n▶② 오늘 1박 금지: 취침 전 보유 전량 MOC(종가) 매도 예약 — MOC 미지원 증권사(NH 등)면 LOC 매도 지정가 ${lastPx !== null ? (lastPx * 0.9).toFixed(2) : "현재가 -10%"} 이하(사실상 종가 체결)\n무응답=보유 후 종가 청산\n----\n${etToKstLabel(fJ.t, kstOffset)} F 반대 확인. SOXX 실측(a24f012): 이견일 낮 청산·역진입은 잡음 손해(Δ-3.2/-2.4) — F 반대의 가치는 1박 금지 문지기(최악 -7.7→-4.1). 삼전과 반대 구조.`,
+          `[SOXX 신모델] F 이견 — 보유는 유지, 1박만 금지\n▶① 지금 매도하지 않습니다 — 보유·자동감시(-2%) 유지\n▶② 오늘 1박 금지: 취침 전 보유 전량 MOC(종가) 매도 예약 — 접수 마감 한국 04:40(정규장 마감 20분 전)\n무응답=보유 후 종가 청산\n----\n${etToKstLabel(fJ.t, kstOffset)} F 반대 확인. SOXX 실측(a24f012): 이견일 낮 청산·역진입은 잡음 손해(Δ-3.2/-2.4) — F 반대의 가치는 1박 금지 문지기(최악 -7.7→-4.1). 삼전과 반대 구조.`,
           `F 이견 ${st.oppT} ET — 1박 금지`);
       }
     }
@@ -468,7 +468,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
         ovnOk
           ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동감시를 재난선 SOXX ${st.entryPx ? ((st.revPx ?? st.entryPx) * (legDirBed === 1 ? 0.95 : 1.05)).toFixed(2) : ""}(진입가 -5%, 3x -15%)로 변경 후 취침 (주간거래 포함) — 낮 폭(-2%)은 애프터 급락·회복 경로에 컷(8/5 실사고)\n▶③ 내일 22:30(한국) 개장 시가 전량 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 밤 스탑 없는 시가 청산이 백테스트 사양(최악 -4.08%) — 재난선은 통계 밖 붕괴 차단용.`
           : holding
-            ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} 전량 MOC(종가) 매도 예약 (새로 사는 것 아님) — MOC 미지원(NH 등)이면 LOC 매도 지정가 ${lastPx !== null ? (lastPx * 0.9).toFixed(2) : "현재가 -10%"} 이하\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
+            ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} 전량 MOC(종가) 매도 예약 (새로 사는 것 아님) — 접수 마감 한국 04:40\n▶② 자동감시(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
             : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (${st.protT ? "이익 보호 청산" : "스탑"}으로 종료된 날)\n----\n오늘 매매 종료.`,
         undefined);
     }
