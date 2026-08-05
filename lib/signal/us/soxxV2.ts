@@ -429,8 +429,9 @@ export async function runSoxxV2Monitor(): Promise<void> {
           // 실측 SOXX -1.67%(57일, soxx-pre-entry-sweep) → 3x ETF 약 -5.0% — 역사적 최악치이지 보장 아님
           ? `프리장에는 자동스탑설정하지 않음 — 이 구간 실측 최대 손실 ${nm} 기준 약 -5.0%(SOXX -1.67%, 57일 최악치) · 개장(22:30) 후 자동스탑설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint}`
           : `자동스탑설정 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint} (매수가 대비 ETF -6%)에 전량 자동매도`;
+        // 판정 주체를 제목에 필수 기재 (사용자 지시 8/5 밤 — "누가 판정한 건지 문자에 빠져 있음")
         await send(`uspredict_v2_entry_${st.entryT.replace(":", "")}`, "high",
-          `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% 지금 즉시 매수${isPre ? " (프리장 직접 매수)" : ""} (초과 금지)\n▶② ${stopLine}\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 246일 +141.6%p·컷은 예정 비용(-2%).`,
+          `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입 — ${fFirst ? "F(피셔) 판정" : "창1(모멘텀) 판정"}\n▶① ${nm}를 계좌 배정액의 100% 지금 즉시 매수${isPre ? " (프리장 직접 매수)" : ""} (초과 금지)\n▶② ${stopLine}\n▶③ 다음 행동은 문자가 지시 — ${fFirst ? "창1(개장 후)이 동의하면 1박·반대면 전환" : "F가 동의하면 1박·이견이면 취침 전 MOC 예약"}${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔·5분봉) 선행 확인" : "창1(1분 6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 246일 +141.6%p·컷은 예정 비용(-2%).`,
           `진입 ${st.entryT} ET ${DIR_KO[st.entryDir]}`);
       }
     }
@@ -445,7 +446,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
           const newNm = c1.dir === 1 ? SY.leverage : SY.inverse;
           const stopPx = c1.dir === 1 ? c1.px * (1 - SOXX_STOP_PCT / 100) : c1.px * (1 + SOXX_STOP_PCT / 100);
           await send(`uspredict_v2_rev_${st.revT.replace(":", "")}`, "high",
-            `[SOXX 신모델] 전환 — 창1이 반대 판정\n▶① 보유 ${oldNm} 전량 즉시 매도 (스탑으로 이미 매도됐다면 ②만)\n▶② ${newNm}를 계좌 배정액의 100% 즉시 매수 (초과 금지)\n▶③ 새 자동스탑설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) · 오늘 1박 금지 — 취침 전 MOC 매도 예약\n무응답=전환\n----\n${etToKstLabel(c1.t, kstOffset)} 창1 @${c1.px.toFixed(2)} — F 선행일 59일 실측: 나중 신호 심판(E1)이 +36.2%p로 우승(E0 +8.7). 반대 판정일은 1박 금지.`,
+            `[SOXX 신모델] 전환 — 창1(모멘텀)이 F 판정과 반대\n▶① 보유 ${oldNm} 전량 즉시 매도 (스탑으로 이미 매도됐다면 ②만)\n▶② ${newNm}를 계좌 배정액의 100% 즉시 매수 (초과 금지)\n▶③ 새 자동스탑설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%) · 오늘 1박 금지 — 취침 전 MOC 매도 예약\n무응답=전환\n----\n진입 근거였던 F(${etToKstLabel(fJ.t, kstOffset)} 확인)와 반대로 ${etToKstLabel(c1.t, kstOffset)} 창1(1분 6봉) 판정 @${c1.px.toFixed(2)} — 이견일 규칙 "나중 신호(창1)가 심판": E1 +36.2%p vs 심판 없음 +8.7 (59일).`,
             `전환 ${st.revT} ET`);
         }
       } else {
