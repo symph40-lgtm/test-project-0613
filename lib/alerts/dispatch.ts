@@ -90,8 +90,9 @@ const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|usp
 // 신모델 심판 F와 중복 혼란이라 계속 억제 (하닉 F만 사다리 1단계라 실전 소속).
 const NM_REF_ALLOW = /^predict_tr_(hxM|hxB|ssM|ssB)_|^uspredict_tr_[MB]_/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
+// 제목 종목명은 정식 명칭 (사용자 지시 2026-08-05 저녁 — 하닉→하이닉스·삼전→삼성전자)
 const nmInstrument = (key: string): string =>
-  key.startsWith("uspredict_") ? "SOXX" : /^predict_(ssv2_|tr_ss)/.test(key) ? "삼전" : "하닉";
+  key.startsWith("uspredict_") ? "SOXX" : /^predict_(ssv2_|tr_ss)/.test(key) ? "삼성전자" : "하이닉스";
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
