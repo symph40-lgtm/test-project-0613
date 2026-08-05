@@ -88,12 +88,14 @@ const NM_ONLY_ALLOW = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|usp
 // 보내줘, 제목으로 구분하면 헷갈리지 않지"): 기존 계층의 M·본 문자는 발송하되 제목을 참고(기존모델)로,
 // 신모델 채널은 실전(신모델)로 교체해 실전/참고를 제목에서 즉시 구분. F 계층(삼전 ssF·미장 F)은
 // 신모델 심판 F와 중복 혼란이라 계속 억제 (하닉 F만 사다리 1단계라 실전 소속).
-// usdaily_(미국 일봉 스윙)도 참고 채널로 재개 (사용자 8/5 저녁 "일봉 예측 문자 안 오는데" — 8/4 차단분 복원)
-const NM_REF_ALLOW = /^predict_tr_(hxM|hxB|ssM|ssB)_|^uspredict_tr_[MB]_|^usdaily_/;
+// usdaily_(미국 일봉 스윙)도 참고 채널로 재개 (사용자 8/5 저녁 "일봉 예측 문자 안 오는데" — 8/4 차단분 복원).
+// 애프터장(predict_ah_ 하이닉스·predict_ss_ah 삼성전자)도 참고 복원 (8/5 밤 — 하이닉스 애프터 -3.7% 급락을
+// 판정하고도 침묵한 실사고. 라벨은 액션형 정비 완료 상태·신모델은 종가 청산이라 정보 채널로만)
+const NM_REF_ALLOW = /^predict_tr_(hxM|hxB|ssM|ssB)_|^uspredict_tr_[MB]_|^usdaily_|^predict_ah_|^predict_ss_ah/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
 // 제목 종목명은 정식 명칭 (사용자 지시 2026-08-05 저녁 — 하닉→하이닉스·삼전→삼성전자)
 const nmInstrument = (key: string): string =>
-  /^us/.test(key) ? "SOXX" : /^predict_(ssv2_|tr_ss)/.test(key) ? "삼성전자" : "하이닉스";
+  /^us/.test(key) ? "SOXX" : /^predict_(ssv2_|tr_ss|ss_ah)/.test(key) ? "삼성전자" : "하이닉스";
 
 export async function dispatchToChannels(
   triggerKey: "signal" | "rate" | "intraday_summary",
