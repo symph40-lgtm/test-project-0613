@@ -409,7 +409,9 @@ export async function runSoxxV2Monitor(): Promise<void> {
         const lagNote = lag >= 30 ? `\n⚠지연 통지(판정 ${st.entryT} ET, ${lag}분 경과) — 진입 금지, 다음 문자 대기` : "";
         const etfHint = await etfStopHint(nm, entryPx, stopPx);
         const stopLine = isPre
-          ? `자동스탑설정는 22:30(한국) 개장 후 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint} — 프리장 구간은 스탑 없음(프리장 스탑은 실측 -15.3%p 열위)`
+          // 프리장 무스탑 구간의 최대 노출을 계산값으로 명시 (사용자 지시 8/5 밤): 확인→개장 최악 드리프트
+          // 실측 SOXX -1.67%(57일, soxx-pre-entry-sweep) → 3x ETF 약 -5.0% — 역사적 최악치이지 보장 아님
+          ? `프리장에는 자동스탑설정하지 않음 — 이 구간 실측 최대 손실 ${nm} 기준 약 -5.0%(SOXX -1.67%, 57일 최악치) · 개장(22:30) 후 자동스탑설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint}`
           : `자동스탑설정 설정: SOXX ${stopPx.toFixed(2)} 이탈(-2%)${etfHint} (매수가 대비 ETF -6%)에 전량 자동매도`;
         await send(`uspredict_v2_entry_${st.entryT.replace(":", "")}`, "high",
           `[SOXX 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100% 지금 즉시 매수${isPre ? " (프리장 직접 매수)" : ""} (초과 금지)\n▶② ${stopLine}\n▶③ 다음 행동은 문자가 지시 — 동의 확인 시 1박, 이견 시 취침 전 MOC 매도 예약${lagNote}\n무응답=진입\n----\n${etToKstLabel(first.t, kstOffset)} ${fFirst ? "F(피셔) 선행 확인" : "창1(6봉 모멘텀) 판정"} @${first.px.toFixed(2)}. 통합 사양 246일 +141.6%p·컷은 예정 비용(-2%).`,
@@ -509,7 +511,7 @@ export async function runSoxxV2Monitor(): Promise<void> {
       const gain = lastPx !== null && st.entryPx ? ((lastPx - (st.revPx ?? st.entryPx)) / (st.revPx ?? st.entryPx)) * 100 * legDirBed : null;
       await send("uspredict_v2_bed", "medium",
         ovnOk
-          ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동스탑설정를 재난선 SOXX ${st.entryPx ? ((st.revPx ?? st.entryPx) * (legDirBed === 1 ? 0.95 : 1.05)).toFixed(2) : ""}(진입가 -5%, 3x -15%)로 변경 후 취침 (주간거래 포함) — 낮 폭(-2%)은 애프터 급락·회복 경로에 컷(8/5 실사고)\n▶③ 내일 22:30(한국) 개장 시가 전량 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 밤 스탑 없는 시가 청산이 백테스트 사양(최악 -4.08%) — 재난선은 통계 밖 붕괴 차단용.`
+          ? `[SOXX 신모델] 취침 지침 — ${nmBed} 무행동 1박\n▶① 보유 ${nmBed} 그대로 두고 취침 (매도 예약 걸지 않음)\n▶② 자동스탑설정을 재난선 SOXX ${st.entryPx ? ((st.revPx ?? st.entryPx) * (legDirBed === 1 ? 0.95 : 1.05)).toFixed(2) : ""}(진입가 -5%, 3x -15%)로 변경 후 취침 (주간거래 포함) — 낮 폭(-2%)은 애프터 급락·회복 경로에 컷(8/5 실사고)\n▶③ 내일 22:30(한국) 개장 시가 전량 매도 — 문자로 다시 지시\n무응답=1박\n----\n동의일 1박 규칙. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}. 밤 스탑 없는 시가 청산이 백테스트 사양(최악 -4.08%) — 재난선은 통계 밖 붕괴 차단용.`
           : holding
             ? `[SOXX 신모델] 취침 지침 — 오늘은 ${nmBed} 종가 청산\n▶① 취침 전 보유 ${nmBed} 전량 MOC(종가) 매도 예약 (새로 사는 것 아님) — 접수 마감 한국 04:40\n▶② 자동스탑설정(-2%)는 예약과 별개로 유지\n무응답=MOC 예약 필요 (이견·무판정일 1박 금지)\n----\n${st.oppT ? "F 이견일" : st.revT ? "전환일(이견)" : "F 무판정일"} — 1박 자격 없음. 현재 미실현 SOXX ${gain !== null ? pct(gain) : "—"}.`
             : `[SOXX 신모델] 취침 지침 — 보유 없음\n▶행동 없음 (${st.protT ? "이익 보호 청산" : "스탑"}으로 종료된 날)\n----\n오늘 매매 종료.`,
