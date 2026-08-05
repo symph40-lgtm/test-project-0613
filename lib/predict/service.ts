@@ -1075,6 +1075,14 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 삼전 신모델 스트림 실패 (본 흐름 무관):", e);
   }
 
+  // ⑯ 신모델 vs 기존 피셔 10일 평가 (사용자 지시 2026-08-06 — 8/17 11시 1회 보고)
+  try {
+    const { runPerf10Report } = await import("./perf10");
+    await runPerf10Report();
+  } catch (e) {
+    console.error("[predict] 10일 평가 실패 (본 흐름 무관):", e);
+  }
+
   // ⑮ 대가 모델 분야별 보완 모니터 (사용자 지시 2026-08-06 — 승격 기준 충족 시 결정 통지)
   try {
     const { runModelComplementMonitor } = await import("./modelComplement");
