@@ -76,7 +76,9 @@ const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vre
 // 하닉 F분은 사다리 2단계라 실전 유지)·재확인·rev9·recut·미장 prog2. 하닉 F(predict_tr_hxF_)는
 // 사다리 1단계 운반 채널이라 실전 발송 (8/4 실사고 교정).
 // smsLegacyRef=true면 대체분을 차단 대신 '참고(기존모델)' 제목으로 병행 발송 (8/4 저녁 방식).
-const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_)|^uspredict_(tr_|prog2_|rev9_|recut_)/;
+// TOP10(396500 모니터링 스트림) 문자도 차단 (사용자 지시 2026-08-06 "TOP10 관련 문자는 꺼줘" —
+// 기록·채점·60일 승격 검토는 계속, 실시간 버튼 응답(fisher_now_etf)은 사용자 문의라 유지)
+const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_tr_etf|^predict_etf_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_)|^uspredict_(tr_|prog2_|rev9_|recut_)/;
 // 참고 제목 대상 (신모델과 무관하지만 구모델 산출물 표시): 미국일봉·애프터장
 const NM_REF_SUBJECT = /^usdaily_|^predict_ah_|^predict_ss_ah/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
