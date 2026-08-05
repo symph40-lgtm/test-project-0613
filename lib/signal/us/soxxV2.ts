@@ -299,8 +299,10 @@ export async function runSoxxV2Monitor(): Promise<void> {
         `[SOXX 신모델] 오늘 세션부터 시범 시행\n▶SOXX 매매는 이 문자 기준 — 창1(1분 6봉 모멘텀) 또는 F(피셔) 중 먼저 온 신호로 진입\n▶상방 ${SY.leverage}·하방 ${SY.inverse} (3x) · 스탑 SOXX -2%(ETF -6%)\n▶인버스 진입일: 이익 +1% 후 되돌림 0.9%면 '이익 보호 청산' 문자 — 즉시 매도 (8/3 기브백 교정 규칙)\n▶한국 00~07시엔 문자 없음 — 아침 요약으로 합산 (모니터링은 계속)\n----\n근거 246일: 통합(보호 포함) +130.9%p·최악일 -4.08%(SOXX). 비이견일 1박(다음 세션 시가 청산)·이견일 종가(MOC) 청산. 취침(23:30) 지침 문자로 마감.`, undefined);
     }
 
-    // ① 1박 청산 — 전 세션 이월분을 개장 시가로 (22:30 KST — 정상 발송 시간)
-    if (st.ovn && reg.length > 0 && etMin >= SOXX_ET_OPEN) {
+    // ① 1박 청산 — 전 세션 이월분을 '다음 세션' 개장 시가로 (22:30 KST — 정상 발송 시간).
+    // ⚠st.ovn.date < todayEt 필수 (8/5 실사고: EOD가 16:01에 ovn을 세팅하자 16:02 크론이 같은 세션
+    // 시가로 즉시 '청산'해버림 — 채점 오확정·새벽 청산 이메일 오발송. 같은 세션에선 절대 발동 금지)
+    if (st.ovn && st.ovn.date < todayEt && reg.length > 0 && etMin >= SOXX_ET_OPEN) {
       const open = reg[0].open;
       const gain = ((open - st.ovn.px) / st.ovn.px) * 100 * st.ovn.dir;
       const nm = st.ovn.dir === 1 ? SY.leverage : SY.inverse;
