@@ -79,7 +79,34 @@ export async function GET(req: NextRequest) {
       console.error("[cron/morning-brief] 전일 이슈 브리핑 실패 (본 브리핑은 발송됨):", e);
     }
 
-    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: (brief.sms2 ? 2 : 1) + (regimeSent ? 1 : 0) + (issueSent ? 1 : 0) });
+    // ⑤갭 추격 금지 경고 (사용자 지시 2026-08-06 — 저녁 SOXX 신호 검토(6b3dcfe) 부산물 반영):
+    // 밤사이 SOXX ±2% 이상이면 국장 갭 출발 가능성 + 추격 금지 근거 동봉. 그 이하 밤은 생략(소음 방지)
+    let gapWarnSent = false;
+    try {
+      const YahooFinance = (await import("yahoo-finance2")).default;
+      const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+      const q = await yf.quote("SOXX");
+      const chg = q.regularMarketChangePercent ?? 0;
+      const post = q.postMarketPrice && q.regularMarketPrice ? ((q.postMarketPrice - q.regularMarketPrice) / q.regularMarketPrice) * 100 : 0;
+      const tot = chg + post;
+      if (Math.abs(tot) >= 2) {
+        sent += await dispatchToChannels(
+          "intraday_summary",
+          date,
+          {
+            key: "morning_gapwarn", severity: "medium",
+            text: `[아침브리핑 갭 경고] 밤사이 SOXX ${tot >= 0 ? "+" : ""}${tot.toFixed(1)}% — 오늘 하이닉스·삼성전자 갭 ${tot >= 0 ? "상승" : "하락"} 출발 가능성\n▶갭 방향 추격 매수 금지 — 시가에 이미 반영된 재료를 사는 것\n▶매매는 09시 이후 실전(신모델) 판정 문자 대기 (|갭| ≥4%면 정찰 절반 규칙 별도 문자)\n----\n근거(20일 실측 6b3dcfe): 갭 방향의 장중 지속 하이닉스 -17.5%p·삼성전자 -10.4%p — 갭은 시가에서 소진되고 장중 되돌림 우세. 기존 갭 실측(2~4%가 최적 구간·≥7%는 이익 0)과 정합.`,
+            smsSubject: "아침브리핑 갭",
+          },
+          `아침 브리핑 갭 경고 (${date})`,
+        );
+        gapWarnSent = true;
+      }
+    } catch (e) {
+      console.error("[cron/morning-brief] 갭 경고 실패 (본 브리핑은 발송됨):", e);
+    }
+
+    return NextResponse.json({ ok: true, sent, events: brief.events.length, parts: (brief.sms2 ? 2 : 1) + (regimeSent ? 1 : 0) + (issueSent ? 1 : 0) + (gapWarnSent ? 1 : 0) });
   } catch (e) {
     console.error("[cron/morning-brief] error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
