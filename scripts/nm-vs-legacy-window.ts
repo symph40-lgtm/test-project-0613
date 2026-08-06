@@ -46,7 +46,7 @@ function leg(bb: MinuteBar[], tl: Tr[], close: number, stopPct: number): number 
   return p;
 }
 
-type DayPair = { date: string; nm: number; old: number };
+type DayPair = { date: string; nm: number; old: number; oc: number };
 function loadDay(f: string): MinuteBar[] | null {
   const p = resolve(CACHE, f);
   return existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as MinuteBar[]) : null;
@@ -68,7 +68,7 @@ function krPairs(code: string, calc: (bars: MinuteBar[], krx: MinuteBar[], hist:
       const r10 = hist.slice(-10).reduce((a, b) => a + (b.high - b.low), 0) / 10;
       const prevCut2 = cuts.slice(-3).filter(Boolean).length >= 2;
       const r = calc([...pre, ...reg], reg, hist, r10, prevCut2, day.close);
-      out.push({ date, nm: Math.round(r.nm * 100) / 100, old: Math.round(r.old * 100) / 100 });
+      out.push({ date, nm: Math.round(r.nm * 100) / 100, old: Math.round(r.old * 100) / 100, oc: ((day.close - day.open) / day.open) * 100 });
       cuts.push(r.nm <= -2.4);
     }
     daily.push(day);
@@ -84,6 +84,8 @@ function show(name: string, rows: DayPair[], lastFrom: string) {
   console.log(`\n════ ${name} ════`);
   line("전체", rows);
   line(`최근 1개월(${lastFrom}~)`, recent);
+  line(`최근 1개월 ∧ |시가→종가|≥5%`, recent.filter((r) => Math.abs(r.oc) >= 5));
+  line(`전체 ∧ |시가→종가|≥5%`, rows.filter((r) => Math.abs(r.oc) >= 5));
 }
 
 async function main() {
@@ -184,7 +186,7 @@ async function main() {
       }
       old += cutHit ? -2 : (((nx ? nx.px : close) - px) / px) * 100 * trs[k].dir;
     }
-    us.push({ date, nm: Math.round(nm * 100) / 100, old: Math.round(old * 100) / 100 });
+    us.push({ date, nm: Math.round(nm * 100) / 100, old: Math.round(old * 100) / 100, oc: ((close - reg[0].open) / reg[0].open) * 100 });
   }
   show("SOXX — v2 주기준 vs 현행 F", us, "2026-07-07");
 }

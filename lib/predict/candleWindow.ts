@@ -245,7 +245,10 @@ export async function runCandleWindowMonitor(): Promise<void> {
     const bars = [...(pre ?? []).filter((b) => b.time < nowHHMM), ...krx];
     if (bars.length < 8) return;
 
-    const trs = candleJudgeStream(bars, unitArr(bars, r10));
+    // 눈금 스케일 1.2 (사용자 채택 8/6 — 7월 재도출 nm-july-param-sweep: 7월 +0.7→+6.4·전체 -0.5 비훼손.
+    // 판정·사다리·0930판 모두 스케일판 기준, 현행 1.0판은 사다리 대조 채점(p10)으로 병기)
+    const unitScaled = unitArr(bars, r10).map((u) => u * PREDICT_CONFIG.newModel.cwUnitScale);
+    const trs = candleJudgeStream(bars, unitScaled);
     const hv = isHighVolDay(hist); // 레짐 분기 (전일까지 일봉 — 사용자 확정 8/1: 저변동일 종가보유·고변동일 전환청산)
     // 대형 갭일 (사용자 채택 8/1 — tmp-gap-day 실측): 시가 |갭| ≥4%면 정찰 절반. ≥7%는 이익 0·컷 38% 구간.
     const prevClose = hist[hist.length - 1]?.close ?? 0;
@@ -288,7 +291,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
 
     // ⑤ 가상 4단 사다리 일일 채점 (사용자 확정 2026-08-01) — 창판정 유무와 무관하게 매 거래일 기록.
     // 8/3~8/5 데이터 분석 기간을 거쳐 8/6 시범 시행 예정 — 그때까지는 기록·결산 병기만.
-    type LadRow = { date: string; pnl: number; cut: boolean; def?: boolean };
+    type LadRow = { date: string; pnl: number; cut: boolean; def?: boolean; p10?: number };
     let ladToday: LadRow | null = null;
     let ladSum = 0, ladN = 0;
     if (!st.ladderDone && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
@@ -298,7 +301,10 @@ export async function runCandleWindowMonitor(): Promise<void> {
         // 정찰 절반 = 서킷브레이커(K=3·M=2) 또는 대형 갭일(|갭|≥4%) — 사용자 확정 8/1
         const defense = arr.slice(-3).filter((r) => r.cut).length >= 2 || gapBig;
         const lad = simLadder(bars, r10, krx[krx.length - 1].close, trs, defense, hv);
-        ladToday = { date: today, pnl: Math.round(lad.pnl * 100) / 100, cut: lad.cut, def: defense };
+        // 대조: 현행 눈금 1.0판 (채택 파라미터의 라이브 재현 검증용 — 60일 채점이 판정)
+        const trs10 = candleJudgeStream(bars, unitArr(bars, r10));
+        const lad10 = simLadder(bars, r10, krx[krx.length - 1].close, trs10, defense, hv);
+        ladToday = { date: today, pnl: Math.round(lad.pnl * 100) / 100, cut: lad.cut, def: defense, p10: Math.round(lad10.pnl * 100) / 100 };
         arr.push(ladToday);
         const kept = arr.slice(-120);
         ladSum = kept.reduce((a, r) => a + r.pnl, 0);
@@ -432,7 +438,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)} · 누적 ${ladN}일 ${pct(ladSum)}.` : ""} ${paperNote}`);
+            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(눈금1.2·X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)}(눈금1.0 대조 ${pct(ladToday.p10 ?? ladToday.pnl)}) · 누적 ${ladN}일 ${pct(ladSum)}.` : ""} ${paperNote}`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }
