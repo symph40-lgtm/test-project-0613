@@ -333,6 +333,19 @@ export async function runPredictDailyService(): Promise<Record<string, unknown>>
     await upsertDay(row);
     (summary.judged as unknown[]).push({ symbol: sym.code, stance: jg.stance, exposure: jg.exposure, gates: jg.gates });
 
+    // 팩터 스냅샷 기록 (Phase 0 · 마이그레이션 033) — 기록 전용, 판정 무관. 실패는 삼킨다.
+    // 지금까지 계산 후 버려지던 매크로·수급·모델 스탠스를 남겨야 60일 뒤 리프트 검정이 가능하다.
+    try {
+      const { buildFactors, upsertFactorDay, labelFactorDays } = await import("./factorStore");
+      await upsertFactorDay(now.date, sym.code, buildFactors(macro, jg.modelStances), {
+        newsRisk: macro?.newsRisk ?? null,
+        newsNote: macro?.newsNote ?? null,
+        envScore: macro?.envScore ?? null,
+        stance: jg.stance, exposure: jg.exposure, gates: jg.gates,
+      });
+      await labelFactorDays(sym.code, bars);
+    } catch { /* 기록 실패는 본 흐름 무관 */ }
+
     // 문자: 매일 발송 (사용자 지시 2026-07-22 — 잊지 않도록). 변경이면 행동 지침, 유지면 "언제부터" 표기.
     //   키에 분 없음 — 스탠스·비중 조합으로 하루 내 중복 방지 (창 내 판정 뒤집힘 시에만 재발송).
     if (CFG.sms.enabled && (!existing || changedVsToday)) {
