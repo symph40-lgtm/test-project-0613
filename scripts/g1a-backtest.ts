@@ -1,0 +1,328 @@
+// G1A 백테스트 — SPEC_G1A_gap_forecast.md §9 검증 계획의 사전 실측판:
+//   npx tsx scripts/g1a-backtest.ts [--months 3]
+// 스펙은 "log-only 60일 후 평가"지만, 조달 가능한 피처는 과거치가 있으므로 60일을 기다리기 전에
+// 초기 가중치가 최소한 무해한지 먼저 본다. 사용자 지시(2026-08-09): **최근 3개월을 주력으로 볼 것**
+// — 최근 변동성이 크게 확대돼 그 이전 구간의 통계가 현재와 안 맞을 수 있기 때문.
+//
+// 룩어헤드 방지 (스펙 §9): 모든 피처는 15:10 KST 이전 값만 쓴다.
+//   · 분봉 F01·F02·F04 → 15:05까지 봉만 사용
+//   · TSMC/가권 14:30 마감 · 니케이 15:00 마감 → 당일 종가 사용 가능
+//   · NQ·환율 → 06:00~15:00 KST 아시아 세션 구간만
+//   · 미 10Y → 간밤(=직전 미국 거래일) 종가 변화
+//   · 예외 1건: F08 외인은 15:10엔 '잠정치'인데 백테스트는 확정치를 쓴다 (근사 — 결과 해석 시 감안)
+import { readdirSync, readFileSync, existsSync } from "fs";
+import { resolve } from "path";
+for (const line of readFileSync(resolve(process.cwd(), ".env.local"), "utf8").split(/\r?\n/)) {
+  const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+}
+import YahooFinance from "yahoo-finance2";
+import { fetchDailyPredict } from "../lib/predict/data";
+import { isNR, isInsideBar } from "../lib/predict/indicators";
+import type { MinuteBar, PredictDailyBar } from "../lib/predict/types";
+import { FOMC_DECISION_DATES, CPI_RELEASE_DATES, ES_RELEASE_DATES } from "../lib/predict-daily/eventCalendar";
+import { G1A_CONFIG, G1A_UNAVAILABLE } from "../lib/g1a/config";
+import { scoreG1A, labelDirection, labelSize, type AbstainCtx } from "../lib/g1a/score";
+import type { G1AFeatures, G1AVerdict } from "../lib/g1a/types";
+
+const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+const CACHE = resolve(process.cwd(), ".predict-cache");
+const args = process.argv.slice(2);
+const MONTHS = parseInt((() => { const i = args.indexOf("--months"); return i >= 0 ? args[i + 1] : "3"; })(), 10);
+const s2 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
+const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+
+// ───────── 데이터 로딩 ─────────
+const loadMinute = (code: string, date: string): MinuteBar[] | null => {
+  const f = resolve(CACHE, `${code}-${date}.json`);
+  return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : null;
+};
+
+type DayVal = Map<string, number>;
+async function dailyCloses(symbol: string, days = 500): Promise<DayVal> {
+  const out: DayVal = new Map();
+  try {
+    const r = await yf.chart(symbol, { period1: new Date(Date.now() - days * 86400e3), interval: "1d" });
+    for (const q of r.quotes ?? []) if (q.close != null) out.set(new Date(q.date).toISOString().slice(0, 10), q.close as number);
+  } catch (e) { console.log(`  ⚠${symbol}: ${(e as Error).message.slice(0, 50)}`); }
+  return out;
+}
+// 일중 저가 (서킷브레이커 프록시용)
+async function dailyLowClose(symbol: string, days = 500): Promise<Map<string, { low: number; close: number }>> {
+  const out = new Map<string, { low: number; close: number }>();
+  try {
+    const r = await yf.chart(symbol, { period1: new Date(Date.now() - days * 86400e3), interval: "1d" });
+    for (const q of r.quotes ?? []) if (q.close != null && q.low != null) out.set(new Date(q.date).toISOString().slice(0, 10), { low: q.low as number, close: q.close as number });
+  } catch { /* noop */ }
+  return out;
+}
+
+// 1시간봉 → KST 날짜·분 인덱스
+type HourBar = { date: string; min: number; close: number };
+async function hourly(symbol: string, days = 200): Promise<HourBar[]> {
+  const out: HourBar[] = [];
+  try {
+    const r = await yf.chart(symbol, { period1: new Date(Date.now() - days * 86400e3), interval: "1h" });
+    for (const q of r.quotes ?? []) {
+      if (q.close == null) continue;
+      const kst = new Date(new Date(q.date).getTime() + 9 * 3600e3);
+      out.push({ date: kst.toISOString().slice(0, 10), min: kst.getUTCHours() * 60 + kst.getUTCMinutes(), close: q.close as number });
+    }
+  } catch (e) { console.log(`  ⚠${symbol} 1h: ${(e as Error).message.slice(0, 50)}`); }
+  return out;
+}
+// 아시아 세션 수익률 % — 그날 06:30 이후 첫 값 → 15:00 이전 마지막 값
+function asiaReturn(bars: HourBar[], date: string): number | null {
+  const day = bars.filter((b) => b.date === date && b.min >= 360 && b.min <= 900).sort((a, b) => a.min - b.min);
+  if (day.length < 2) return null;
+  return ((day[day.length - 1].close - day[0].close) / day[0].close) * 100;
+}
+// 직전 거래일 대비 % (일봉)
+function prevChg(m: DayVal, keys: string[], date: string): number | null {
+  const i = keys.findIndex((k) => k === date);
+  if (i <= 0) {
+    // 정확히 일치하는 날짜가 없으면 그 이전 최근 2개 사용 (휴장 대응)
+    let a = -1;
+    for (let j = 0; j < keys.length; j++) if (keys[j] <= date) a = j; else break;
+    if (a <= 0) return null;
+    return ((m.get(keys[a])! - m.get(keys[a - 1])!) / m.get(keys[a - 1])!) * 100;
+  }
+  return ((m.get(keys[i])! - m.get(keys[i - 1])!) / m.get(keys[i - 1])!) * 100;
+}
+// 간밤(=date 이전 마지막) 미국 종가의 전일 대비 변화
+function overnightChg(m: DayVal, keys: string[], date: string): number | null {
+  let a = -1;
+  for (let j = 0; j < keys.length; j++) if (keys[j] < date) a = j; else break;
+  if (a <= 0) return null;
+  return m.get(keys[a])! - m.get(keys[a - 1])!;
+}
+
+// 외인 수급 (네이버 종목별 매매동향, 여러 페이지)
+async function fetchFlowHistory(code: string, pages = 8): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let p = 1; p <= pages; p++) {
+    try {
+      const res = await fetch(`https://finance.naver.com/item/frgn.naver?code=${code}&page=${p}`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Referer: "https://finance.naver.com/" },
+      });
+      if (!res.ok) break;
+      const html = new TextDecoder("euc-kr").decode(await res.arrayBuffer());
+      const rowRe = /<tr onMouseOver[\s\S]*?<\/tr>/g;
+      let m: RegExpExecArray | null;
+      while ((m = rowRe.exec(html)) !== null) {
+        const d = m[0].match(/(\d{4})\.(\d{2})\.(\d{2})/);
+        const frgnM = m[0].match(/width="80"[^>]*>[\s\S]*?([+\-][\d,]+)/);
+        if (d && frgnM) out.set(`${d[1]}-${d[2]}-${d[3]}`, parseFloat(frgnM[1].replace(/,/g, "")));
+      }
+    } catch { break; }
+  }
+  return out;
+}
+
+// ───────── 피처 계산 ─────────
+// 10분봉 동방향 지속률 (DC1 프록시): 15:05까지의 10분봉 중 상승봉 비율을 −1~+1로
+function dc1Proxy(mins: MinuteBar[]): number | null {
+  const upto = mins.filter((b) => b.time <= "15:05");
+  if (upto.length < 60) return null;
+  let up = 0, down = 0;
+  for (let i = 0; i + 10 <= upto.length; i += 10) {
+    const seg = upto.slice(i, i + 10);
+    const d = seg[seg.length - 1].close - seg[0].open;
+    if (d > 0) up++; else if (d < 0) down++;
+  }
+  const n = up + down;
+  return n ? (up - down) / n : 0;
+}
+// 시가 유형 (O1 간략판): 시가 후 30분 방향·되돌림으로 판정
+function openType(mins: MinuteBar[]): G1AFeatures["F04_o1"] {
+  const first = mins.filter((b) => b.time <= "09:30");
+  if (first.length < 20) return null;
+  const o = first[0].open, c = first[first.length - 1].close;
+  const hi = Math.max(...first.map((b) => b.high)), lo = Math.min(...first.map((b) => b.low));
+  const move = ((c - o) / o) * 100;
+  const backfill = c > o ? ((o - lo) / o) * 100 : ((hi - o) / o) * 100; // 시가 반대쪽 되돌림
+  if (Math.abs(move) >= 0.7 && backfill <= 0.2) return move > 0 ? "OD_up" : "OD_down";
+  if (Math.abs(move) >= 0.5) return "OTD";
+  return "OA";
+}
+function clvAt(mins: MinuteBar[]): number | null {
+  const upto = mins.filter((b) => b.time <= "15:05");
+  if (upto.length < 60) return null;
+  const hi = Math.max(...upto.map((b) => b.high)), lo = Math.min(...upto.map((b) => b.low));
+  return hi > lo ? (upto[upto.length - 1].close - lo) / (hi - lo) : 0.5;
+}
+
+const EVENT_SET = new Map<string, string>();
+for (const d of FOMC_DECISION_DATES) EVENT_SET.set(d, "FOMC");
+for (const d of CPI_RELEASE_DATES) EVENT_SET.set(d, "CPI");
+for (const d of ES_RELEASE_DATES) EVENT_SET.set(d, "고용");
+
+type Row = {
+  date: string; symbol: string; f: G1AFeatures; v: G1AVerdict;
+  L1: number; L2: number | null; actualDir: "UP" | "DOWN" | "FLAT";
+};
+
+async function main() {
+  console.log(`G1A 백테스트 — 주력 구간 최근 ${MONTHS}개월 (사용자 지시: 최근 변동성 확대 반영)\n`);
+  console.log("미조달 피처 (스펙 대비 결손):");
+  for (const [k, why] of Object.entries(G1A_UNAVAILABLE)) console.log(`  ${k.padEnd(18)} ${why}`);
+  console.log(`  F15 반도체 실적일   eventCalendar에 FOMC·CPI·고용만 있음 — 실적일 미포함(보류1 과소 추정)\n`);
+
+  console.log("데이터 수집 중...");
+  const [tsmc, n225, twii, tnx, ks11h] = await Promise.all([
+    dailyCloses("2330.TW"), dailyCloses("^N225"), dailyCloses("^TWII"), dailyCloses("^TNX"), dailyLowClose("^KS11"),
+  ]);
+  const [nq, krw] = await Promise.all([hourly("NQ=F"), hourly("KRW=X")]);
+  const k = {
+    tsmc: [...tsmc.keys()].sort(), n225: [...n225.keys()].sort(),
+    twii: [...twii.keys()].sort(), tnx: [...tnx.keys()].sort(),
+  };
+  console.log(`  TSMC ${tsmc.size} · N225 ${n225.size} · TWII ${twii.size} · TNX ${tnx.size} · NQ1h ${nq.length} · KRW1h ${krw.length} · KOSPI ${ks11h.size}`);
+
+  // 서킷브레이커 프록시 (KOSPI 일중 −8%)
+  const cbDays = new Set<string>();
+  const ksKeys = [...ks11h.keys()].sort();
+  for (let i = 1; i < ksKeys.length; i++) {
+    const prev = ks11h.get(ksKeys[i - 1])!.close, cur = ks11h.get(ksKeys[i])!;
+    if (((cur.low - prev) / prev) * 100 <= G1A_CONFIG.circuitBreakerPct) cbDays.add(ksKeys[i]);
+  }
+
+  const cutoff = new Date(Date.now() - MONTHS * 30.5 * 86400e3).toISOString().slice(0, 10);
+  const allRows: Row[] = [];
+
+  for (const [code, name] of [["000660", "SK하이닉스"], ["005930", "삼성전자"]] as [string, string][]) {
+    const bars: PredictDailyBar[] = await fetchDailyPredict(code, 400);
+    const flow = await fetchFlowHistory(code);
+    const rows: Row[] = [];
+    for (let i = 30; i < bars.length - 1; i++) {
+      const d = bars[i].date, next = bars[i + 1];
+      if (!(bars[i].close > 0) || !(next.open > 0)) continue;
+      const mins = loadMinute(code, d);
+      const hist = bars.slice(0, i + 1);
+
+      // 외인 감속률: 당일 순매수 / 직전 20일 |순매수| 평균
+      let frnDecel: number | null = null;
+      const today = flow.get(d);
+      if (today != null) {
+        const prevs: number[] = [];
+        for (let j = i - 1; j >= 0 && prevs.length < 20; j--) { const v = flow.get(bars[j].date); if (v != null) prevs.push(Math.abs(v)); }
+        if (prevs.length >= 10) {
+          const avg = prevs.reduce((a, b) => a + b, 0) / prevs.length;
+          frnDecel = avg > 0 ? today / avg : null;
+        }
+      }
+
+      const f: G1AFeatures = {
+        F01_clv: mins ? clvAt(mins) : null,
+        F02_dc1: mins ? dc1Proxy(mins) : null,
+        F03_n1: isNR(hist, 7) ? "NR7" : isNR(hist, 4) && isInsideBar(hist) ? "NR4IB" : isInsideBar(hist) ? "inside" : null,
+        F04_o1: mins ? openType(mins) : null,
+        F05_w1: null, F06_v1: null, F07_b1_z: null,
+        F08_frn_decel: frnDecel,
+        F09_c1: null,
+        F10_nq_asia: asiaReturn(nq, d),
+        F11_tsmc: prevChg(tsmc, k.tsmc, d),
+        F12_asia_idx: (() => {
+          const a = prevChg(n225, k.n225, d), b = prevChg(twii, k.twii, d);
+          return a == null && b == null ? null : ((a ?? 0) + (b ?? 0)) / (a != null && b != null ? 2 : 1);
+        })(),
+        F13_ust10y_bp: (() => { const c = overnightChg(tnx, k.tnx, d); return c == null ? null : c * 100; })(),
+        F14_usdkrw: asiaReturn(krw, d),
+        F15_event: EVENT_SET.get(d) ?? null,
+        F16_implied_move: null, F17_pos_extreme: null,
+        F20_europe: null, F21_us_pre_semi: null, F23_nxt_after: null,
+      };
+      const wd = new Date(d + "T00:00:00Z").getUTCDay();
+      const ctx: AbstainCtx = {
+        weekday: wd,
+        eventTonight: f.F15_event,
+        impliedMoveRatio: null,
+        posExtreme: null,
+        circuitBreakerToday: cbDays.has(d),
+        circuitBreakerYesterday: cbDays.has(bars[i - 1]?.date ?? ""),
+      };
+      const v = scoreG1A(f, ctx);
+      const L1 = ((next.open - bars[i].close) / bars[i].close) * 100;
+      rows.push({ date: d, symbol: code, f, v, L1, L2: null, actualDir: labelDirection(L1) });
+    }
+    allRows.push(...rows);
+    report(name, rows, cutoff);
+  }
+
+  // 판정 보류 규칙별 발동 빈도 (사용자 질문: "4번 맞는지·최근 한달간 너무 많이 발생")
+  console.log(`\n══════ 판정 보류 규칙별 발동 빈도 (SPEC §5.3) ══════`);
+  const m1 = new Date(Date.now() - 31 * 86400e3).toISOString().slice(0, 10);
+  for (const [lb, from] of [["최근 1개월", m1], [`최근 ${MONTHS}개월`, cutoff], ["전체 가용", "2000-01-01"]] as [string, string][]) {
+    const g = allRows.filter((r) => r.date >= from && r.symbol === "000660"); // 규칙은 종목 무관 → 한 종목 기준
+    if (!g.length) continue;
+    const c: Record<string, number> = {};
+    for (const r of g) { const key = r.v.abstainReason?.split(" ")[0] ?? "판정함"; c[key] = (c[key] ?? 0) + 1; }
+    const parts = Object.entries(c).sort().map(([kk, n]) => `${kk} ${n}일(${pct(n, g.length)}%)`);
+    console.log(`  ${lb.padEnd(10)} 총 ${g.length}일 · ${parts.join(" · ")}`);
+  }
+  console.log(`  ※ 보류1=이벤트밤 · 보류2=금요일 · 보류4=서킷브레이커 · 보류5=핵심피처결측`);
+
+  // 프록시 검증 — 발동일의 실제 KOSPI 낙폭을 찍어 데이터 이상인지 진짜 급락인지 가린다
+  console.log(`\n  서킷브레이커 프록시(KOSPI 일중 ${G1A_CONFIG.circuitBreakerPct}%) 발동일 실측:`);
+  for (const d of [...cbDays].sort()) {
+    const i = ksKeys.indexOf(d);
+    const prev = ks11h.get(ksKeys[i - 1])!.close, cur = ks11h.get(d)!;
+    console.log(`     ${d} 전일종가 ${prev.toFixed(0)} → 일중저가 ${cur.low.toFixed(0)} (${s2(((cur.low - prev) / prev) * 100)}%) · 종가 ${cur.close.toFixed(0)} (${s2(((cur.close - prev) / prev) * 100)}%)`);
+  }
+
+  // ★사용자 질문: 보류 규칙을 '넣어도 될지' — 보류하지 않고 점수대로 진입했다면 어땠는가
+  console.log(`\n══════ 보류 규칙별 반사실 검정 — 보류 안 했다면? ══════`);
+  console.log(`  (그날 GapScore대로 진입했을 때의 사이징 가중 손익. 음수여야 보류가 옳다)`);
+  const sizeMul = (s: string) => (s === "1/3" ? 1 / 3 : s === "1/6" ? 1 / 6 : 0);
+  for (const [lb, from] of [["최근 1개월", m1], [`최근 ${MONTHS}개월`, cutoff], ["전체 가용", "2000-01-01"]] as [string, string][]) {
+    console.log(`  ── ${lb} ──`);
+    for (const rule of ["보류1", "보류2", "보류4", "보류5"]) {
+      const g = allRows.filter((r) => r.date >= from && r.v.abstainReason?.startsWith(rule));
+      if (!g.length) { console.log(`     ${rule} 발동 없음`); continue; }
+      // 보류가 없었다면 나왔을 판정 = 점수 기준 재판정
+      let pnl = 0, n = 0, hit = 0, gradable = 0;
+      for (const r of g) {
+        const sc = r.v.gapScore;
+        const dir = sc >= G1A_CONFIG.verdict.lowAbs ? "UP" : sc <= -G1A_CONFIG.verdict.lowAbs ? "DOWN" : null;
+        if (!dir) continue;
+        const size = Math.abs(sc) >= G1A_CONFIG.verdict.highAbs ? "1/3" : "1/6";
+        pnl += (dir === "UP" ? r.L1 : -r.L1) * sizeMul(size);
+        n++;
+        if (r.actualDir !== "FLAT") { gradable++; if (dir === r.actualDir) hit++; }
+      }
+      const avgGap = g.reduce((a, r) => a + Math.abs(r.L1), 0) / g.length;
+      console.log(`     ${rule} ${g.length}일(2종목 합) · 진입했을 일수 ${n} · 손익 ${s2(pnl)}%p (1일당 ${n ? s2(pnl / n) : "—"}) · 적중 ${gradable ? pct(hit, gradable) + "%" : "—"} · 평균|갭| ${avgGap.toFixed(2)}% → ${pnl < 0 ? "보류가 이득 (규칙 유지)" : "보류가 손해 (규칙 재검토)"}`);
+    }
+  }
+}
+
+function report(name: string, rows: Row[], cutoff: string) {
+  for (const [lb, g] of [[`최근 ${MONTHS}개월 ★주력`, rows.filter((r) => r.date >= cutoff)], ["전체 가용구간", rows]] as [string, Row[]][]) {
+    if (g.length < 10) { console.log(`\n──── ${name} · ${lb}: 표본 ${g.length}일 부족`); continue; }
+    const acted = g.filter((r) => r.v.direction === "UP" || r.v.direction === "DOWN");
+    const gradable = acted.filter((r) => r.actualDir !== "FLAT");
+    const hit = gradable.filter((r) => r.v.direction === r.actualDir).length;
+    const abst = g.filter((r) => r.v.abstainReason);
+    const sizeMul = (s: string) => (s === "1/3" ? 1 / 3 : s === "1/6" ? 1 / 6 : 0);
+    const exp = acted.reduce((a, r) => a + (r.v.direction === "UP" ? r.L1 : -r.L1) * sizeMul(r.v.size), 0);
+    // Brier — GapScore를 확률로 사상 (0.5 + 0.04·score, 0.05~0.95 클램프)
+    const brier = g.filter((r) => r.actualDir !== "FLAT").reduce((a, r) => {
+      const p = Math.max(0.05, Math.min(0.95, 0.5 + 0.04 * r.v.gapScore));
+      const y = r.actualDir === "UP" ? 1 : 0;
+      return a + (p - y) ** 2;
+    }, 0) / Math.max(1, g.filter((r) => r.actualDir !== "FLAT").length);
+    const absGap = (xs: Row[]) => xs.length ? xs.reduce((a, r) => a + Math.abs(r.L1), 0) / xs.length : 0;
+    const upRate = pct(g.filter((r) => r.actualDir === "UP").length, g.filter((r) => r.actualDir !== "FLAT").length);
+    console.log(`\n──── ${name} · ${lb} (${g[0].date} ~ ${g[g.length - 1].date}, ${g.length}일) ────`);
+    console.log(`  기저: 갭 UP ${upRate}% · 평균 |갭| ${absGap(g).toFixed(2)}% · FLAT(±0.3%) ${pct(g.filter(r => r.actualDir === "FLAT").length, g.length)}%`);
+    console.log(`  판정: 진입 ${acted.length}일(${pct(acted.length, g.length)}%) · 보류 ${abst.length}일(${pct(abst.length, g.length)}%) · 무판정(점수미달) ${g.length - acted.length - abst.length}일`);
+    if (gradable.length) console.log(`  적중: ${hit}/${gradable.length} = ${pct(hit, gradable.length)}% (FLAT 제외) · 기저 ${Math.max(upRate, 100 - upRate)}% ${pct(hit, gradable.length) > Math.max(upRate, 100 - upRate) ? "→ 우위" : "→ 우위 없음"}`);
+    console.log(`  Brier ${brier.toFixed(4)} (0.25=무정보) · expectancy 합 ${s2(exp)}%p · 1일당 ${s2(exp / g.length)}%p`);
+    const hi = acted.filter((r) => r.v.confidence === "High");
+    if (hi.length) {
+      const hg = hi.filter((r) => r.actualDir !== "FLAT");
+      console.log(`  High 등급 ${hi.length}일 · 적중 ${hg.length ? pct(hg.filter(r => r.v.direction === r.actualDir).length, hg.length) : 0}% (합격선 58%)`);
+    } else console.log(`  High 등급 0일`);
+    console.log(`  보류일 평균 |갭| ${absGap(abst).toFixed(2)}% vs 진입일 ${absGap(acted).toFixed(2)}% ${absGap(abst) > absGap(acted) ? "→ 보류가 큰 갭을 피함(규율 유효)" : "→ 보류일이 오히려 잔잔함(규율 손해)"}`);
+  }
+}
+main();
