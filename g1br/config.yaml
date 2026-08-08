@@ -1,0 +1,53 @@
+# G1B-R 설정 — WORKORDER_G1BR_week1 T0 / 스펙 SPEC_G1B_R_beta_estimation.md §2.1
+# 기간·티커는 스펙이 정본. 여기서는 조달 파라미터만 관리한다.
+
+period:
+  start: "2023-01-01"
+  end: null            # null = 오늘
+
+timezone:
+  krx: "Asia/Seoul"
+  us: "America/New_York"
+
+calendars:
+  krx: "XKRX"
+  us: "XNYS"
+
+cache_dir: "data/raw"
+
+# 스펙 §2.1 시세 소스 (A등급 후보 전체)
+tickers:
+  pykrx:                       # 수정주가 기준
+    - { code: "005930", name: "삼성전자", role: "label" }
+    - { code: "000660", name: "SK하이닉스", role: "label" }
+    - { code: "1028",  name: "KOSPI200", role: "beta_mkt·지수 라벨", kind: "index" }
+  yfinance:
+    - { ticker: "^GSPC",   role: "지수 회귀 b1 (SPX)" }
+    - { ticker: "SOXX",    role: "고유 c1 (SPX 직교 후)" }
+    - { ticker: "TSM",     role: "고유 c3 (SOXX 직교 후)" }
+    - { ticker: "MU",      role: "고유 c2" }
+    - { ticker: "NVDA",    role: "고유 c2" }
+    - { ticker: "EWY",     role: "보조 검증" }
+    - { ticker: "KRW=X",   role: "b4 (직교화 후) — NDF 프록시" }
+    - { ticker: "SMSN.IL", role: "고유 관측 v1 (삼전 GDR)" }
+    - { ticker: "^N225",   role: "γ 추정" }
+    - { ticker: "^AXJO",   role: "γ 추정 (ASX)" }
+  fred:
+    - { series: "DGS2",  role: "b2" }
+    - { series: "DGS10", role: "b3" }
+
+# §2.2 일중 (세션 질 b5~b7) — T1에서 가용성 실측 후 판정
+intraday_probe:
+  tickers: ["^GSPC", "SOXX"]
+  breadth_proxy: ["RSP", "SPY"]   # 등락종목수 조달 곤란 시 프록시 (스펙 §2.2)
+
+# §2.4 B등급 — 조사만 (조사 상한 소스당 1시간, 크롤링·비공식 API 금지)
+grade_b:
+  - "KRX 야간선물 히스토리"
+  - "TAIFEX 야간선물"
+  - "니케이 선물 조기 세션"
+
+# §2.4 C등급 — 시도하지 않음 (오프라인 제외 확정)
+grade_c:
+  - "미 시간외 개별주 히스토리 (β_ah)"
+  - "08:40 동시호가 예상체결가 히스토리"
