@@ -70,6 +70,20 @@ async function run(sym: string, name: string, spec: string) {
   const V4 = (i: number) => (L("minervini", i) ? 1 : L("weinstein", i) ? 0.5 : 0);
   const BH = () => 1;
 
+  // 단기 구간 표 (사용자 질문 2026-08-08 "최근 1개월은 성능이 어때")
+  {
+    const N = c.length - 1;
+    console.log(`\n──── ${name} 최근 구간 (손절 없음·비중만 다름) ────`);
+    console.log(`  ${"배분".padEnd(26)}${["7거래일", "20거래일", "1개월(21)", "2개월(42)", "3개월(63)"].map(s => s.padStart(15)).join("")}`);
+    for (const [label, f] of [["P1 이진 (미너 100/0)", P1], ["P4 5단계 (완충 25%)", P4], ["v4 현행 (완충 50%)", V4], ["(참고) 항상 100%", BH]] as [string, (i: number) => number][]) {
+      const cells = [7, 20, 21, 42, 63].map((n) => {
+        const r = sim(bars, Math.max(WARMUP, N - n), N, f, atr, 0);
+        return `${r.cum >= 0 ? "+" : ""}${r.cum.toFixed(1)}%/노출${r.expo.toFixed(0)}`.padStart(15);
+      });
+      console.log(`  ${label.padEnd(26)}${cells.join("")}`);
+    }
+  }
+
   const from = WARMUP, to = c.length - 1;
   // v4 채택 시점(2026-07-22)까지로 잘라 대조 — 그 뒤 급락 2주가 결론을 뒤집었는지 확인
   let cutIdx = bars.findIndex(b => b.date > "2026-07-22"); if (cutIdx < 0) cutIdx = to; else cutIdx -= 1;
