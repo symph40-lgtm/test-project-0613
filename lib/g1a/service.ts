@@ -10,10 +10,10 @@ import { fetchDayMinutes, fetchNxtPremarket } from "@/lib/predict/kisMinute";
 import { G1A_CONFIG } from "./config";
 import {
   fetchCircuitBreaker, fetchDayCharacter, fetchEventTonight, fetchEuropeTone,
-  fetchFrnDecel, fetchMacroZ, fetchNxtState, fetchPremarketBasket, fetchTsmcResidual, fetchUsFutDelta,
+  fetchFrnDecel, fetchMacroZ, fetchNxtState, fetchPremarketBasket, fetchT1Globals, fetchTsmcResidual, fetchUsFutDelta,
 } from "./data";
 import { buildReversalReport, buildT2Report } from "./report";
-import { abstainReason, evaluateT2, isExpiryDay, reversalCheck, type AbstainCtx } from "./score";
+import { evaluateT2, gapScoreT1, isExpiryDay, reversalCheck, type AbstainCtx } from "./score";
 import { g1aTablesReady, loadDay, loadUnlabeled, upsertDay } from "./store";
 import type { G1ARow, G1ASymbol, T2Features, T2State } from "./types";
 
@@ -59,18 +59,29 @@ async function buildAbstainCtx(f: T2Features): Promise<AbstainCtx> {
 // ── T1 스냅샷 (§7 — 판정·리포트·자본 없음) ──
 async function runT1(date: string): Promise<string[]> {
   const notes: string[] = [];
+  const globals = await Promise.all([fetchT1Globals(), fetchMacroZ()]);
+  const [t1g, macro] = globals;
   for (const symbol of SYMBOLS) {
     const row = (await loadDay(date, symbol)) ?? { date, symbol, t1_snapshot: null, t2: null, labels: null, outcome: null };
     if (row.t1_snapshot) continue;
     const dayChar = await fetchDayCharacter(symbol);
     const frn = await fetchFrnDecel(symbol);
+    // 가상 GapScore — v0.2 §5.1.2 T1 가중표 (기록 전용, 판정·자본 없음)
+    const virtual = gapScoreT1({
+      tsmcRaw: t1g.tsmcRaw, nqAsia: t1g.nqAsia,
+      clv: dayChar.clv, dc1: dayChar.dc1, o1: dayChar.o1,
+      frnDecel: frn, rateZ: macro.rateZ, fxZ: macro.fxZ,
+    });
     row.t1_snapshot = {
       taken_at: kst().hhmmss,
-      gap_score_virtual: null, // T2 가중 체계는 저녁 피처 전제 — 15:10 가상 점수는 당일 캐릭터만으로 무의미해 미산출 (기록만)
-      features: { F01_clv: dayChar.clv, F02_dc1: dayChar.dc1, F04_o1: dayChar.o1, F08_frn_decel: frn },
+      gap_score_virtual: virtual,
+      features: {
+        F01_clv: dayChar.clv, F02_dc1: dayChar.dc1, F04_o1: dayChar.o1, F08_frn_decel: frn,
+        F11_tsmc_raw: t1g.tsmcRaw, F10_nq_asia: t1g.nqAsia, F13_rate_z: macro.rateZ, F14_fx_z: macro.fxZ,
+      },
     };
     await upsertDay(row);
-    notes.push(`${symbol} T1 스냅샷`);
+    notes.push(`${symbol} T1 스냅샷 (가상 ${virtual})`);
   }
   return notes;
 }

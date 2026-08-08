@@ -1,6 +1,5 @@
 // G1A v0.3 설정 — specs/SPEC_G1A_gap_forecast.md §4~5. 초기값은 전부 log-only 60일 재조정 전제.
-// ⚠ v0.2 문서 미보유: BiasGate·그룹 캡·z-score 세부는 "v0.2 §5.1 승계"로만 명시돼 있어
-//   본 파일의 재구성 정의(주석 표기)를 발주자가 확인해야 한다 — WEEK 보고에 스펙 충돌로 기재.
+// BiasGate·그룹 캡·s_i 표준화는 v0.2 §5.1 원 정의 (2026-08-09 복원본 확보 — specs/SPEC_G1A_gap_forecast_v0.2.md).
 
 import type { G1ASymbol } from "./types";
 
@@ -24,23 +23,33 @@ export const G1A_CONFIG = {
     F13: 0.5, F14: 0.5,                                // L4 매크로 (합산 캡 아래)
     F24cap: 1.0,                                       // 저녁 뉴스 상한 ±1 (수동)
   },
-  l4Cap: 1.0,                                          // F13+F14 가산 상한 ±1.0 (스펙 명시)
 
-  // 피처 이산화 임계 (s_i ∈ {-1,0,+1} 판정 — 초기값, 60일 재조정)
-  thresh: {
-    basketPct: 0.5,      // §5.1-3 크기 유의성과 동일
-    usfutPct: 0.15,
-    europePct: 0.3,
-    tsmcResidPct: 0.5,
-    clvHigh: 0.7, clvLow: 0.3,
-    dc1: 0.2,
-    frnDecel: 0.5,
-    zAbs: 1.0,           // F13·F14 z 임계
+  // s_i 표준화 (v0.2 §5.1.1): 연속 피처는 20일 z-score → tanh, [−1,+1].
+  // 로그 20일 축적 전에는 아래 σ 상수를 분모로 쓴다(사전 신념) — 축적 후 롤링 z로 전환 예정.
+  scales: {
+    basketPct: 0.7,      // 프리마켓 바스켓 % 1σ 근사
+    usfutPct: 0.3,
+    europePct: 0.5,
+    tsmcResidPct: 0.8,
+    tsmcRawPct: 1.0,     // T1용 원수익률
+    nqAsiaPct: 0.4,      // T1용
+    clvHalfWidth: 0.35,  // s = (CLV−0.5)/0.35 → 0.85≈+1
+    dc1: 0.5,
+    frnDecel: 1.0,
   },
+  // 크기 유의성 임계 (§5.1-3 트리거 조건용 — 표준화와 별개)
+  thresh: { basketPct: 0.5 },
 
-  // BiasGate ×0.5/×1.0/×1.25 — v0.2 미보유로 재구성한 정의 (발주자 확인 필요):
-  // 당일 국장 캐릭터(L2 합) 방향과 글로벌 근접대리(L1 합) 방향이 일치 ×1.25 / 상충 ×0.5 / 그 외 ×1.0
-  biasGate: { agree: 1.25, neutral: 1.0, conflict: 0.5 },
+  // BiasGate (v0.2 §5.1.1 원 정의): 매크로 사슬 합성(F13+F14 감쇠 z 합, 갭 방향 기준)이
+  // 가산부 Σ와 일치 ×1.25 / |합성 z| < 0.5 중립 ×1.0 / 충돌 ×0.5.
+  // "매크로 필터가 인트라데이 시그널에 우선"의 점수화 — Gate 0.5면 High 등급 구조적 불가(의도).
+  biasGate: { agree: 1.25, neutral: 1.0, conflict: 0.5, neutralBand: 0.5 },
+
+  // 그룹 캡 (v0.2 §5.1.2 — 이중계상 차단)
+  caps: { l1T2: 3.5, l1T1: 2.5, l2: 2.0, l3: 1.5, l4: 1.0 },
+
+  // T1 스냅샷 가상 GapScore 가중 (v0.2 §5.1.2 T1 열 — 기록 전용, §7)
+  weightsT1: { F11_raw: 1.5, F10_nq: 1.0, F01: 1.0, F02: 0.75, F04: 0.5, F09: -0.25, F08: 0.75, F05: 0.5, F07: 0.5, F13: 0.5, F14: 0.5 },
 
   // §5.3 시간 가변 임계값 θ(t) — KST 시각 경계
   theta: [

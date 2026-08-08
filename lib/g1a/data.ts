@@ -203,6 +203,22 @@ export async function fetchNxtState(symbol: G1ASymbol, regClose: number | null):
   return { rNxt: Math.round(((last - regClose) / regClose) * 10000) / 100, lastPx: last };
 }
 
+// ── T1 스냅샷 전용 (v0.2 §5.1.2 T1 열): TSMC 원수익률(13:30 확정) + NQ 아시아 세션 ──
+export async function fetchT1Globals(): Promise<{ tsmcRaw: number | null; nqAsia: number | null }> {
+  const today = kstDate();
+  const [tw, nq] = await Promise.all([dailyCloses("2330.TW", 12), chart5m("NQ=F", 2)]);
+  let tsmcRaw: number | null = null;
+  if (tw.length >= 2 && tw[tw.length - 1].date === today) {
+    tsmcRaw = Math.round(((tw[tw.length - 1].close - tw[tw.length - 2].close) / tw[tw.length - 2].close) * 10000) / 100;
+  }
+  const anchor = new Date(today + "T00:00:00Z"); // 09:00 KST
+  const from = nq.filter((b) => b.ts >= anchor);
+  const nqAsia = from.length >= 2
+    ? Math.round(((from[from.length - 1].close - from[0].close) / from[0].close) * 10000) / 100
+    : null;
+  return { tsmcRaw, nqAsia };
+}
+
 // ── 서킷브레이커 프록시 (v0.1 반사실 검정 통과 규칙) ──
 export async function fetchCircuitBreaker(): Promise<boolean> {
   try {

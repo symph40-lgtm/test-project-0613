@@ -4,32 +4,60 @@ import { G1A_CONFIG } from "./config";
 import type { AbstainCheck, Direction, G1ASymbol, T2Features, T2Verdict } from "./types";
 
 const C = G1A_CONFIG;
-const sgn = (v: number | null, t: number): number => (v == null ? 0 : v >= t ? 1 : v <= -t ? -1 : 0);
+// s_i 표준화 (v0.2 §5.1.1): 연속 피처 → tanh(값/σ상수), [−1,+1]. σ상수는 로그 20일 후 롤링 z로 전환.
+const sq = (v: number | null, scale: number): number => (v == null ? 0 : Math.tanh(v / scale));
+const clip = (x: number, c: number) => Math.max(-c, Math.min(c, x));
 
-// ── GapScore (§4.2) ──
+// ── GapScore (v0.2 §5.1 이층 구조: BiasGate × Σ w_i·s_i, 그룹 캡) ──
 export function gapScore(f: T2Features): { score: number; gate: number; l1: number; l2: number; l3: number; l4: number } {
-  const W = C.weights, T = C.thresh;
-  // L1 근접대리
-  const l1 =
-    W.F21 * sgn(f.F21_basket, T.basketPct) +
-    W.F22 * sgn(f.F22_usfut, T.usfutPct) +
-    W.F20 * sgn(f.F20_europe, T.europePct) +
-    W.F11p * sgn(f.F11p_tsmc_resid, T.tsmcResidPct);
-  // L2 당일 캐릭터
-  const clv = f.F01_clv == null ? 0 : f.F01_clv >= T.clvHigh ? 1 : f.F01_clv <= T.clvLow ? -1 : 0;
+  const W = C.weights, S = C.scales;
+  // L1 근접대리 (T2 캡 ±3.5)
+  const l1 = clip(
+    W.F21 * sq(f.F21_basket, S.basketPct) +
+    W.F22 * sq(f.F22_usfut, S.usfutPct) +
+    W.F20 * sq(f.F20_europe, S.europePct) +
+    W.F11p * sq(f.F11p_tsmc_resid, S.tsmcResidPct),
+    C.caps.l1T2,
+  );
+  // L2 당일 캐릭터 (캡 ±2.0)
+  const clv = f.F01_clv == null ? 0 : clip((f.F01_clv - 0.5) / S.clvHalfWidth, 1);
   const o1 = f.F04_o1 == null ? 0 : f.F04_o1 === "OD_up" ? 1 : f.F04_o1 === "OD_down" ? -1 : 0;
-  const l2 = W.F01 * clv + W.F02 * sgn(f.F02_dc1, T.dc1) + W.F04 * o1 + W.F09 * (f.F09_c1 ?? 0);
-  // L3 수급
-  const l3 = W.F08 * sgn(f.F08_frn_decel, T.frnDecel) + W.F05 * (f.F05_w1 ?? 0) + W.F07 * (f.F07_b1_z ?? 0);
-  // L4 매크로 — 금리↑·원화약세 = 역풍 (음수 기여), 합산 캡 ±1.0 (스펙 명시)
-  let l4 = -W.F13 * sgn(f.F13_rate_z, T.zAbs) - W.F14 * sgn(f.F14_fx_z, T.zAbs);
-  l4 += Math.max(-C.weights.F24cap, Math.min(C.weights.F24cap, f.F24_news ?? 0));
-  l4 = Math.max(-C.l4Cap, Math.min(C.l4Cap, l4));
-  // BiasGate (재구성 정의 — config 주석): L2 방향 vs L1 방향
-  const gate = l1 !== 0 && l2 !== 0
-    ? (Math.sign(l1) === Math.sign(l2) ? C.biasGate.agree : C.biasGate.conflict)
-    : C.biasGate.neutral;
-  return { score: (l1 + l2 + l3 + l4) * gate, gate, l1, l2, l3, l4 };
+  const l2 = clip(W.F01 * clv + W.F02 * sq(f.F02_dc1, S.dc1) + W.F04 * o1 + W.F09 * (f.F09_c1 ?? 0), C.caps.l2);
+  // L3 수급 (캡 ±1.5)
+  const l3 = clip(W.F08 * sq(f.F08_frn_decel, S.frnDecel) + W.F05 * (f.F05_w1 ?? 0) + W.F07 * (f.F07_b1_z ?? 0), C.caps.l3);
+  // L4 매크로 가산 (캡 ±1.0) — 금리↑·원화약세 = 역풍. z는 이미 표준화돼 있어 tanh(z)만.
+  const l4Macro = clip(-W.F13 * sq(f.F13_rate_z, 1) - W.F14 * sq(f.F14_fx_z, 1), C.caps.l4);
+  const l4 = l4Macro + clip(f.F24_news ?? 0, C.weights.F24cap);
+  const sum = l1 + l2 + l3 + l4;
+  // BiasGate (v0.2 §5.1.1 원 정의): 매크로 사슬 합성 z(갭 방향 기준) vs 가산부 Σ
+  const zs = [f.F13_rate_z, f.F14_fx_z].filter((z): z is number => z != null);
+  const macroComposite = zs.length ? zs.reduce((a, z) => a - z, 0) / zs.length : 0; // 금리↑·원화약세=하방이므로 −z
+  const gate =
+    Math.abs(macroComposite) < C.biasGate.neutralBand || sum === 0 ? C.biasGate.neutral
+    : Math.sign(macroComposite) === Math.sign(sum) ? C.biasGate.agree
+    : C.biasGate.conflict;
+  return { score: sum * gate, gate, l1, l2, l3, l4 };
+}
+
+// ── T1 가상 GapScore (v0.2 §5.1.2 T1 열 — §7 스냅샷 기록 전용) ──
+export type T1Inputs = {
+  tsmcRaw: number | null; nqAsia: number | null;
+  clv: number | null; dc1: number | null; o1: T2Features["F04_o1"];
+  frnDecel: number | null; rateZ: number | null; fxZ: number | null;
+};
+export function gapScoreT1(t: T1Inputs): number {
+  const W = C.weightsT1, S = C.scales;
+  const l1 = clip(W.F11_raw * sq(t.tsmcRaw, S.tsmcRawPct) + W.F10_nq * sq(t.nqAsia, S.nqAsiaPct), C.caps.l1T1);
+  const clv = t.clv == null ? 0 : clip((t.clv - 0.5) / S.clvHalfWidth, 1);
+  const o1 = t.o1 == null ? 0 : t.o1 === "OD_up" ? 1 : t.o1 === "OD_down" ? -1 : 0;
+  const l2 = clip(W.F01 * clv + W.F02 * sq(t.dc1, S.dc1) + W.F04 * o1, C.caps.l2);
+  const l3 = clip(W.F08 * sq(t.frnDecel, S.frnDecel), C.caps.l3);
+  const l4 = clip(-W.F13 * sq(t.rateZ, 1) - W.F14 * sq(t.fxZ, 1), C.caps.l4);
+  const sum = l1 + l2 + l3 + l4;
+  const zs = [t.rateZ, t.fxZ].filter((z): z is number => z != null);
+  const comp = zs.length ? zs.reduce((a, z) => a - z, 0) / zs.length : 0;
+  const gate = Math.abs(comp) < C.biasGate.neutralBand || sum === 0 ? 1.0 : Math.sign(comp) === Math.sign(sum) ? 1.25 : 0.5;
+  return Math.round(sum * gate * 100) / 100;
 }
 
 // ── θ(t) (§5.3) ──
