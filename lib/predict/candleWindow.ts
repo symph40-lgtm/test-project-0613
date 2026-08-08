@@ -123,6 +123,7 @@ type CwState = {
   eodDone?: boolean;
   ladderDone?: boolean;
   ovnDone?: boolean;
+  ovnPreT?: string;
 };
 
 // ── 국장 1박(오버나이트) 페이퍼 채점 (사용자 확정 2026-08-08) ──────────────────────────
@@ -142,11 +143,22 @@ export const OVN_FULL_BY = 600; // 창1 확인 ≤10:00이면 100% 후보
 export function ovnWeight(t1Min: number, gapBig: boolean): number {
   return t1Min <= OVN_FULL_BY && !gapBig ? 1 : 0.5;
 }
-// 밤 구간 참고 스탑폭% — 최근 3일 평균 일중폭 × 0.75 (사용자 확정 문구용 안내값)
+// 밤 구간 재난선 폭(본주 %) — 최근 3일 평균 일중폭 × 0.75.
+// ⚠규칙이 아니라 통계 외 붕괴 차단용. 밤 스탑을 규칙으로 넣은 변형은 전부 열위로 기각됐고(갭이 스탑을
+// 무력화), 밤 경로 분봉이 없어 폭 자체는 검증 불가 — SOXX 재난선(낮 -2% → 밤 -5%)과 같은 성격이다.
+// 실측 위치 확인(scripts/kr-overnight-residual.ts): 평균 폭 하닉 본주 4.23%(ETF 8.5%)·삼전 3.22%(6.4%)로
+// 낮 스탑(2.5·1.5%)보다 넓고 '낮 스탑×2 재난선'(5.0·3.0%)과 같은 구간 — 변동성에 적응하는 쪽을 채택.
 export function ovnStopPct(hist: { high: number; low: number; close: number }[]): number {
   const last3 = hist.slice(-3);
   if (!last3.length) return 0;
   return (last3.reduce((a, b) => a + ((b.high - b.low) / b.close) * 100, 0) / last3.length) * 0.75;
+}
+// 1박 스탑 안내 문구 — 보유 ETF 기준 %와 본주 이탈가·이탈 방향을 모두 명시 (사용자 지시 2026-08-08
+// "인버스인 날은 본주 기준인지 인버스 기준인지 명확히"). 하닉·삼전 실매매 ETF는 모두 2배수.
+export function ovnStopLine(close: number, dir: 1 | -1, stopPct: number): string {
+  const stopPx = dir === 1 ? close * (1 - stopPct / 100) : close * (1 + stopPct / 100);
+  const side = dir === 1 ? "아래로" : "위로";
+  return `보유 ETF −${(stopPct * 2).toFixed(1)}% (= 본주 ${Math.round(stopPx).toLocaleString()}원 ${side} 이탈 시 자동매도, 종가 대비 ${stopPct.toFixed(2)}%)`;
 }
 type CwScore = { date: string; dir: Dir; entryT: string; entryPx: number; holdPnl: number; flipPnl: number; cut: boolean; flip: boolean; ladderPnl?: number; ladderCut?: boolean };
 
@@ -238,6 +250,20 @@ export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr
 
 const DIR_KO: Record<Dir, string> = { up: "상승(레버 방향)", down: "하락(인버 방향)" };
 const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+
+// 하닉 1박 자격에 쓰는 F 방향 (시행판 = 강돌파 0.1 + 0930 rebox).
+// 사다리 내부 미러(fisherFirstKr·rebox 없음)와 달리 스윕 정의와 자격일·성적이 완전 일치한다
+// (scripts/kr-overnight-fcfg-check.ts: 68일·+192.2%p 동일 / 미러판은 66일·+186.9).
+export function hxOvnFisherDir(bars: MinuteBar[], hist: { date: string; open: number; high: number; low: number; close: number; volume: number }[], today: string): 0 | 1 | -1 {
+  const C = PREDICT_CONFIG;
+  const tr = runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, {
+    offsetRangeRatio: C.earlyOffsetRatio, confirmMinutes: C.earlyConfirmMinutes,
+    strongBreakRatio: C.earlyStrongBreakRatio, reversalMinutes: C.streamReversalMinutes,
+    earlyVolMult: C.earlyVol.mult, earlyVolUntil: C.earlyVol.until,
+    confirmFromHHMM: C.confirmFromKr, ...C.newModel.rebox,
+  }).transitions ?? [];
+  return tr.length ? (tr[0].to === "up" ? 1 : -1) : 0;
+}
 
 // 전 거래일 1박분 정산 (오늘 정규장 시가로 청산) — 하닉·삼전 공용. 실패는 삼켜 본 흐름에 무영향.
 export async function settleOvn(
@@ -376,28 +402,38 @@ export async function runCandleWindowMonitor(): Promise<void> {
     // 자격 = 창1 첫판정 방향 == 피셔F(시행판 0930 rebox) 첫판정 방향 · 당일 컷 아님.
     // ⚠F 상수는 시행판(강돌파 0.1)과 스윕(0.075)이 자격일 68일·성적 +192.2%p로 완전 동일 — 실측 확인
     //   (scripts/kr-overnight-fcfg-check.ts). 사다리 내부 미러(rebox 없음)만 66일·+186.9로 갈려 미채택.
+    // ⑤-b 15:20 1박 사전 통지 (사용자 지시 2026-08-08 "1박 필요 없으면 정규장 종가에 팔 수 있게 일찍"):
+    // 자격 요소(창·F 첫판정 방향, 창 확인 시각, 갭)는 실측상 전 자격일이 15:20 이전에 확정된다
+    // (scripts/kr-overnight-residual.ts: 15:20 이후 확정 0일 · 15:00 이후 하닉 1·삼전 2일) —
+    // 그래서 종가 전에 '유지 / 종가 전량 매도'를 지시할 수 있다. 애프터장(NXT) 청산은 사양 밖
+    // (백테스트는 정규장 종가 기준·저유동). 15:31 결산이 최종 확정·기록.
+    if (!st.ovnPreT && st.entryT && minuteOfDay >= hhmmToMin("15:20") && minuteOfDay <= hhmmToMin("15:29") && krx.length > 0) {
+      st.ovnPreT = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
+      changed = true;
+      try {
+        const cwDir: 1 | -1 = trs.length ? (trs[0].to === "up" ? 1 : -1) : 1;
+        const ok = trs.length > 0 && hxOvnFisherDir(bars, hist, today) === cwDir && !st.cutT;
+        const px = krx[krx.length - 1].close;
+        const w = trs.length ? ovnWeight(hhmmToMin(bars[trs[0].i].time), gapBig) : 0;
+        await send("predict_cw_ovnpre", "medium", ok
+          ? `[예측·하이닉스] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 배정액의 ${w * 100}%를 ${cwDir === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, cwDir, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소). ${paperNote}`
+          : `[예측·하이닉스] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!trs.length ? "창 판정 없음" : st.cutT ? "오늘 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. ${paperNote}`);
+      } catch { /* 사전 통지 실패는 본 흐름 무관 */ }
+    }
+
     let ovnLine = ""; // 결산 문자에 병기할 1박 열
     if (!st.ovnDone && ladToday && trs.length && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
       st.ovnDone = true;
       changed = true;
       try {
-        const C2 = PREDICT_CONFIG;
-        const fCfgOvn = {
-          offsetRangeRatio: C2.earlyOffsetRatio, confirmMinutes: C2.earlyConfirmMinutes,
-          strongBreakRatio: C2.earlyStrongBreakRatio, reversalMinutes: C2.streamReversalMinutes,
-          earlyVolMult: C2.earlyVol.mult, earlyVolUntil: C2.earlyVol.until,
-          confirmFromHHMM: C2.confirmFromKr, ...C2.newModel.rebox,
-        };
-        const fT = runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, fCfgOvn).transitions ?? [];
         const cwDir: 1 | -1 = trs[0].to === "up" ? 1 : -1;
-        const fDir = fT.length ? (fT[0].to === "up" ? 1 : -1) : 0;
+        const fDir = hxOvnFisherDir(bars, hist, today);
         const close = krx[krx.length - 1].close;
         const qualify = fDir === cwDir && ladToday.pnl > -2.4;
         if (qualify) {
           const t1 = bars[trs[0].i].time;
           const w = ovnWeight(hhmmToMin(t1), gapBig);
           const stopPct = ovnStopPct(hist);
-          const stopPx = cwDir === 1 ? close * (1 - stopPct / 100) : close * (1 + stopPct / 100);
           const { data: oRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ovn").maybeSingle();
           const arr = (Array.isArray(oRow?.value) ? (oRow!.value as OvnRow[]) : []).filter((r) => r.date !== today);
           arr.push({ date: today, dir: cwDir, px: close, w, t1, gap: gapBig });
@@ -405,7 +441,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const done = arr.filter((r) => r.raw !== undefined);
           ovnLine = ` 1박: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
           await send("predict_cw_ovn", "medium",
-            `[예측·하이닉스] 오늘 밤 1박 유지 09:00 시가매도, 스탑설정\n▶① 종가 보유분을 배정액의 ${w * 100}%만 남기고 밤새 유지${w === 1 ? "" : " (절반 축소)"}\n▶② 스탑설정 ${Math.round(stopPx).toLocaleString()}원(종가 대비 ${stopPct.toFixed(2)}%) — 최근 3일 평균 일중폭×0.75\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[trs[0].to]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${hhmmToMin(t1) > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${hhmmToMin(t1) > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. ⚠밤사이 갭이 스탑 밖에서 시작하면 미체결 — 그 경우 09:00 시가 청산으로 처리. 근거 217일 +220.0%p(비중 반영 +192.2). ${paperNote}`);
+            `[예측·하이닉스] 오늘 밤 1박 유지, 다음날 09:00 시가매도\n▶① 종가 기준 배정액의 ${w * 100}%를 ${cwDir === 1 ? "레버리지" : "인버스"} ETF로 보유 (남은 게 적으면 종가에 채우고, 많으면 줄입니다)\n▶② 스탑설정: ${ovnStopLine(close, cwDir, stopPct)}\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[trs[0].to]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${hhmmToMin(t1) > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${hhmmToMin(t1) > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. 스탑은 규칙이 아니라 밤 재난선(최근 3일 평균 일중폭×0.75) — ⚠갭이 스탑 밖에서 시작하면 미체결이고 그 경우 09:00 시가 청산으로 처리합니다. 근거 217일 +220.0%p(비중 반영 +192.2). ${paperNote}`);
         }
       } catch { /* 1박 판정 실패는 본 흐름 무관 */ }
     }
