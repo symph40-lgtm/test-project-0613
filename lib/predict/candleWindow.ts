@@ -122,7 +122,32 @@ type CwState = {
   flipT?: string; flipPx?: number;
   eodDone?: boolean;
   ladderDone?: boolean;
+  ovnDone?: boolean;
 };
+
+// ── 국장 1박(오버나이트) 페이퍼 채점 (사용자 확정 2026-08-08) ──────────────────────────
+// 자격: 창1 첫판정 방향 == 피셔F 첫판정 방향 (확인 시각 무관 · 무판정일·이견일 제외) + 당일 컷 아님.
+//   근거 217일(scripts/kr-overnight-consent.ts): 하닉 68일 +220.0%p·삼전 125일 +182.9%p.
+//   '비이견(무판정 포함)' 정의 대비 하닉 +27.3%p — 무판정일은 국장에 1~3일뿐이라 실익 없음.
+// 비중: 창1 확인 ≤10:00 그리고 갭 4%+ 아닌 날 = 100%, 나머지 = 50% (사용자 확정 8/8).
+//   근거 scripts/kr-overnight-size-split.ts: 9개 후보축 중 두 종목에서 방향이 일관된 둘만 채택
+//   (창1 늦은 날 일당 +2.05→+0.73 / 갭일 하닉 +1.34·삼전 -1.21). 일괄 50% 대비 하닉 +23.5·삼전 +48.5%p,
+//   최악일은 하닉 -7.96→-4.74. '갭일 전면 쉼'은 종목별로 부호가 갈려(하닉 +32.2·삼전 -33.8) 기각.
+// 채점은 원값(100% 환산)과 비중 반영값을 함께 기록 — 비중을 바꿔도 과거 채점이 흔들리지 않는다.
+export type OvnRow = {
+  date: string; dir: 1 | -1; px: number; w: number; t1: string; gap: boolean;
+  raw?: number; wtd?: number; openPx?: number; sDate?: string;
+};
+export const OVN_FULL_BY = 600; // 창1 확인 ≤10:00이면 100% 후보
+export function ovnWeight(t1Min: number, gapBig: boolean): number {
+  return t1Min <= OVN_FULL_BY && !gapBig ? 1 : 0.5;
+}
+// 밤 구간 참고 스탑폭% — 최근 3일 평균 일중폭 × 0.75 (사용자 확정 문구용 안내값)
+export function ovnStopPct(hist: { high: number; low: number; close: number }[]): number {
+  const last3 = hist.slice(-3);
+  if (!last3.length) return 0;
+  return (last3.reduce((a, b) => a + ((b.high - b.low) / b.close) * 100, 0) / last3.length) * 0.75;
+}
 type CwScore = { date: string; dir: Dir; entryT: string; entryPx: number; holdPnl: number; flipPnl: number; cut: boolean; flip: boolean; ladderPnl?: number; ladderCut?: boolean };
 
 // ── 가상 4단 사다리 채점 (사용자 확정 2026-08-01 — 결산 문자 병기, 60일 실전 채점 후 승격 판단) ──
@@ -214,6 +239,30 @@ export function simLadder(bars: MinuteBar[], r10: number, close: number, trs: Tr
 const DIR_KO: Record<Dir, string> = { up: "상승(레버 방향)", down: "하락(인버 방향)" };
 const pct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 
+// 전 거래일 1박분 정산 (오늘 정규장 시가로 청산) — 하닉·삼전 공용. 실패는 삼켜 본 흐름에 무영향.
+export async function settleOvn(
+  admin: ReturnType<typeof createAdminClient>,
+  key: string, label: string, today: string, openPx: number,
+  send: (k: string, sev: "low" | "medium" | "high", text: string) => Promise<void>,
+): Promise<void> {
+  try {
+    const { data } = await admin.from("ops_settings").select("value").eq("key", key).maybeSingle();
+    const arr = (Array.isArray(data?.value) ? (data!.value as OvnRow[]) : []);
+    const pend = arr.find((r) => r.raw === undefined && r.date < today);
+    if (!pend || !(openPx > 0)) return;
+    pend.raw = Math.round(((openPx - pend.px) / pend.px) * 100 * pend.dir * 100) / 100;
+    pend.wtd = Math.round(pend.raw * pend.w * 100) / 100;
+    pend.openPx = openPx;
+    pend.sDate = today;
+    const kept = arr.slice(-120);
+    await admin.from("ops_settings").upsert({ key, value: kept, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    const done = kept.filter((r) => r.raw !== undefined);
+    const sum = (f: (r: OvnRow) => number) => done.reduce((a, r) => a + f(r), 0);
+    await send(`${key}_settle_${pend.date.replace(/-/g, "")}`, "medium",
+      `[예측·${label} 1박 청산] 시가 청산 ${pct(pend.wtd)} (비중 ${pend.w * 100}% 반영 · 원값 ${pct(pend.raw)})\n▶09:00 시가에 전량 매도 — 어젯밤 1박분 종료\n▶오늘 신규 판정은 별도 문자로\n무응답=시가 매도\n----\n${pend.date} 종가 ${pend.px.toLocaleString()}원 → 오늘 시가 ${openPx.toLocaleString()}원. 1박 누적 ${done.length}일: 비중반영 ${pct(sum((r) => r.wtd ?? 0))} · 원값(전부 100% 환산) ${pct(sum((r) => r.raw ?? 0))}.`);
+  } catch { /* 1박 정산 실패는 본 흐름 무관 */ }
+}
+
 // runPredictService 말미에서 매분 호출 — 실패는 삼켜 기존 스트림에 무영향
 export async function runCandleWindowMonitor(): Promise<void> {
   try {
@@ -266,6 +315,11 @@ export async function runCandleWindowMonitor(): Promise<void> {
     };
     const paperNote = "(페이퍼 60일 채점 중 — 실투자 판정은 기존 피셔 문자)";
 
+    // ⓪ 전 거래일 1박분 정산 (오늘 정규장 시가로 청산 — 사용자 확정 8/8)
+    if (minuteOfDay >= hhmmToMin("09:01") && krx.length > 0) {
+      await settleOvn(admin, "predict_cw_ovn", "하이닉스", today, krx[0].open, send);
+    }
+
     // 갭 경보 문자 (사용자 지시 8/1 "갭에 따른 이익·컷과 비중 지침을 같이 안내") — 개장 직후 1일 1회
     if (gapBig && minuteOfDay >= hhmmToMin("09:01") && minuteOfDay <= hhmmToMin("09:20")) {
       const g = gapPct.toFixed(1);
@@ -316,6 +370,44 @@ export async function runCandleWindowMonitor(): Promise<void> {
         st.ladderDone = true;
         changed = true;
       } catch { /* 사다리 채점 실패는 본 흐름 무관 */ }
+    }
+
+    // ⑥ 국장 1박 자격·비중 판정 (사용자 확정 2026-08-08) — 사다리 채점과 같은 실행에서 1일 1회.
+    // 자격 = 창1 첫판정 방향 == 피셔F(시행판 0930 rebox) 첫판정 방향 · 당일 컷 아님.
+    // ⚠F 상수는 시행판(강돌파 0.1)과 스윕(0.075)이 자격일 68일·성적 +192.2%p로 완전 동일 — 실측 확인
+    //   (scripts/kr-overnight-fcfg-check.ts). 사다리 내부 미러(rebox 없음)만 66일·+186.9로 갈려 미채택.
+    let ovnLine = ""; // 결산 문자에 병기할 1박 열
+    if (!st.ovnDone && ladToday && trs.length && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
+      st.ovnDone = true;
+      changed = true;
+      try {
+        const C2 = PREDICT_CONFIG;
+        const fCfgOvn = {
+          offsetRangeRatio: C2.earlyOffsetRatio, confirmMinutes: C2.earlyConfirmMinutes,
+          strongBreakRatio: C2.earlyStrongBreakRatio, reversalMinutes: C2.streamReversalMinutes,
+          earlyVolMult: C2.earlyVol.mult, earlyVolUntil: C2.earlyVol.until,
+          confirmFromHHMM: C2.confirmFromKr, ...C2.newModel.rebox,
+        };
+        const fT = runFisher({ date: today, dailyHistory: hist, openPx: bars[0].open, morning: bars, prevDayMinutes: null }, fCfgOvn).transitions ?? [];
+        const cwDir: 1 | -1 = trs[0].to === "up" ? 1 : -1;
+        const fDir = fT.length ? (fT[0].to === "up" ? 1 : -1) : 0;
+        const close = krx[krx.length - 1].close;
+        const qualify = fDir === cwDir && ladToday.pnl > -2.4;
+        if (qualify) {
+          const t1 = bars[trs[0].i].time;
+          const w = ovnWeight(hhmmToMin(t1), gapBig);
+          const stopPct = ovnStopPct(hist);
+          const stopPx = cwDir === 1 ? close * (1 - stopPct / 100) : close * (1 + stopPct / 100);
+          const { data: oRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ovn").maybeSingle();
+          const arr = (Array.isArray(oRow?.value) ? (oRow!.value as OvnRow[]) : []).filter((r) => r.date !== today);
+          arr.push({ date: today, dir: cwDir, px: close, w, t1, gap: gapBig });
+          await admin.from("ops_settings").upsert({ key: "predict_cw_ovn", value: arr.slice(-120), updated_at: new Date().toISOString() }, { onConflict: "key" });
+          const done = arr.filter((r) => r.raw !== undefined);
+          ovnLine = ` 1박: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
+          await send("predict_cw_ovn", "medium",
+            `[예측·하이닉스] 오늘 밤 1박 유지 09:00 시가매도, 스탑설정\n▶① 종가 보유분을 배정액의 ${w * 100}%만 남기고 밤새 유지${w === 1 ? "" : " (절반 축소)"}\n▶② 스탑설정 ${Math.round(stopPx).toLocaleString()}원(종가 대비 ${stopPct.toFixed(2)}%) — 최근 3일 평균 일중폭×0.75\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[trs[0].to]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${hhmmToMin(t1) > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${hhmmToMin(t1) > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. ⚠밤사이 갭이 스탑 밖에서 시작하면 미체결 — 그 경우 09:00 시가 청산으로 처리. 근거 217일 +220.0%p(비중 반영 +192.2). ${paperNote}`);
+        }
+      } catch { /* 1박 판정 실패는 본 흐름 무관 */ }
     }
 
     // 신모델 vs 현행 비교 성능 문자 (사용자 지시 2026-08-01 밤 — 8/3~5 실전 테스트 기간, 장마감 1회):
@@ -438,7 +530,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(눈금1.2·X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)}(눈금1.0 대조 ${pct(ladToday.p10 ?? ladToday.pnl)}) · 누적 ${ladN}일 ${pct(ladSum)}.` : ""} ${paperNote}`);
+            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(눈금1.2·X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)}(눈금1.0 대조 ${pct(ladToday.p10 ?? ladToday.pnl)}) · 누적 ${ladN}일 ${pct(ladSum)}.` : ""}${ovnLine} ${paperNote}`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }

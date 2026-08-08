@@ -14,7 +14,7 @@ import { fetchDailyPredict } from "./data";
 import { avgRange } from "./indicators";
 import { fetchDayMinutes, fetchNxtPremarket, fetchTodayMinutes } from "./kisMinute";
 import { runFisher, type FisherCfg } from "./models/fisher";
-import { unitArr } from "./candleWindow";
+import { unitArr, settleOvn, ovnWeight, ovnStopPct, OVN_FULL_BY, type OvnRow } from "./candleWindow";
 import type { MinuteBar } from "./types";
 
 const CODE = "005930";
@@ -95,6 +95,7 @@ type St = {
   entryT?: string; entryDir?: "up" | "down"; entryPx?: number;
   stop1T?: string; confT?: string; revT?: string; revPx?: number; stop2T?: string;
   eodDone?: boolean;
+  ovnDone?: boolean;
 };
 type Score = { date: string; p: number; p5: number; p4: number; p12: number; cut: boolean; note?: string };
 const DIR_KO = { up: "상승(레버 방향)", down: "하락(인버 방향)" } as const;
@@ -146,6 +147,14 @@ export async function runSsV2Monitor(): Promise<void> {
     const send = async (key: string, severity: "low" | "medium" | "high", text: string): Promise<void> => {
       try { await dispatchToChannels("signal", today, { key, severity, text, smsSubject: "삼전 신모델" }); } catch { /* 발송 실패 무시 */ }
     };
+    // 대형 갭일 (1박 비중 축소 축 — 삼전 갭 4%+ 28일 1박 일당 -1.21%, scripts/kr-overnight-size-split.ts)
+    const prevClose = hist[hist.length - 1]?.close ?? 0;
+    const gapBig = krx.length > 0 && prevClose > 0 && Math.abs(((krx[0].open - prevClose) / prevClose) * 100) >= 4;
+
+    // ⓪ 전 거래일 1박분 정산 (오늘 정규장 시가로 청산 — 사용자 확정 8/8)
+    if (minuteOfDay >= hhmmToMin("09:01") && krx.length > 0) {
+      await settleOvn(admin, "predict_ssv2_ovn", "삼성전자", today, krx[0].open, send);
+    }
 
     // 시범 시작 안내 (applyFrom 첫날 1회)
     if (live && today === NM.applyFrom && minuteOfDay <= hhmmToMin("09:30")) {
@@ -226,6 +235,28 @@ export async function runSsV2Monitor(): Promise<void> {
       const r12v = simV2(bars, r10, close, NM.ssV2.tanAlt, fJ, NM.ssV2.win);
       st.eodDone = true;
       changed = true;
+
+      // ⑥ 국장 1박 자격·비중 (사용자 확정 2026-08-08 — 정의·근거는 candleWindow.ts OvnRow 주석 참조).
+      // 자격 = 창 첫판정 방향 == 피셔F 첫판정 방향(F 선행일 제외 — 그날은 진입 자체가 없다) · 당일 컷 아님.
+      let ovnLine = "";
+      if (!st.ovnDone && cw && !fFirstDay && fJ && fJ.dir === cw.dir && rMain.pnl > -2.4) {
+        st.ovnDone = true;
+        try {
+          const t1 = bars[cw.i].time;
+          const w = ovnWeight(cw.t, gapBig);
+          const stopPct = ovnStopPct(hist);
+          const stopPx = cw.dir === 1 ? close * (1 - stopPct / 100) : close * (1 + stopPct / 100);
+          const { data: oRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ssv2_ovn").maybeSingle();
+          const arr = (Array.isArray(oRow?.value) ? (oRow!.value as OvnRow[]) : []).filter((r) => r.date !== today);
+          arr.push({ date: today, dir: cw.dir, px: close, w, t1, gap: gapBig });
+          await admin.from("ops_settings").upsert({ key: "predict_ssv2_ovn", value: arr.slice(-120), updated_at: new Date().toISOString() }, { onConflict: "key" });
+          const done = arr.filter((r) => r.raw !== undefined);
+          ovnLine = ` 1박: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
+          await send("predict_ssv2_ovn", "medium",
+            `[예측·삼성전자] 오늘 밤 1박 유지 09:00 시가매도, 스탑설정\n▶① 종가 보유분을 배정액의 ${w * 100}%만 남기고 밤새 유지${w === 1 ? "" : " (절반 축소)"}\n▶② 스탑설정 ${Math.round(stopPx).toLocaleString()}원(종가 대비 ${stopPct.toFixed(2)}%) — 최근 3일 평균 일중폭×0.75\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[cw.dir === 1 ? "up" : "down"]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${cw.t > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${cw.t > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. ⚠밤사이 갭이 스탑 밖에서 시작하면 미체결 — 그 경우 09:00 시가 청산으로 처리. 근거 217일 +182.9%p(비중 반영 +198.5).`);
+        } catch { /* 1박 판정 실패는 본 흐름 무관 */ }
+      }
+
       try {
         const { data: scRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ssv2_scores").maybeSingle();
         const arr = (Array.isArray(scRow?.value) ? (scRow!.value as Score[]) : []).filter((s) => s.date !== today);
@@ -235,7 +266,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.${ovnLine}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

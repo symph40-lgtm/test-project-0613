@@ -100,11 +100,15 @@ export async function dispatchToChannels(
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
   if (PREDICT_CONFIG.smsNewModelOnly) {
+    // 기존 계층 30% 실전 승격 (사용자 확정 2026-08-07 — config.legacyTier): 신모델 70%와 고정 배합으로
+    // 병행하므로 대체 채널을 차단하지 않고 '실전(기존계층 30%)' 제목으로 발송한다. live: false면 종전대로.
+    const LT = PREDICT_CONFIG.legacyTier;
     if (NM_REPLACED.test(alert.key)) {
-      if (!PREDICT_CONFIG.smsLegacyRef) return 0; // 신모델 대체 채널 차단 (2026-08-06 정정 범위)
-      alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
+      if (LT.live) alert = { ...alert, smsSubject: `실전(기존계층 ${LT.pct}%)·${nmInstrument(alert.key)}` };
+      else if (!PREDICT_CONFIG.smsLegacyRef) return 0; // 신모델 대체 채널 차단 (2026-08-06 정정 범위)
+      else alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     } else if (NM_REF_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
-    else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델)·${nmInstrument(alert.key)}` };
+    else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델${LT.live ? ` ${100 - LT.pct}%` : ""})·${nmInstrument(alert.key)}` };
   }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();

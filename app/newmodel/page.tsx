@@ -20,6 +20,8 @@ type UsState = {
   ovn?: { date: string; dir: 1 | -1; px: number } | null;
 };
 type UsScore = { date: string; p: number; pRe: number; pV0: number; pNP?: number; cut: boolean; kind: string; ovn: boolean; pend?: boolean };
+// 국장 1박 채점 (predict_cw_ovn·predict_ssv2_ovn) — raw = 100% 환산 원값, wtd = 비중 반영값
+type KrOvn = { date: string; dir: 1 | -1; px: number; w: number; t1: string; gap: boolean; raw?: number; wtd?: number; openPx?: number };
 
 const DIR_KO = { up: "상승(레버)", down: "하락(인버)" } as const;
 const won = (v?: number) => (v != null ? v.toLocaleString() : "—");
@@ -65,7 +67,7 @@ export default async function NewModelPage() {
   const { data: rows } = await admin
     .from("ops_settings")
     .select("key, value, updated_at")
-    .in("key", ["predict_cw_state", "predict_cw_scores", "predict_cw_ladder", "predict_ssv2_state", "predict_ssv2_scores", "uspredict_v2_state", "uspredict_v2_scores"]);
+    .in("key", ["predict_cw_state", "predict_cw_scores", "predict_cw_ladder", "predict_cw_ovn", "predict_ssv2_state", "predict_ssv2_scores", "predict_ssv2_ovn", "uspredict_v2_state", "uspredict_v2_scores"]);
   const byKey = new Map((rows ?? []).map((r) => [r.key as string, r]));
   const val = <T,>(k: string): T | null => (byKey.get(k)?.value as T | undefined) ?? null;
 
@@ -74,6 +76,9 @@ export default async function NewModelPage() {
   const ladder = (val<LadderScore[]>("predict_cw_ladder") ?? []);
   const ssSt = val<SsState>("predict_ssv2_state");
   const ssSc = (val<SsScore[]>("predict_ssv2_scores") ?? []);
+  // 국장 1박 (사용자 확정 8/8) — 자격일 종가 보유 → 다음 거래일 09:00 시가 청산
+  const hxOvn = (val<KrOvn[]>("predict_cw_ovn") ?? []);
+  const ssOvn = (val<KrOvn[]>("predict_ssv2_ovn") ?? []);
   const usSt = val<UsState>("uspredict_v2_state");
   const usSc = (val<UsScore[]>("uspredict_v2_scores") ?? []);
   const usUpdated = byKey.get("uspredict_v2_state")?.updated_at as string | undefined;
@@ -98,14 +103,28 @@ export default async function NewModelPage() {
     soxxAction = `보유 ${usNm(usSt.entryDir)} 유지 — 자동감시 SOXX ${stop} · ${tail}`;
   }
 
-  const krAction = (st: { date?: string; entryT?: string; entryDir?: "up" | "down" } | null, cutT?: string, name?: string): string => {
+  const krAction = (st: { date?: string; entryT?: string; entryDir?: "up" | "down" } | null, cutT?: string, ovn: KrOvn[] = []): string => {
+    // 전 거래일 1박분이 아직 안 팔린 상태 (오늘 09:00 시가 청산 대상)
+    const carry = ovn.find((r) => r.raw === undefined && r.date < kstToday);
+    if (carry && kstMin < 9 * 60 + 10) return `어젯밤 1박 보유 중 (비중 ${carry.w * 100}%·기준가 ${won(carry.px)}원) — 09:00 시가에 전량 매도`;
     if (!st || st.date !== kstToday || !st.entryT) return "오늘 판정 없음 — 행동 없음";
     if (cutT) return `스탑 종료(${cutT}) — 행동 없음, 내일 문자 대기`;
-    if (kstMin >= 15 * 60 + 30) return "장 마감(종가 청산) — 행동 없음, 내일 문자 대기";
-    return `${st.entryDir === "up" ? "레버" : "인버"} 보유 유지 — 15:30 종가 전량 매도 (전환·스탑 문자 오면 그 지침 우선)`;
+    const tonight = ovn.find((r) => r.date === kstToday && r.raw === undefined);
+    if (kstMin >= 15 * 60 + 30) {
+      return tonight
+        ? `1박 보유 중 (비중 ${tonight.w * 100}%) — 내일 09:00 시가 전량 매도 · 밤 구간은 스탑 설정만(갭이면 미체결 — 시가 청산)`
+        : "장 마감(종가 청산) — 행동 없음, 내일 문자 대기";
+    }
+    return `${st.entryDir === "up" ? "레버" : "인버"} 보유 유지 — 15:30 종가 전량 매도, 1박 자격이면 결산 문자로 유지 지시 (전환·스탑 문자 오면 그 지침 우선)`;
   };
-  const hxAction = krAction(cwSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (cwSt as { cutT?: string })?.cutT);
-  const ssAction = krAction(ssSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (ssSt as { stop1T?: string })?.stop1T);
+  const hxAction = krAction(cwSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (cwSt as { cutT?: string })?.cutT, hxOvn);
+  const ssAction = krAction(ssSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (ssSt as { stop1T?: string })?.stop1T, ssOvn);
+  // 카드에 병기할 1박 누적 (원값 = 전부 100% 환산 · 비중반영 = 확정 배분)
+  const ovnLine = (arr: KrOvn[]): string => {
+    const done = arr.filter((r) => r.raw !== undefined);
+    if (!done.length) return "아직 없음 (자격일 종가부터 기록)";
+    return `${pp(sum(done, (r) => r.wtd ?? 0))} (${done.length}일 · 원값 ${pp(sum(done, (r) => r.raw ?? 0))} · 100%일 ${done.filter((r) => r.w === 1).length})`;
+  };
 
   // 오늘(KST) 발송 문자 타임라인
   const { data: todayAlerts } = await admin
@@ -222,6 +241,7 @@ export default async function NewModelPage() {
         <div className="mt-3">
           <Row label={`창판정 누적 ${cwSc.length}일 (종가보유 기준)`} value={<b>{pp(sum(cwSc, (s) => s.holdPnl))}</b>} />
           <Row label="가상 사다리 채점 누적" value={`${pp(sum(ladder, (s) => s.pnl))} (${ladder.length}일)`} />
+          <Row label="1박 누적 (비중반영)" value={ovnLine(hxOvn)} />
           {cwSc.slice(-5).reverse().map((s) => (
             <Row key={s.date} label={`${s.date} ${DIR_KO[s.dir]}`} value={`${pp(s.holdPnl)}${s.cut ? " 컷" : ""}`} />
           ))}
@@ -229,6 +249,7 @@ export default async function NewModelPage() {
         <p className="mt-2 text-[11px] leading-relaxed text-ink-48">
           규칙: F 30%(방어일 15%) → 진행성 충족 70% → 전진 0.3/창동의 100% · 이견 청산+재진입 · 스탑 -2.5%(ETF -5%) ·
           당일 종가 청산 · 서킷 K3M2. 227일 +120.7%p. 사다리 증액 지침 문자는 8/6 시범부터.
+          1박(8/8~ 페이퍼): 창·F 동의일은 종가 보유 → 익일 09:00 시가 청산, 비중은 창 확인 ≤10:00·비갭이면 100%·나머지 50% (217일 +192.2%p).
         </p>
       </Card>
 
@@ -246,6 +267,7 @@ export default async function NewModelPage() {
         <div className="mt-3">
           <Row label={`누적 ${ssSc.length}일 (6봉 주기준)`} value={<b>{pp(sum(ssSc, (s) => s.p))}</b>} />
           <Row label="5봉 / 4봉 / 1.2판 (대조)" value={`${pp(sum(ssSc, (s) => s.p5))} / ${pp(sum(ssSc, (s) => s.p4))} / ${pp(sum(ssSc, (s) => s.p12))}`} />
+          <Row label="1박 누적 (비중반영)" value={ovnLine(ssOvn)} />
           {ssSc.slice(-5).reverse().map((s) => (
             <Row key={s.date} label={`${s.date}${s.note ? ` (${s.note})` : ""}`} value={`${pp(s.p)}${s.cut ? " 컷" : ""}`} />
           ))}
@@ -253,6 +275,7 @@ export default async function NewModelPage() {
         <p className="mt-2 text-[11px] leading-relaxed text-ink-48">
           규칙: 창(6봉 누적 순전진 1.0) 100% 진입 → 피셔F 반대 확인 시 전량 전환 → 종가 청산 · 스탑 ETF -3% ·
           F 선행일 관망 · 창 전환 무시. 232일 +112.8%p(F 0930 rebox판). 진입/전환 지침 문자는 8/6 시범부터.
+          1박(8/8~ 페이퍼): 창·F 동의일은 종가 보유 → 익일 09:00 시가 청산, 비중은 창 확인 ≤10:00·비갭이면 100%·나머지 50% (217일 +198.5%p).
         </p>
       </Card>
 
