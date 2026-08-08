@@ -402,12 +402,13 @@ export async function runCandleWindowMonitor(): Promise<void> {
     // 자격 = 창1 첫판정 방향 == 피셔F(시행판 0930 rebox) 첫판정 방향 · 당일 컷 아님.
     // ⚠F 상수는 시행판(강돌파 0.1)과 스윕(0.075)이 자격일 68일·성적 +192.2%p로 완전 동일 — 실측 확인
     //   (scripts/kr-overnight-fcfg-check.ts). 사다리 내부 미러(rebox 없음)만 66일·+186.9로 갈려 미채택.
-    // ⑤-b 15:20 1박 사전 통지 (사용자 지시 2026-08-08 "1박 필요 없으면 정규장 종가에 팔 수 있게 일찍"):
-    // 자격 요소(창·F 첫판정 방향, 창 확인 시각, 갭)는 실측상 전 자격일이 15:20 이전에 확정된다
-    // (scripts/kr-overnight-residual.ts: 15:20 이후 확정 0일 · 15:00 이후 하닉 1·삼전 2일) —
+    // ⑤-b 15:15 1박 사전 통지 (사용자 지시 2026-08-08 "1박 필요 없으면 정규장 종가에 팔 수 있게 일찍",
+    // 시각 확정 "15:20부터 시간외 종가 거래로 빠지니까 15:15에"):
+    // 자격 요소(창·F 첫판정 방향, 창 확인 시각, 갭)는 실측상 전 자격일이 15:15 이전에 확정된다
+    // (scripts/kr-overnight-residual.ts: 15:15 이후 확정 0일 · 15:00 이후 하닉 1·삼전 2일) —
     // 그래서 종가 전에 '유지 / 종가 전량 매도'를 지시할 수 있다. 애프터장(NXT) 청산은 사양 밖
     // (백테스트는 정규장 종가 기준·저유동). 15:31 결산이 최종 확정·기록.
-    if (!st.ovnPreT && st.entryT && minuteOfDay >= hhmmToMin("15:20") && minuteOfDay <= hhmmToMin("15:29") && krx.length > 0) {
+    if (!st.ovnPreT && st.entryT && minuteOfDay >= hhmmToMin("15:15") && minuteOfDay <= hhmmToMin("15:19") && krx.length > 0) {
       st.ovnPreT = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       changed = true;
       try {
@@ -417,7 +418,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
         const w = trs.length ? ovnWeight(hhmmToMin(bars[trs[0].i].time), gapBig) : 0;
         await send("predict_cw_ovnpre", "medium", ok
           ? `[예측·하이닉스] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 배정액의 ${w * 100}%를 ${cwDir === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, cwDir, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소). ${paperNote}`
-          : `[예측·하이닉스] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!trs.length ? "창 판정 없음" : st.cutT ? "오늘 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. ${paperNote}`);
+          : `[예측·하이닉스] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!trs.length ? "창 판정 없음" : st.cutT ? "오늘 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. 드물게 15:15 이후 판정이 성립하면 15:31 결산 문자로 다시 안내합니다(217일 중 하닉 0일·삼전 1일). ${paperNote}`);
       } catch { /* 사전 통지 실패는 본 흐름 무관 */ }
     }
 

@@ -151,7 +151,7 @@ function run(name: string, days: Day[], isHx: boolean) {
   console.log(`  → 추가 매수가 필요한 날 ${need.length}/${rows.length}일 · 평균 부족분 ${(short / Math.max(1, need.length) * 100).toFixed(0)}%p`);
   // 1박 여부를 언제 알 수 있나 (창·F 첫판정 중 늦은 쪽 = 자격 확정 시각)
   const late = (m: number) => rows.filter((r) => r.known > m).length;
-  console.log(`  자격 확정 시각: 15:20 이후 확정 ${late(920)}일 · 15:00 이후 ${late(900)}일 · 14:00 이후 ${late(840)}일 (나머지는 장중 확정)`);
+  console.log(`  자격 확정 시각: 15:15 이후 확정 ${late(915)}일 · 15:00 이후 ${late(900)}일 · 14:00 이후 ${late(840)}일 (나머지는 장중 확정)`);
   // 스탑 폭 후보 — 밤 경로 데이터가 없으므로 '익일 시가가 그 폭을 불리하게 넘는 빈도'만 실측 가능
   const cand: [string, (r: R) => number][] = [
     ["3일폭×0.75 (사양)", (r) => r.stop3],

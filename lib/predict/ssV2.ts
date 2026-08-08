@@ -228,7 +228,7 @@ export async function runSsV2Monitor(): Promise<void> {
     }
 
     // ④-b 15:20 1박 사전 통지 (사용자 지시 2026-08-08 — candleWindow.ts ⑤-b와 동일 취지·근거)
-    if (!st.ovnPreT && st.entryT && minuteOfDay >= hhmmToMin("15:20") && minuteOfDay <= hhmmToMin("15:29") && krx.length > 0) {
+    if (!st.ovnPreT && st.entryT && minuteOfDay >= hhmmToMin("15:15") && minuteOfDay <= hhmmToMin("15:19") && krx.length > 0) {
       st.ovnPreT = `${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}`;
       changed = true;
       try {
@@ -239,7 +239,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const w = cw ? ovnWeight(cw.t, gapBig) : 0;
         if (live) await send("predict_ssv2_ovnpre", "medium", ok
           ? `[예측·삼성전자] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 배정액의 ${w * 100}%를 ${d === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, d, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소).`
-          : `[예측·삼성전자] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!cw ? "창 판정 없음" : fFirstDay ? "F 선행 관망일" : bothStopped ? "양쪽 레그 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만.`);
+          : `[예측·삼성전자] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!cw ? "창 판정 없음" : fFirstDay ? "F 선행 관망일" : bothStopped ? "양쪽 레그 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. 드물게 15:15 이후 판정이 성립하면 15:31 결산 문자로 다시 안내합니다(217일 중 1일).`);
       } catch { /* 사전 통지 실패는 본 흐름 무관 */ }
     }
 
