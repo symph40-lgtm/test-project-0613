@@ -24,22 +24,32 @@ const s2 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
 const load = (f: string): MinuteBar[] | null => existsSync(resolve(CACHE, f)) ? JSON.parse(readFileSync(resolve(CACHE, f), "utf8")) : null;
 const hm = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 
-type D = { date: string; pnl: number; ovn: number; cut: boolean };
+// traded = 그날 진입이 있었나(판정일). 무판정일(손익 0)을 분모에 넣으면 승률이 왜곡되므로 분리한다.
+// cut = 스탑(손절선) 도달 — 하닉 본주 -2.5%·삼전 -1.5%·SOXX -2%. '판정이 반대로 뒤집힌 날'과는 다르다.
+// flip = 방향 반대 신호 발생(전환) — 하닉 창 전환/F 이견, 삼전 F 반대 확인, SOXX F선행일 창1 반대.
+// dirHit = 첫 판정 '방향'이 그날 종가 기준으로 맞았나 (판정가 → 종가). 승률(손익>0)과는 다른 개념 —
+// 방향이 맞아도 장중에 스탑을 먼저 맞으면 손익은 마이너스가 된다. 둘의 격차가 스탑 비용이다.
+type D = { date: string; pnl: number; ovn: number; cut: boolean; traded: boolean; flip: boolean; dirHit: boolean | null };
 
 // 구간 표: 최근 7거래일 / 21(1개월) / 63(3개월) / 전체
 function table(name: string, rows: D[], withOvn: boolean) {
   console.log(`\n════ ${name} — ${rows.length}일 (${rows[0]?.date} ~ ${rows[rows.length - 1]?.date}) ════`);
-  const head = withOvn ? "구간          일수  기간            합계(1박포함)   일당   승률   컷일   최악일 | 당일청산만" : "구간          일수  기간            합계      일당   승률   컷일   최악일";
-  console.log(`  ${head}`);
+  console.log(`  구간           전체 진입  기간            ${withOvn ? "합계(1박포함)" : "합계     "}   일당    승률   컷일   전환  방향적중  최악일${withOvn ? " | 당일청산만" : ""}`);
+  console.log(`  ${" ".repeat(31)}(승률·컷률·전환률은 '진입일' 기준 — 무판정일 제외)`);
   for (const [label, n] of [["최근 7거래일", 7], ["최근 1개월(21)", 21], ["최근 3개월(63)", 63], ["전체", rows.length]] as [string, number][]) {
     const g = rows.slice(-n);
     if (!g.length) continue;
+    const t = g.filter((r) => r.traded);          // 진입일만 — 승률·컷률의 정확한 분모
     const tot = g.reduce((a, r) => a + r.pnl + (withOvn ? r.ovn : 0), 0);
     const base = g.reduce((a, r) => a + r.pnl, 0);
-    const wins = g.filter((r) => r.pnl + (withOvn ? r.ovn : 0) > 0).length;
-    const cuts = g.filter((r) => r.cut).length;
+    const wins = t.filter((r) => r.pnl + (withOvn ? r.ovn : 0) > 0).length;
+    const cuts = t.filter((r) => r.cut).length;
+    const flips = t.filter((r) => r.flip).length;
+    const dh = t.filter((r) => r.dirHit !== null);
+    const dhW = dh.filter((r) => r.dirHit).length;
     const worst = Math.min(...g.map((r) => r.pnl + (withOvn ? r.ovn : 0)));
-    const line = `  ${label.padEnd(14)} ${String(g.length).padStart(3)}  ${g[0].date}~${g[g.length - 1].date.slice(5)}  ${s1(tot).padStart(7)}%p ${s2(tot / g.length).padStart(6)} ${`${Math.round((wins / g.length) * 100)}%`.padStart(5)} ${`${cuts}일(${Math.round((cuts / g.length) * 100)}%)`.padStart(8)} ${worst.toFixed(2).padStart(6)}`;
+    const p = (a: number) => `${Math.round((a / Math.max(1, t.length)) * 100)}%`;
+    const line = `  ${label.padEnd(14)} ${String(g.length).padStart(3)} ${String(t.length).padStart(4)}  ${g[0].date}~${g[g.length - 1].date.slice(5)}  ${s1(tot).padStart(7)}%p ${s2(tot / g.length).padStart(6)} ${p(wins).padStart(6)} ${p(cuts).padStart(6)} ${p(flips).padStart(6)} ${(dh.length ? `${Math.round((dhW / dh.length) * 100)}%` : "—").padStart(7)} ${worst.toFixed(2).padStart(7)}`;
     console.log(withOvn ? `${line} | ${s1(base).padStart(7)}%p` : line);
   }
 }
@@ -86,7 +96,21 @@ function runKr(name: string, code: string, isHx: boolean) {
       const fLeadSkip = !isHx && ssJ !== null && ssJ.t < t1;
       if (fDir === dir && !fLeadSkip) ovn = ((next.d.open - D0.d.close) / D0.d.close) * 100 * dir * ovnWeight(t1, gapBig);
     }
-    rows.push({ date: D0.date, pnl: r.pnl, ovn, cut: r.cut });
+    // 진입 여부·전환 여부 (라이브 규칙 미러)
+    const cwJ = first ? { i: first.i, t: hm(D0.bars[first.i].time), dir: (first.to === "up" ? 1 : -1) as 1 | -1 } : null;
+    const fLead = isHx ? null : ssJ; // 삼전은 F 선행일 관망
+    const traded = isHx
+      ? !!(cwJ || hxOvnFisherDir(D0.bars, D0.hist, D0.date) !== 0)
+      : !!cwJ && !(fLead && cwJ && fLead.t < cwJ.t);
+    const cwFlip = trs.find((x) => cwJ && x.i > cwJ.i && x.to !== first!.to) ?? null;
+    const fOpp = ssJ && cwJ && ssJ.dir !== cwJ.dir && ssJ.t > cwJ.t;
+    const flip = isHx
+      ? !!(fOpp || (isHighVolDay(D0.hist) && cwFlip))   // F 이견 청산·역진입 또는 고변동일 창 전환청산
+      : !!fOpp;                                          // 삼전 = F 반대 확인 시 전량 전환
+    const entryPx = cwJ ? trs[0].px : (ssJ ? ssJ.px : null);
+    const entryDir = cwJ ? cwJ.dir : (ssJ ? ssJ.dir : null);
+    const dirHit = entryPx !== null && entryDir !== null ? (D0.d.close - entryPx) * entryDir > 0 : null;
+    rows.push({ date: D0.date, pnl: r.pnl, ovn, cut: r.cut, traded, flip, dirHit });
   }
   table(name, rows, true);
 }
@@ -111,7 +135,10 @@ async function runSoxx() {
     if (!j.c1 && !j.fJ) continue;
     const next = dIdx.find((x) => x > date);
     const sc = scoreSoxxDay(raw, j.c1, j.fJ, reg[reg.length - 1].close, next ? dBy.get(next)!.open : null, true, true);
-    rows.push({ date, pnl: sc.p, ovn: 0, cut: sc.cut });
+    // SOXX 전환 = F 선행일에 창1이 반대로 와 전량 전환한 날(E1). 창1 선행일은 설계상 낮 행동 없음.
+    const flip = sc.kind === "f" && !!j.c1 && !!j.fJ && j.c1.dir !== j.fJ.dir;
+    const dh = sc.base !== null && sc.dir !== null ? (reg[reg.length - 1].close - sc.base) * sc.dir > 0 : null;
+    rows.push({ date, pnl: sc.p, ovn: 0, cut: sc.cut, traded: sc.kind !== "none", flip, dirHit: dh });
   }
   table("SOXX v2 (주기준: rebox+인버보호+프리장 확인가 진입 · SOXX 기준 %, 3x ETF는 ×3)", rows, false);
 }
