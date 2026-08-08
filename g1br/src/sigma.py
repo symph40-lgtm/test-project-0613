@@ -14,8 +14,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
 RAW = Path(__file__).resolve().parents[1] / "data"
 TS_CAL = Path(__file__).resolve().parents[3] / "test project_0613" / "lib" / "predict-daily" / "eventCalendar.ts"
 if not TS_CAL.exists():
@@ -70,6 +68,7 @@ def sigma_ci(std: float, n: int) -> list[float]:
 
 
 def main() -> None:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     base = pd.read_parquet(RAW / "ladder_results.parquet")
     macro = macro_event_dates()
     earn, earn_note = earnings_dates()
