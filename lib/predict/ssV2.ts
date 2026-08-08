@@ -237,7 +237,8 @@ export async function runSsV2Monitor(): Promise<void> {
         const px = krx[krx.length - 1].close;
         const d: Dir = cw ? cw.dir : 1;
         const w = cw ? ovnWeight(cw.t, gapBig) : 0;
-        if (live) await send("predict_ssv2_ovnpre", "medium", ok
+        // 지침 문자는 ssOvnAdvise 게이트 (8/8 사용자 확정 — 삼전 1박은 채점만, 근거는 config 주석)
+        if (live && NM.ssOvnAdvise) await send("predict_ssv2_ovnpre", "medium", ok
           ? `[예측·삼성전자] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 배정액의 ${w * 100}%를 ${d === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, d, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소).`
           : `[예측·삼성전자] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!cw ? "창 판정 없음" : fFirstDay ? "F 선행 관망일" : bothStopped ? "양쪽 레그 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. 드물게 15:15 이후 판정이 성립하면 15:31 결산 문자로 다시 안내합니다(217일 중 1일).`);
       } catch { /* 사전 통지 실패는 본 흐름 무관 */ }
@@ -267,8 +268,8 @@ export async function runSsV2Monitor(): Promise<void> {
           arr.push({ date: today, dir: cw.dir, px: close, w, t1, gap: gapBig });
           await admin.from("ops_settings").upsert({ key: "predict_ssv2_ovn", value: arr.slice(-120), updated_at: new Date().toISOString() }, { onConflict: "key" });
           const done = arr.filter((r) => r.raw !== undefined);
-          ovnLine = ` 1박: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
-          await send("predict_ssv2_ovn", "medium",
+          ovnLine = ` 1박${NM.ssOvnAdvise ? "" : "(채점 전용 — 지침 중단)"}: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
+          if (NM.ssOvnAdvise) await send("predict_ssv2_ovn", "medium",
             `[예측·삼성전자] 오늘 밤 1박 유지, 다음날 09:00 시가매도\n▶① 종가 기준 배정액의 ${w * 100}%를 ${cw.dir === 1 ? "레버리지" : "인버스"} ETF로 보유 (남은 게 적으면 종가에 채우고, 많으면 줄입니다)\n▶② 스탑설정: ${ovnStopLine(close, cw.dir, stopPct)}\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[cw.dir === 1 ? "up" : "down"]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${cw.t > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${cw.t > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. 스탑은 규칙이 아니라 밤 재난선(최근 3일 평균 일중폭×0.75) — ⚠갭이 스탑 밖에서 시작하면 미체결이고 그 경우 09:00 시가 청산으로 처리합니다. 근거 217일 +182.9%p(비중 반영 +198.5).`);
         } catch { /* 1박 판정 실패는 본 흐름 무관 */ }
       }
