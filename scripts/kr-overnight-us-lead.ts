@@ -122,7 +122,8 @@ function report(name: string, rows: Row[]) {
   // ⓑ 19:40 시점: 미장 프리장 흐름 + 국장 애프터장 청산
   const b = rows.filter(r => r.preSox !== null && r.ahExit !== null);
   console.log(`  ── ⓑ 19:40 재판정 → 국장 애프터장 청산 (프리장·애프터 둘 다 있는 ${b.length}일) ──`);
-  if (b.length < 15) { console.log(`     표본 부족`); return; }
+  if (b.length < 5) { console.log(`     표본 ${b.length}일 — 산출 불가`); return; }
+  if (b.length < 25) console.log(`     ⚠표본 ${b.length}일 — 아래 수치는 참고용, 판정 불가 (SOXX 조기 프리장이 야후 30일 롤링이라 소급 불가)`);
   const preHit = b.filter(r => (r.preSox ?? 0) * (r.soxNight ?? 0) > 0).length;
   console.log(`     프리장 방향이 '그날 밤 미국 종가' 방향과 일치: ${pctOf(preHit, b.filter(r => r.soxNight !== null).length)}`);
   const preGapHit = b.filter(r => (r.preSox ?? 0) * r.gap > 0).length;
