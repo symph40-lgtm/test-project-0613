@@ -1,0 +1,73 @@
+# T6 — param_pack_v1.json 생성 (WORKORDER week3 §6). 초대 챔피언 pack_v1.0.
+# "검증된 초기값"이 아니라 "가장 정직한 출발값" (스펙 §6 판정 비대칭).
+import io
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    sigma = json.load(open(ROOT / "reports" / "t3_sigma.json", encoding="utf-8"))
+    weights = json.load(open(ROOT / "reports" / "t5_weights.json", encoding="utf-8"))["결과"]
+    base = pd.read_parquet(ROOT / "data" / "total_validation.parquet")
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                            cwd=ROOT.parent).stdout.strip()
+    pack = {
+        "pack_id": "pack_v1.0",
+        "generated": {"date": "2026-08-09", "commit": commit, "source": "G1B-R week3 T1~T6"},
+        "champion": {
+            "idx_channel": {"model": "I0", "vars": ["r_spx"], "window": 120, "refit": "주1회",
+                            "금리항": "미채택 — OOS 무기여 (T4 boot80 0 걸침)",
+                            "fx항": "챔피언 미포함 — 지수 라벨 유의(boot80 하한 +0.007)이나 결합 후반부 열위. 챌린저 등재"},
+            "idio_channel": {"model": "S1", "vars": ["soxx_ex", "peer_orth"], "tsm_ex": "미채택 (t<1, OOS 무기여)"},
+            "beta_mkt": {"method": "huber_rolling120", "last": {"hx": round(float(base["b_huber_hx"].dropna().iloc[-1]), 3),
+                                                               "ss": round(float(base["b_huber_ss"].dropna().iloc[-1]), 3)},
+                         "확정 근거": "4안 OOS 최소 + 동률 시 Huber 우선 (T4 부트스트랩)"},
+        },
+        "challenger_candidates": [
+            {"id": "I2+S1", "diff": "지수 채널에 fx_orth_a 추가", "근거": "지수 라벨 boot80 [0.007, 0.061]", "표본": "2024-08+"},
+        ],
+        "sigma_base_pct": sigma,
+        "sigma_flags": {"coverage_gate": "미달 (1σ 0.80~0.81 vs 목표 0.65~0.72 — 두꺼운 꼬리) → 60일 로그 재조정 이관",
+                        "bigmove": "provisional=1.5×event (J3)", "k_event": "미검증 — implied move 소스 확보 후"},
+        "weights_by_regime": {
+            "hx": {**{k.split(":")[1]: v for k, v in weights.items() if k == "hx:I0+S1"}},
+            "ss": {**{k.split(":")[1]: v for k, v in weights.items() if k == "ss:I0+S1"}},
+            "unverified": {"u1_야간선물": {"value": 0.5, "unverified": True}, "u3_TAIFEX": {"value": 0.2, "unverified": True},
+                           "v2_시간외": {"value": 0.55, "unverified": True},
+                           "비고": "스펙 초기값 유지 — 60일 로그가 검증 주체 (D4)"},
+        },
+        "zt_monitor": {"metric": "rolling126_corr_vs_FRED", "threshold": 0.90,
+                       "action": "플래그만 (금리 항 미채택으로 강등 대상 소멸 — 데이터 인프라 존치)"},
+        "adjex": {"rule": "분기배당 락일(기준세션 직전 거래일) AdjEx=−DPS/4÷전일종가", "dps_annual": {"005930": 1668, "000660": 3000},
+                  "가격조정_이벤트": "자동 검출(수정/미수정 비율) — 기간 내 0건", "근사": "DPS 현재값 소급 — 연도별 정밀화 이관"},
+        "offline_gate": {
+            "결과": "미달 — 후반부 동결 med% hx 1.589 / ss 1.054 (관문 0.45)",
+            "결론": "스펙 §7 강등 사다리: 회귀 성분은 크기 참고용 — w_reg 하향 방향, 관측부 중심 운영. "
+                   "전반부(평상 국면) 삼전 0.47~0.49%가 관문 근처였음 — 국면 요인이 주원인. "
+                   "60일 로그에서 야간선물·시간외 관측 확보가 관건 (판정 비대칭: 음성은 확정)",
+        },
+        "o8_이관목록": [
+            "b5·b6 세션질 (일중 데이터 한도)", "u1 야간선물·u3 TAIFEX (조달 불가)", "v2 시간외 바스켓·β_ah",
+            "σ_base(대변동)·k_event", "1σ 커버리지 재조정 (관문 미달)", "fx(I2) 챌린저 검증",
+            "GDR 하닉 (유동성 확인)", "γ1~γ3 아시아 조기 신호 (해상도 부족)", "R2 예상체결가 잔차", "β_pm (G1A 연동)",
+            "연도별 DPS 정밀화",
+        ],
+    }
+    with open(ROOT / "param_pack_v1.json", "w", encoding="utf-8") as f:
+        json.dump(pack, f, ensure_ascii=False, indent=1)
+    # 스키마 검증 (필수 키 존재·타입)
+    required = ["pack_id", "champion", "sigma_base_pct", "weights_by_regime", "offline_gate", "o8_이관목록"]
+    missing = [k for k in required if k not in pack]
+    assert not missing, f"스키마 미달: {missing}"
+    print(f"param_pack_v1.json 생성 (commit {commit}) — 스키마 검증 통과")
+
+
+if __name__ == "__main__":
+    main()

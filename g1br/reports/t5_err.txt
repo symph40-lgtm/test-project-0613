@@ -1,0 +1,22 @@
+﻿.venv\Scripts\python.exe : D:\vivecoding\test project_0613\g1br\.venv\Lib\site-packages\yfinance\utils.py:484: Deprecat
+ionWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes 
+implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+At line:1 char:355
++ ... 0613\g1br"; .venv\Scripts\python.exe -m src.t5_weights > reports\t5_o ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (D:\vivecoding\t...c unit instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  return _pd.Timedelta(interval)
+D:\vivecoding\test project_0613\g1br\.venv\Lib\site-packages\yfinance\utils.py:667: DeprecationWarning: The 'generic' u
+nit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare
+ integers (e.g. `+ 1`).Please use a specific unit instead.
+  last_rows_same_interval = (dt2 - dt1) < _pd.Timedelta(interval)
+D:\vivecoding\test project_0613\g1br\src\t5_weights.py:51: DeprecationWarning: The 'generic' unit for NumPy timedelta i
+s deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Pl
+ease use a specific unit instead.
+  a2 = pd.Timestamp(r["krx_date"] + "T22:00:00Z") - pd.Timedelta(days=1)  # 07:00 KST 당일
+D:\vivecoding\test project_0613\g1br\src\t5_weights.py:52: DeprecationWarning: The 'generic' unit for NumPy timedelta i
+s deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Pl
+ease use a specific unit instead.
+  a1 = a2 - pd.Timedelta(hours=2)                                          # 미장 마감 부근 (근사, 계절 혼합 명시)

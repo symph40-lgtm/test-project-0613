@@ -1,0 +1,14 @@
+﻿.venv\Scripts\python.exe : Traceback (most recent call last):
+At line:1 char:355
++ ... 0613\g1br"; .venv\Scripts\python.exe -m src.t4_total 2> reports\t4_er ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\vivecoding\test project_0613\g1br\src\t4_total.py", line 159, in <module>
+    main()
+  File "D:\vivecoding\test project_0613\g1br\src\t4_total.py", line 155, in main
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+ValueError: I/O operation on closed file.
