@@ -163,7 +163,8 @@ AVAILABLE_BY_0715 = {
     "r_spx": True, "r_soxx": True, "r_tsm": True, "r_mu": True, "r_nvda": True,
     "r_ewy": True, "breadth_proxy": True, "r_gdr": True,
     "d_y2_bp": True, "d_y10_bp": True,    # ^TNX·ZT=F 환산 (발주자 T1 판정 — 조건부 편입+감시)
-    "d_fx_daily": False,                   # KRW=X 일봉은 KST 08~09시 완성 (AUDIT §3-부록)
+    "d_fx_daily": False,                   # KRW=X 일봉은 KST 08~09시 완성 (AUDIT §3-부록) — 참조용만
+    "d_fx_night": True,                    # b4 확정(T3): 60분봉 07:00 KST 절단 — 2024-08 이후 가용
     "r_n225_prev": True, "r_axjo_prev": True,
     "gap": False, "gap_idx": False,        # 라벨 (사후값)
 }
@@ -193,6 +194,27 @@ def build_night_panel(start: str, end: str) -> pd.DataFrame:
     zt_bp = zt_yield_bp()
     y2_mon = zt_monitor_corr126()
     fx = _load("yf_KRW_eq_X")
+    # b4 확정 (T3 판정 2026-08-09): Δfx = 60분봉 야간 절단 (전 KRX일 15:00 KST → 당일 07:00 KST).
+    # 2024-08 이후만 가용 — 그 이전 밤은 NaN (A안 전일봉은 fx 없는 대조보다도 나빠 기각).
+    fx_night_lookup: dict[str, float] = {}
+    fxh_path = RAW / "yf_KRW_eq_X_60m.parquet"
+    if fxh_path.exists():
+        h = pd.read_parquet(fxh_path)
+        h["ts"] = pd.to_datetime(h["ts_utc"], utc=True)
+        h = h.sort_values("ts")
+        hts = h["ts"].values
+        hcl = h["close"].values
+
+        def _fx_at(anchor: pd.Timestamp) -> float:
+            pos = hts.searchsorted(np.datetime64(anchor.tz_convert(None))) - 1
+            return float(hcl[pos]) if pos >= 0 else math.nan
+
+        for i in range(1, len(nights)):
+            r = nights.iloc[i]
+            p1 = _fx_at(pd.Timestamp(r["krx_prev_date"] + "T06:00:00Z"))
+            p2 = _fx_at(pd.Timestamp(r["krx_date"] + "T22:00:00Z") - pd.Timedelta(days=1))
+            if p1 > 0 and p2 > 0:
+                fx_night_lookup[r["krx_date"]] = math.log(p2 / p1)
     n225 = _load("yf__i_N225")
     axjo = _load("yf__i_AXJO")
     k200 = _load_oc("kospi200_pykrx" if (RAW / "kospi200_pykrx.parquet").exists() else "kospi200_ks200")
@@ -223,6 +245,7 @@ def build_night_panel(start: str, end: str) -> pd.DataFrame:
             "y2_monitor_corr126": (lambda v: round(v, 4) if pd.notna(v) else math.nan)(_asof(y2_mon, ud[-1]) if ud else math.nan),
             "y2_degraded": (_asof(y2_mon, ud[-1]) < 0.90) if ud and pd.notna(_asof(y2_mon, ud[-1])) else False,
             "d_fx_daily": _ret_over(fx, ud),
+            "d_fx_night": fx_night_lookup.get(d, math.nan),
             # 아시아 전일 변수 (KRX 개장 전 확정치)
             "r_n225_prev": _prev_ret(n225, d), "r_axjo_prev": _prev_ret(axjo, d),
             # 락일 — KRX 계정 없이는 이벤트 API 불가 (AUDIT §3-1): False 고정 + attrs 경고

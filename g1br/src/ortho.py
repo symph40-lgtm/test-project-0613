@@ -50,9 +50,9 @@ def add_ortho_columns(panel: pd.DataFrame, window: int = 120) -> pd.DataFrame:
         return base[name]
 
     pairs = [
-        # (출력, y, x) — 스펙 §3.1 순서. fx는 갈래별 (발주자 T1 판정 §3)
-        ("fx_orth_a", "d_fx_daily", "d_y10_bp"),
-        ("fx_orth_b", "d_fx_daily", "d_y2_bp"),
+        # (출력, y, x) — 스펙 §3.1 순서. fx = d_fx_night (b4 확정, T3 판정). 갈래별 직교화 (발주자 T1 판정 §3)
+        ("fx_orth_a", "d_fx_night", "d_y10_bp"),
+        ("fx_orth_b", "d_fx_night", "d_y2_bp"),
         ("soxx_ex", "r_soxx", "r_spx"),
         ("tsm_ex", "r_tsm", "r_soxx"),
         ("mu_ex", "r_mu", "r_soxx"),

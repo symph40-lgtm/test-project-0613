@@ -132,6 +132,30 @@ def fetch_kospi200() -> dict:
     return {"kospi200": f"^KS200 폴백 {len(total)}행 (KRX_ID 미설정)"}
 
 
+def fetch_krw_hourly() -> dict:
+    # T3 B안용 — KRW=X 60분봉 (야후 한도 730일 → 2024-08 이후만). UTC 타임스탬프로 저장.
+    import yfinance as yf
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    path = _fname("yf_KRW_eq_X_60m")
+    start = dt.date.today() - dt.timedelta(days=728)
+    if path.exists():
+        last = pd.read_parquet(path)["ts_utc"].max()
+        start = max(start, (pd.Timestamp(last) - pd.Timedelta(days=5)).date())
+    df = yf.Ticker("KRW=X").history(start=start.isoformat(), interval="60m")
+    if df.empty:
+        return {"KRW=X 60m": "empty"}
+    out = pd.DataFrame({
+        "ts_utc": [d.tz_convert("UTC").isoformat() for d in df.index],
+        "close": df["Close"].values,
+        "source": "yfinance:KRW=X:60m", "fetch_ts": now,
+    })
+    if path.exists():
+        old = pd.read_parquet(path)
+        out = pd.concat([old, out], ignore_index=True).drop_duplicates(subset=["ts_utc"], keep="last").sort_values("ts_utc")
+    out.to_parquet(path, index=False)
+    return {"KRW=X 60m": f"{len(out)}행"}
+
+
 def fetch_fred() -> dict:
     # 검증 병행용 (주 소스는 야후 — AUDIT 결정 2). 지연 1영업일은 실측 확정 사항.
     import pandas_datareader.data as web
@@ -157,7 +181,7 @@ def fetch_fred() -> dict:
 def main() -> None:
     RAW.mkdir(parents=True, exist_ok=True)
     all_summary = {}
-    for fn in [fetch_yf_daily, fetch_pykrx_equity, fetch_kospi200, fetch_fred]:
+    for fn in [fetch_yf_daily, fetch_pykrx_equity, fetch_kospi200, fetch_krw_hourly, fetch_fred]:
         all_summary.update(fn())
     width = max(len(k) for k in all_summary)
     for k, v in all_summary.items():
