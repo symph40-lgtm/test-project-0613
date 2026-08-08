@@ -14,7 +14,8 @@ START = "2023-01-01"
 # 스펙 §2.1 + AUDIT 결정 반영: 금리 = 야후(^TNX·2YY=F) 주 소스, FRED 검증 병행 (AUDIT §3-부록)
 YF_DAILY = [
     "^GSPC", "SOXX", "TSM", "MU", "NVDA", "EWY", "KRW=X", "SMSN.IL",
-    "^N225", "^AXJO", "RSP", "SPY", "^TNX", "2YY=F",
+    "^N225", "^AXJO", "RSP", "SPY", "^TNX", "ZT=F",
+    # "2YY=F" — 사용 금지 (발주자 T1 판정 2026-08-09: 피드 붕괴, AUDIT 등재). 기존 parquet은 증거 보존.
 ]
 PYKRX_EQUITY = ["005930", "000660"]
 

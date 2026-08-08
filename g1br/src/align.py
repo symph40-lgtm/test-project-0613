@@ -132,6 +132,22 @@ def _diff_over(series: pd.Series, dates: list) -> float:
     return float(b - a) if (pd.notna(a) and pd.notna(b)) else math.nan
 
 
+def _sum_over(daily_series: pd.Series, dates: list) -> float:
+    """일별 변화량(bp 등)의 세션 묶음 합 — multi_session이면 누적. 결측 하나라도 있으면 NaN."""
+    if not dates:
+        return math.nan
+    vals = [daily_series.get(d, math.nan) for d in dates]
+    if any(pd.isna(v) for v in vals):
+        return math.nan
+    return float(sum(vals))
+
+
+def _asof(series: pd.Series, date: str) -> float:
+    idx = series.index
+    pos = idx.searchsorted(date, side="right") - 1
+    return float(series.iloc[pos]) if pos >= 0 and pd.notna(series.iloc[pos]) else math.nan
+
+
 def _prev_ret(series: pd.Series, before_date: str) -> float:
     """before_date 이전 마지막 관측의 직전 대비 로그수익률 (아시아 전일 변수)."""
     idx = series.index
@@ -146,7 +162,7 @@ def _prev_ret(series: pd.Series, before_date: str) -> float:
 AVAILABLE_BY_0715 = {
     "r_spx": True, "r_soxx": True, "r_tsm": True, "r_mu": True, "r_nvda": True,
     "r_ewy": True, "breadth_proxy": True, "r_gdr": True,
-    "d_y2": True, "d_y10": True,          # 야후 ^TNX·2YY=F (AUDIT 결정 2)
+    "d_y2_bp": True, "d_y10_bp": True,    # ^TNX·ZT=F 환산 (발주자 T1 판정 — 조건부 편입+감시)
     "d_fx_daily": False,                   # KRW=X 일봉은 KST 08~09시 완성 (AUDIT §3-부록)
     "r_n225_prev": True, "r_axjo_prev": True,
     "gap": False, "gap_idx": False,        # 라벨 (사후값)
@@ -167,8 +183,15 @@ def build_night_panel(start: str, end: str) -> pd.DataFrame:
     rsp = _load("yf_RSP")
     spy = _load("yf_SPY")
     gdr = _load("yf_SMSN_IL")
-    tnx = _load("yf__i_TNX")
-    yy2 = _load("yf_2YY_eq_F")
+    # 금리 (발주자 T1 판정 2026-08-09): 10Y = ^TNX(×10=bp) / 2Y = ZT=F DV01 환산(bp).
+    # 2YY=F는 피드 붕괴로 사용 금지 (backlog.md 포스트모템). 감시: 롤링 126일 상관 <0.90 → I1b 강등 플래그.
+    try:
+        from src.rates import TNX_INDEX_TO_BP, zt_monitor_corr126, zt_yield_bp
+    except ModuleNotFoundError:  # 직접 실행(python src/align.py) 시
+        from rates import TNX_INDEX_TO_BP, zt_monitor_corr126, zt_yield_bp
+    tnx_bp = _load("yf__i_TNX").diff() * TNX_INDEX_TO_BP
+    zt_bp = zt_yield_bp()
+    y2_mon = zt_monitor_corr126()
     fx = _load("yf_KRW_eq_X")
     n225 = _load("yf__i_N225")
     axjo = _load("yf__i_AXJO")
@@ -196,7 +219,9 @@ def build_night_panel(start: str, end: str) -> pd.DataFrame:
             "r_nvda": _ret_over(nvda, ud), "r_ewy": _ret_over(ewy, ud),
             "breadth_proxy": _ret_over(rsp, ud) - _ret_over(spy, ud),
             "r_gdr": _ret_over(gdr, ud),
-            "d_y10": _diff_over(tnx, ud), "d_y2": _diff_over(yy2, ud),
+            "d_y10_bp": _sum_over(tnx_bp, ud), "d_y2_bp": _sum_over(zt_bp, ud),
+            "y2_monitor_corr126": (lambda v: round(v, 4) if pd.notna(v) else math.nan)(_asof(y2_mon, ud[-1]) if ud else math.nan),
+            "y2_degraded": (_asof(y2_mon, ud[-1]) < 0.90) if ud and pd.notna(_asof(y2_mon, ud[-1])) else False,
             "d_fx_daily": _ret_over(fx, ud),
             # 아시아 전일 변수 (KRX 개장 전 확정치)
             "r_n225_prev": _prev_ret(n225, d), "r_axjo_prev": _prev_ret(axjo, d),
