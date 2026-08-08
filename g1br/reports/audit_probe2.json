@@ -1,0 +1,50 @@
+{
+  "kospi200": {
+    "pykrx_1028": {
+      "error": "KeyError: '지수명'",
+      "suspect": "pykrx 신버전이 지수 API에 KRX 데이터 계정(KRX_ID/KRX_PW) 요구"
+    },
+    "yf_^KS200": {
+      "rows": 864,
+      "first": "2023-01-02",
+      "last": "2026-08-07",
+      "nan_close": 1,
+      "has_open": false
+    },
+    "yf_^KS11": {
+      "rows": 878,
+      "first": "2023-01-02",
+      "last": "2026-08-07"
+    },
+    "pykrx_KODEX200": {
+      "rows": 878,
+      "first": "2023-01-02",
+      "last": "2026-08-07",
+      "note": "ETF라 분배금 조정 필요 — 지수 프록시로는 ^KS200 우선"
+    }
+  },
+  "adjust_check": {
+    "error": "KeyError: '종가_adj'"
+  },
+  "fred": {
+    "DGS2": {
+      "rows": 939,
+      "non_nan": 899,
+      "nan_pct": 4.26,
+      "first": "2023-01-03",
+      "last_obs": "2026-08-06",
+      "prev_us_session": "2026-08-07",
+      "lag_us_sessions": 1
+    },
+    "DGS10": {
+      "rows": 939,
+      "non_nan": 899,
+      "nan_pct": 4.26,
+      "first": "2023-01-03",
+      "last_obs": "2026-08-06",
+      "prev_us_session": "2026-08-07",
+      "lag_us_sessions": 1
+    },
+    "available_by_0715_verdict": "H.15는 미 동부 오후 4시대(≈KST 익일 05~06시) 게시가 정상이나, FRED 반영은 통상 1영업일 지연. 위 lag_us_sessions 실측이 1 이상이면 R1(07:15)에 '당일치'는 없다고 판정 — 전일치 사용 원칙 확정."
+  }
+}

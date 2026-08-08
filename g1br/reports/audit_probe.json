@@ -1,0 +1,219 @@
+{
+  "pykrx": {
+    "005930": {
+      "name": "삼성전자",
+      "rows": 878,
+      "first": "2023-01-02",
+      "last": "2026-08-07",
+      "krx_sessions": 880,
+      "missing_pct": 0.23,
+      "cols": [
+        "시가",
+        "고가",
+        "저가",
+        "종가",
+        "거래량",
+        "등락률"
+      ],
+      "zero_or_nan_open": 0
+    },
+    "000660": {
+      "name": "SK하이닉스",
+      "rows": 878,
+      "first": "2023-01-02",
+      "last": "2026-08-07",
+      "krx_sessions": 880,
+      "missing_pct": 0.23,
+      "cols": [
+        "시가",
+        "고가",
+        "저가",
+        "종가",
+        "거래량",
+        "등락률"
+      ],
+      "zero_or_nan_open": 0
+    },
+    "1028": {
+      "name": "KOSPI200",
+      "error": "KeyError: '지수명'"
+    },
+    "adjust_check": {
+      "error": "'종가'"
+    }
+  },
+  "yfinance_daily": {
+    "^GSPC": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "SOXX": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "TSM": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "MU": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "NVDA": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "EWY": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "KRW=X": {
+      "rows": 935,
+      "first": "2023-01-02",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": null,
+      "currency": "KRW",
+      "tz": "Europe/London",
+      "nan_close": 0
+    },
+    "SMSN.IL": {
+      "rows": 910,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": null,
+      "currency": "USD",
+      "tz": "Europe/London",
+      "nan_close": 0
+    },
+    "^N225": {
+      "rows": 880,
+      "first": "2023-01-04",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": null,
+      "currency": "JPY",
+      "tz": "Asia/Tokyo",
+      "nan_close": 0
+    },
+    "^AXJO": {
+      "rows": 911,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": null,
+      "currency": "AUD",
+      "tz": "Australia/Sydney",
+      "nan_close": 0
+    },
+    "RSP": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    },
+    "SPY": {
+      "rows": 902,
+      "first": "2023-01-03",
+      "last": "2026-08-07",
+      "missing_pct_vs_xnys": 0.0,
+      "currency": "USD",
+      "tz": "America/New_York",
+      "nan_close": 0
+    }
+  },
+  "fred": {
+    "DGS2": {
+      "error": "NotSessionError: Parameter `session` takes a session although received input that parsed to '2026-08-09 00:00:00' which is not a session of calendar 'XNYS'."
+    },
+    "DGS10": {
+      "error": "NotSessionError: Parameter `session` takes a session although received input that parsed to '2026-08-09 00:00:00' which is not a session of calendar 'XNYS'."
+    }
+  },
+  "yfinance_intraday": {
+    "1m_8d": {
+      "rows": 1950,
+      "first": "2026-08-03 09:30:00-04:00",
+      "last": "2026-08-07 15:59:00-04:00"
+    },
+    "5m_59d": {
+      "rows": 3120,
+      "first": "2026-06-11 09:30:00-04:00",
+      "last": "2026-08-07 15:55:00-04:00"
+    },
+    "15m_59d": {
+      "rows": 1040,
+      "first": "2026-06-11 09:30:00-04:00",
+      "last": "2026-08-07 15:45:00-04:00"
+    },
+    "30m_59d": {
+      "rows": 520,
+      "first": "2026-06-11 09:30:00-04:00",
+      "last": "2026-08-07 15:30:00-04:00"
+    },
+    "60m_500d": {
+      "rows": 2380,
+      "first": "2025-03-27 09:30:00-04:00",
+      "last": "2026-08-07 15:30:00-04:00"
+    },
+    "60m_730d": {
+      "rows": 3471,
+      "first": "2024-08-09 09:30:00-04:00",
+      "last": "2026-08-07 15:30:00-04:00"
+    }
+  },
+  "grade_b": {
+    "NKD=F": {
+      "label": "니케이선물(CME·USD)",
+      "rows": 575,
+      "first": "2026-07-05 18:00:00-04:00",
+      "last": "2026-08-07 16:00:00-04:00",
+      "note": "일중 60m — 히스토리 제한은 yfinance intraday 한도와 동일"
+    },
+    "NIY=F": {
+      "label": "니케이선물(CME·JPY)",
+      "rows": 575,
+      "first": "2026-07-05 18:00:00-04:00",
+      "last": "2026-08-07 16:00:00-04:00",
+      "note": "일중 60m — 히스토리 제한은 yfinance intraday 한도와 동일"
+    },
+    "krx_night_futures": {
+      "verdict": "조달 불가(공개 무료 히스토리 API 없음)",
+      "basis": "유렉스 연계 KOSPI200 야간선물은 시세 히스토리가 유렉스/정보업체 유료 제공. yfinance 티커 부재."
+    },
+    "taifex_night": {
+      "verdict": "부분 가능성 — TAIFEX 공식 사이트가 애프터아워 통계 CSV 제공(수동 다운로드), 자동화는 크롤링 영역이라 1주차 금지 범위",
+      "basis": "공식 오픈 API 없음. 60일 로그 이관 권고."
+    }
+  }
+}
