@@ -1,0 +1,237 @@
+// G1A v0.3 라이브 수집기 — 스펙 §4·§8. 전 소스는 T2 시점(16:30~19:55 KST)에 실제로 뜨는 것만.
+// 야후 시세는 수 분 지연 가능 — log-only 기간 기록으로 지연 실측 (스펙 §8 감사 항목).
+
+import YahooFinance from "yahoo-finance2";
+import { fetchDayMinutes, fetchNxtAfterMarket } from "@/lib/predict/kisMinute";
+import { fetchRecentFlow } from "@/lib/predict-daily/flow"; // 공용 참조 전례: 캘린더·kisToken과 동일
+import { G1A_CONFIG } from "./config";
+import type { G1ASymbol, T2Features } from "./types";
+
+const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+
+type Bar = { ts: Date; close: number };
+
+async function chart5m(symbol: string, days = 2, prePost = false): Promise<Bar[]> {
+  try {
+    const r = await yf.chart(symbol, {
+      period1: new Date(Date.now() - days * 86400e3),
+      interval: "5m",
+      includePrePost: prePost,
+    });
+    return (r.quotes ?? [])
+      .filter((q) => q.close != null && isFinite(q.close as number))
+      .map((q) => ({ ts: q.date instanceof Date ? q.date : new Date(q.date), close: q.close as number }));
+  } catch {
+    return [];
+  }
+}
+
+async function dailyCloses(symbol: string, days: number): Promise<{ date: string; close: number }[]> {
+  try {
+    const r = await yf.chart(symbol, { period1: new Date(Date.now() - days * 86400e3), interval: "1d" });
+    return (r.quotes ?? [])
+      .filter((q) => q.close != null)
+      .map((q) => ({
+        date: (q.date instanceof Date ? q.date : new Date(q.date)).toISOString().slice(0, 10),
+        close: q.close as number,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+const kstNow = () => new Date(Date.now() + 9 * 3600e3);
+const kstHHMM = () => kstNow().toISOString().slice(11, 16);
+const kstDate = () => kstNow().toISOString().slice(0, 10);
+
+// ET 기준 오늘 프리마켓(04:00~09:30 ET) 봉만
+function premarketBars(bars: Bar[]): Bar[] {
+  const now = new Date();
+  const etFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+  const etToday = etFmt.format(now);
+  return bars.filter((b) => {
+    if (etFmt.format(b.ts) !== etToday) return false;
+    const et = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).format(b.ts);
+    return et >= "04:00" && et < "09:30";
+  });
+}
+
+// ── F21: 프리마켓 바스켓 + DC-PM ──
+export async function fetchPremarketBasket(symbol: G1ASymbol): Promise<{
+  rBasket: number | null; dcpm: number | null; obsMin: number | null;
+}> {
+  const cfg = G1A_CONFIG.basket[symbol];
+  const parts: { w: number; ret: number; bars: Bar[] }[] = [];
+  for (const [tk, w] of Object.entries(cfg.weights)) {
+    const [bars, daily] = await Promise.all([chart5m(tk, 2, true), dailyCloses(tk, 10)]);
+    const pm = premarketBars(bars);
+    if (!pm.length || daily.length < 1) continue;
+    const prevClose = daily[daily.length - 1].close; // 전일 정규장 종가 (프리마켓 중엔 마지막 일봉 = 전일)
+    let ret = ((pm[pm.length - 1].close - prevClose) / prevClose) * 100;
+    if (tk === "SOXL") ret /= cfg.soxlDiv;
+    parts.push({ w, ret, bars: pm });
+  }
+  if (!parts.length) return { rBasket: null, dcpm: null, obsMin: null };
+  const wSum = parts.reduce((a, p) => a + p.w, 0);
+  const rBasket = parts.reduce((a, p) => a + p.w * p.ret, 0) / wSum;
+  // DC-PM: 최대 가중 구성종목의 프리마켓 10분 그룹 중 바스켓 방향과 동방향 비율 (스펙 DC1 이식 — 근사)
+  const main = parts.sort((a, b) => b.w - a.w)[0];
+  const dir = Math.sign(rBasket);
+  let same = 0, total = 0;
+  for (let i = 0; i + 2 <= main.bars.length; i += 2) {
+    const d = main.bars[i + 1].close - main.bars[i].close;
+    if (d === 0) continue;
+    total++;
+    if (Math.sign(d) === dir) same++;
+  }
+  const first = main.bars[0].ts.getTime();
+  return {
+    rBasket: Math.round(rBasket * 100) / 100,
+    dcpm: total >= 3 ? same / total : null,
+    obsMin: Math.round((Date.now() - first) / 60000),
+  };
+}
+
+// ── F22: 미 선물 16:00 KST 이후 변화 ──
+export async function fetchUsFutDelta(): Promise<number | null> {
+  const bars = await chart5m("NQ=F", 2);
+  if (!bars.length) return null;
+  const anchor = new Date(kstDate() + "T07:00:00Z"); // 16:00 KST = 07:00 UTC
+  const from = bars.filter((b) => b.ts >= anchor);
+  if (from.length < 2) return null;
+  return Math.round(((from[from.length - 1].close - from[0].close) / from[0].close) * 10000) / 100;
+}
+
+// ── F20: 유럽 개장(16:00 KST) 이후 톤 ──
+export async function fetchEuropeTone(): Promise<{ pct: number | null; obsMin: number | null }> {
+  const bars = await chart5m("^STOXX50E", 2);
+  const anchor = new Date(kstDate() + "T07:00:00Z");
+  const from = bars.filter((b) => b.ts >= anchor);
+  if (from.length < 2) return { pct: null, obsMin: null };
+  return {
+    pct: Math.round(((from[from.length - 1].close - from[0].close) / from[0].close) * 10000) / 100,
+    obsMin: Math.round((Date.now() - from[0].ts.getTime()) / 60000),
+  };
+}
+
+// ── F11': TSMC 잔차 = 당일 TSMC − β·전일밤 SOXX ──
+export async function fetchTsmcResidual(): Promise<number | null> {
+  const [tw, sox] = await Promise.all([dailyCloses("2330.TW", 12), dailyCloses("^SOX", 12)]);
+  if (tw.length < 2 || sox.length < 2) return null;
+  const today = kstDate();
+  const twLast = tw[tw.length - 1];
+  if (twLast.date !== today) return null; // 대만 당일 종가 미확정
+  const rTw = ((twLast.close - tw[tw.length - 2].close) / tw[tw.length - 2].close) * 100;
+  const soxPrev = sox.filter((s) => s.date < today);
+  if (soxPrev.length < 2) return null;
+  const rSox = ((soxPrev[soxPrev.length - 1].close - soxPrev[soxPrev.length - 2].close) / soxPrev[soxPrev.length - 2].close) * 100;
+  return Math.round((rTw - G1A_CONFIG.tsmcBetaSoxx * rSox) * 100) / 100;
+}
+
+// ── F01/F02/F04: 당일 국장 캐릭터 (KIS 분봉, 15:05까지) ──
+export async function fetchDayCharacter(symbol: G1ASymbol): Promise<{
+  clv: number | null; dc1: number | null; o1: T2Features["F04_o1"]; regClose: number | null;
+}> {
+  const ymd = kstDate().replace(/-/g, "");
+  const mins = await fetchDayMinutes(symbol, ymd, "153000");
+  if (!mins || mins.length < 60) return { clv: null, dc1: null, o1: null, regClose: null };
+  const upto = mins.filter((b) => b.time <= "15:05");
+  const hi = Math.max(...upto.map((b) => b.high));
+  const lo = Math.min(...upto.map((b) => b.low));
+  const clv = hi > lo ? (upto[upto.length - 1].close - lo) / (hi - lo) : 0.5;
+  let up = 0, down = 0;
+  for (let i = 0; i + 10 <= upto.length; i += 10) {
+    const d = upto[i + 9].close - upto[i].open;
+    if (d > 0) up++; else if (d < 0) down++;
+  }
+  const dc1 = up + down ? (up - down) / (up + down) : 0;
+  // 시가 유형 (O1 간략판 — v0.1 검증 로직 이식)
+  const first30 = mins.filter((b) => b.time <= "09:30");
+  let o1: T2Features["F04_o1"] = null;
+  if (first30.length >= 20) {
+    const o = first30[0].open, c = first30[first30.length - 1].close;
+    const h30 = Math.max(...first30.map((b) => b.high)), l30 = Math.min(...first30.map((b) => b.low));
+    const move = ((c - o) / o) * 100;
+    const backfill = c > o ? ((o - l30) / o) * 100 : ((h30 - o) / o) * 100;
+    o1 = Math.abs(move) >= 0.7 && backfill <= 0.2 ? (move > 0 ? "OD_up" : "OD_down")
+      : Math.abs(move) >= 0.5 ? "OTD" : "OA";
+  }
+  return { clv: Math.round(clv * 100) / 100, dc1: Math.round(dc1 * 100) / 100, o1, regClose: mins[mins.length - 1].close };
+}
+
+// ── F08: 외인 감속률 (마감 확정치 — T2 시점 가용) ──
+export async function fetchFrnDecel(symbol: G1ASymbol): Promise<number | null> {
+  const flow = await fetchRecentFlow(symbol);
+  if (flow.length < 12) return null;
+  const today = flow[flow.length - 1];
+  if (today.date !== kstDate()) return null; // 당일 확정치 미반영
+  const prevs = flow.slice(-21, -1).map((f) => Math.abs(f.frgn));
+  const avg = prevs.reduce((a, b) => a + b, 0) / prevs.length;
+  return avg > 0 ? Math.round((today.frgn / avg) * 100) / 100 : null;
+}
+
+// ── F13/F14: 매크로 z (글로벡스 금리 선물·환율 — 저녁 실시간 관측 가능분) ──
+async function zOfDayChange(symbol: string, invert = false): Promise<number | null> {
+  const [bars, daily] = await Promise.all([chart5m(symbol, 2), dailyCloses(symbol, 90)]);
+  if (bars.length < 2 || daily.length < 40) return null;
+  const anchor = new Date(kstDate() + "T00:00:00Z"); // KST 09:00
+  const from = bars.filter((b) => b.ts >= anchor);
+  if (from.length < 2) return null;
+  const chg = ((from[from.length - 1].close - from[0].close) / from[0].close) * 100;
+  const rets: number[] = [];
+  for (let i = 1; i < daily.length; i++) rets.push(((daily[i].close - daily[i - 1].close) / daily[i - 1].close) * 100);
+  const sd = Math.sqrt(rets.reduce((a, r) => a + r * r, 0) / rets.length);
+  if (!sd) return null;
+  const z = chg / sd;
+  return Math.round((invert ? -z : z) * 100) / 100;
+}
+export async function fetchMacroZ(): Promise<{ rateZ: number | null; fxZ: number | null }> {
+  // ZN=F(10Y 노트 선물): 가격↑=금리↓ → invert로 '금리 방향' z. KRW=X: 원화 약세(상승)=+z.
+  const [rate, fx] = await Promise.all([zOfDayChange("ZN=F", true), zOfDayChange("KRW=X", false)]);
+  return { rateZ: rate, fxZ: fx };
+}
+
+// ── r_NXT: 당일 NXT 애프터 기반영 수익률 + 최근 체결가 ──
+export async function fetchNxtState(symbol: G1ASymbol, regClose: number | null): Promise<{
+  rNxt: number | null; lastPx: number | null;
+}> {
+  const ymd = kstDate().replace(/-/g, "");
+  const bars = await fetchNxtAfterMarket(symbol, ymd, kstHHMM().replace(":", "") + "00");
+  if (!bars || !bars.length) return { rNxt: null, lastPx: null };
+  const last = bars[bars.length - 1].close;
+  if (!regClose || !(last > 0)) return { rNxt: null, lastPx: last > 0 ? last : null };
+  return { rNxt: Math.round(((last - regClose) / regClose) * 10000) / 100, lastPx: last };
+}
+
+// ── 서킷브레이커 프록시 (v0.1 반사실 검정 통과 규칙) ──
+export async function fetchCircuitBreaker(): Promise<boolean> {
+  try {
+    const r = await yf.chart("^KS11", { period1: new Date(Date.now() - 7 * 86400e3), interval: "1d" });
+    const q = (r.quotes ?? []).filter((x) => x.close != null && x.low != null);
+    if (q.length < 2) return false;
+    // 당일·전일 두 구간 검사 (당일·익일 abstain)
+    for (let i = Math.max(1, q.length - 2); i < q.length; i++) {
+      const prev = q[i - 1].close as number;
+      if (((q[i].low as number) - prev) / prev * 100 <= G1A_CONFIG.abstain.circuitBreakerPct) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// ── F15: 오늘 밤 바이너리 이벤트 (매크로 캘린더 + 반도체 실적) ──
+export async function fetchEventTonight(): Promise<string | null> {
+  const today = kstDate();
+  const { FOMC_DECISION_DATES, CPI_RELEASE_DATES, ES_RELEASE_DATES } = await import("@/lib/predict-daily/eventCalendar");
+  if (FOMC_DECISION_DATES.includes(today)) return "FOMC";
+  if (CPI_RELEASE_DATES.includes(today)) return "CPI";
+  if (ES_RELEASE_DATES.includes(today)) return "고용";
+  try {
+    const { fetchSemiAiEarnings } = await import("@/lib/market/earnings");
+    const ev = await fetchSemiAiEarnings(2);
+    const tonight = ev.find((e) => e.date === today);
+    if (tonight) return `실적 ${tonight.symbol}`;
+  } catch { /* 실적 조회 실패는 결측 처리 */ }
+  return null;
+}
