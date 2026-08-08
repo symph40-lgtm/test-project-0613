@@ -40,7 +40,7 @@ function collect(code: string): Day[] {
 
 function analyze(name: string, days: Day[], isHx: boolean) {
   const cuts: boolean[] = [];
-  type R = { date: string; base: number; dir: number; cat: Cat | null; ovn: number };
+  type R = { date: string; base: number; dir: number; cat: Cat | null; ovn: number; t1: number; tF: number };
   const rows: R[] = [];
   for (let n = 0; n < days.length; n++) {
     const D = days[n], next = days[n + 1];
@@ -64,7 +64,7 @@ function analyze(name: string, days: Day[], isHx: boolean) {
       cat = fd === 0 ? "무판정" : fd === dir ? (fJ!.t >= hm(D.bars[first.i].time) ? "동의" : "동의(F선행)") : "이견";
       ovn = ((next.d.open - D.d.close) / D.d.close) * 100 * dir;
     }
-    rows.push({ date: D.date, base, dir, cat, ovn });
+    rows.push({ date: D.date, base, dir, cat, ovn, t1: first ? hm(D.bars[first.i].time) : -1, tF: fJ ? fJ.t : -1 });
   }
   const jul = (a: R[]) => a.filter(r => r.date >= "2026-07-01");
   const sum = (a: R[], f: (r: R) => number) => a.reduce((x, r) => x + f(r), 0);
@@ -79,6 +79,18 @@ function analyze(name: string, days: Day[], isHx: boolean) {
     const win = g.filter(r => r.ovn > 0).length;
     console.log(`  ${c.padEnd(12)} ${String(g.length).padStart(3)}일: 1박 ${s1(sum(g, r => r.ovn))}%p (승률 ${g.length ? Math.round((win / g.length) * 100) : 0}% · 최악 ${worst(g, r => r.ovn).toFixed(2)} · 일당 ${s2(sum(g, r => r.ovn) / Math.max(1, g.length))}) · 7월 ${s1(sum(jul(g), r => r.ovn))}%p/${jul(g).length}일`);
   }
+
+  // 왜 'F선행 동의'가 많은가 — 창1(사다리/누적)과 F(피셔 0.05·확인1)의 확인 시각 분포
+  const t = (m: number) => m < 0 ? "--:--" : `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const med = (a: number[]) => a.length ? t(a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)]) : "--:--";
+  console.log(`  ── 확인 시각(중앙값) ──`);
+  for (const c of ["동의", "동의(F선행)", "이견"] as Cat[]) {
+    const g = rows.filter(r => r.cat === c);
+    const pre = g.filter(r => r.tF >= 0 && r.tF < 540).length; // 09:00 이전 = NXT 프리장 확인
+    console.log(`  ${c.padEnd(12)} ${String(g.length).padStart(3)}일: 창1 ${med(g.map(r => r.t1))} · F ${med(g.filter(r => r.tF >= 0).map(r => r.tF))} · F가 프리장(09시 전) 확인 ${pre}일`);
+  }
+  const withF = rows.filter(r => r.cat !== null && r.tF >= 0);
+  console.log(`  전체 F 판정일 ${withF.length}일 중 F가 창1보다 이른 날 ${withF.filter(r => r.tF < r.t1).length}일`);
 
   console.log(`  ── 자격 정의별 합계(①+1박) ──`);
   const defs: [string, (r: R) => boolean][] = [
