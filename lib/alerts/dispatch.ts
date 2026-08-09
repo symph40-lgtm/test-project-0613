@@ -107,6 +107,16 @@ export async function dispatchToChannels(
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
   if (AH_LADDER_MUTED.test(alert.key)) return 0; // 애프터장 F·M 사다리 문자 차단 (2026-08-08)
+  // ── 신모델 무관 문자 전면 차단 (사용자 지시 2026-08-08 "신모델과 관계가 조금도 없는 문자는 우선은 다 꺼")
+  // 화이트리스트만 통과: 신모델 3종 채널·하닉 사다리 실전 운반(F/진행경보)·기존계층 30% 실전(8/7 배합 결정)·
+  // 갭경보(사다리 비중 지침)·딥바이·당일청산 리마인더·결정통지·실시간 버튼 응답·발송 점검.
+  // 이로써 꺼지는 것: 일봉(pdaily)·미국일봉(usdaily)·애프터장 전체·TOP10·금리 알람·아침브리핑·장중시황·
+  // 성능/리뷰·flat 가동확인·기타 M7 잔재. 판정·기록·채점은 전부 계속 — 문자 표시층만.
+  // G1A/G1B는 dispatch를 거치지 않는 직접 발송(발주자 승인 예외)이라 영향 없음. 해제 = strict를 false로.
+  if (PREDICT_CONFIG.smsNewModelStrict) {
+    const NM_STRICT_ALLOW = /^(predict_cw_|predict_gap_hx|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_(hxF|hxM|hxB|ssF|ssM|ssB)_|predict_prog5_hxF_|predict_ss_delay_entry|uspredict_dipbuy|predict_sell_1510|predict_promote_|predict_now_|nm_audit$)/;
+    if (!NM_STRICT_ALLOW.test(alert.key)) return 0;
+  }
   if (PREDICT_CONFIG.smsNewModelOnly) {
     // 기존 계층 30% 실전 승격 (사용자 확정 2026-08-07 — config.legacyTier): 신모델 70%와 고정 배합으로
     // 병행하므로 대체 채널을 차단하지 않고 '실전(기존계층 30%)' 제목으로 발송한다. live: false면 종전대로.
