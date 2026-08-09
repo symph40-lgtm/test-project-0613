@@ -163,6 +163,7 @@ function runKr(name: string, code: string, isHx: boolean, Ns: number[]) {
   }
   console.log(`  [P2] 대조군(09시 무신호 롱+스탑${stopPct}%) ${s1(B)}%p → 초과 ${s1(G - B)}%p (월평균 초과 ${s2((G - B) / (rows.length / 21))}%p)`);
   const netRets = rows.map(r => r.gross - (r.sides * 0.03) / 2); // 기본 가정 0.01+0.02 슬리피지
+  console.log(`  [V5상수] μ_bt(순) ${mean(netRets).toFixed(4)} · σ_bt ${std(netRets).toFixed(4)} · 평균비용/일 ${(mean(rows.map(r => (r.sides * 0.03) / 2))).toFixed(4)} (본주 %p/일)`);
   dsrReport(`${name} 순수익(기본 비용)`, netRets, Ns);
   dsrReport(`${name} 초과수익(순-대조군)`, rows.map((r, i) => netRets[i] - r.bench), Ns);
   foldReport(name, rows.map(r => ({ date: r.date, v: r.gross })));
@@ -209,6 +210,7 @@ async function runSoxx(Ns: number[]) {
   }
   console.log(`  [P2] 대조군(매일 시가 매수→다음 세션 시가) ${s1(B)}%p → 초과 ${s1(G - B)}%p`);
   const netRets = rows.map(r => r.gross - (r.sides * 0.10) / 3); // 기본 가정 0.07+0.03
+  console.log(`  [V5상수] μ_bt(순) ${mean(netRets).toFixed(4)} · σ_bt ${std(netRets).toFixed(4)} · 평균비용/일 ${(mean(rows.map(r => (r.sides * 0.10) / 3))).toFixed(4)} (SOXX %p/일)`);
   dsrReport(`SOXX 순수익(기본 비용)`, netRets, Ns);
   dsrReport(`SOXX 초과수익(순-대조군)`, rows.map((r, i) => netRets[i] - r.bench), Ns);
   foldReport("SOXX", rows.map(r => ({ date: r.date, v: r.gross })));

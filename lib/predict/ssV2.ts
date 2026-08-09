@@ -296,10 +296,18 @@ export async function runSsV2Monitor(): Promise<void> {
         arr.push({ date: today, p: Math.round(rMain.pnl * 100) / 100, p5: Math.round(r5.pnl * 100) / 100, p4: Math.round(r4.pnl * 100) / 100, p12: Math.round(r12v.pnl * 100) / 100, cut: rMain.cut, ...(fFirstDay ? { note: "F선행 관망" } : {}) });
         const kept = arr.slice(-120);
         await admin.from("ops_settings").upsert({ key: "predict_ssv2_scores", value: kept, updated_at: new Date().toISOString() }, { onConflict: "key" });
+        // NM3 W1 (V5): 궤도 1줄 + 장기 백업 (판정 불변 — IMPL_SPEC_TrackA §B)
+        let v5L = "";
+        try {
+          const { v5Line, mergeFull } = await import("./nm3V5");
+          v5L = v5Line(kept.map((s) => s.p), "ss");
+          const { data: fRow } = await admin.from("ops_settings").select("value").eq("key", "predict_ssv2_scores_full").maybeSingle();
+          await admin.from("ops_settings").upsert({ key: "predict_ssv2_scores_full", value: mergeFull(fRow?.value, kept), updated_at: new Date().toISOString() }, { onConflict: "key" });
+        } catch { /* V5 병기 실패는 채점 본류 무관 */ }
         const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.${ovnLine}`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.${v5L ? ` ${v5L}.` : ""}${ovnLine}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

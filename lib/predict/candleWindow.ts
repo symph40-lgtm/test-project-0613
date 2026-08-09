@@ -375,7 +375,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
     // 8/3~8/5 데이터 분석 기간을 거쳐 8/6 시범 시행 예정 — 그때까지는 기록·결산 병기만.
     type LadRow = { date: string; pnl: number; cut: boolean; def?: boolean; p10?: number };
     let ladToday: LadRow | null = null;
-    let ladSum = 0, ladN = 0;
+    let ladSum = 0, ladN = 0, ladV5 = "";
     if (!st.ladderDone && minuteOfDay >= hhmmToMin("15:31") && krx.length > 0) {
       try {
         const { data: lRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ladder").maybeSingle();
@@ -395,6 +395,16 @@ export async function runCandleWindowMonitor(): Promise<void> {
           { key: "predict_cw_ladder", value: kept, updated_at: new Date().toISOString() },
           { onConflict: "key" },
         );
+        // NM3 W1 (V5): 궤도 1줄 + 장기 백업 (판정 불변 — IMPL_SPEC_TrackA §B, D-2 착수 지시)
+        try {
+          const { v5Line, mergeFull } = await import("./nm3V5");
+          ladV5 = v5Line(kept.map((r) => r.pnl), "hx");
+          const { data: fRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_ladder_full").maybeSingle();
+          await admin.from("ops_settings").upsert(
+            { key: "predict_cw_ladder_full", value: mergeFull(fRow?.value, kept), updated_at: new Date().toISOString() },
+            { onConflict: "key" },
+          );
+        } catch { /* V5 병기 실패는 채점 본류 무관 */ }
         st.ladderDone = true;
         changed = true;
       } catch { /* 사다리 채점 실패는 본 흐름 무관 */ }
@@ -569,7 +579,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
           const n = kept.length;
           const sum = (f: (s: CwScore) => number) => kept.reduce((a, s) => a + f(s), 0);
           await send("predict_cw_eod", "low",
-            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(눈금1.2·X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)}(눈금1.0 대조 ${pct(ladToday.p10 ?? ladToday.pnl)}) · 누적 ${ladN}일 ${pct(ladSum)}.` : ""}${ovnLine} ${paperNote}`);
+            `[예측·하닉 창판정 결산] 오늘 ★${hv ? "전환청산" : "종가보유"}(공식) ${pct(hv ? flipPnl : holdPnl)}\n▶액션 없음(마감 결산)\n----\n${DIR_KO[st.dir]} ${st.entryT} 진입 ${st.entryPx.toLocaleString()}원. 공식(${hv ? "고" : "저"}변동일 기준) ${pct(hv ? flipPnl : holdPnl)}${hv ? (st.flipT ? `(${st.flipT} 전환)` : "(전환 없음=종가)") : st.cutT ? "(스탑)" : ""} · 대조 ${pct(hv ? holdPnl : flipPnl)}. 누적 ${n}일: 전환청산 ${pct(sum((s) => s.flipPnl))} · 종가보유 ${pct(sum((s) => s.holdPnl))}.${ladToday ? ` 가상 4단사다리(눈금1.2·X0.3·서킷K3M2${ladToday.def ? "·방어일" : ""}): 오늘 ${pct(ladToday.pnl)}(눈금1.0 대조 ${pct(ladToday.p10 ?? ladToday.pnl)}) · 누적 ${ladN}일 ${pct(ladSum)}.` : ""}${ladV5 ? ` ${ladV5}.` : ""}${ovnLine} ${paperNote}`);
         } catch { /* 채점 실패는 상태 저장에 영향 없음 */ }
       }
     }

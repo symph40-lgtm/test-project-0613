@@ -562,10 +562,18 @@ export async function runSoxxV2Monitor(): Promise<void> {
         });
         const kept = arr.slice(-120);
         await admin.from("ops_settings").upsert({ key: "uspredict_v2_scores", value: kept, updated_at: new Date().toISOString() }, { onConflict: "key" });
+        // NM3 W1 (V5): 궤도 1줄 + 장기 백업 — 1박 미확정(pend) 행은 대역·SPRT 입력에서 제외 (IMPL_SPEC §B1)
+        let v5L = "";
+        try {
+          const { v5Line, mergeFull } = await import("@/lib/predict/nm3V5");
+          v5L = v5Line(kept.filter((s) => !s.pend).map((s) => s.p), "soxx");
+          const { data: fRow } = await admin.from("ops_settings").select("value").eq("key", "uspredict_v2_scores_full").maybeSingle();
+          await admin.from("ops_settings").upsert({ key: "uspredict_v2_scores_full", value: mergeFull(fRow?.value, kept), updated_at: new Date().toISOString() }, { onConflict: "key" });
+        } catch { /* V5 병기 실패는 채점 본류 무관 */ }
         const sum = (f: (s: ScoreRow) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("uspredict_v2_eod", "low",
-          `[SOXX 신모델 결산] ${phase} — 오늘 ${pct(sc.p)}${sc.protT !== null ? "(이익 보호 발동)" : ""} · 보호없음 ${pct(scNP.p)} · 역진입판 ${pct(sc.pRe)} · 무rebox ${pct(scV0.p)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${st.protT ? `·보호 ${st.protT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준(보호) ${pct(sum((s) => s.p))} · 보호없음 ${pct(sum((s) => s.pNP ?? s.p))} · 역진입판 ${pct(sum((s) => s.pRe))} · 무rebox ${pct(sum((s) => s.pV0 ?? s.p))}. 백테스트 궤도 일당 +0.53%(SOXX·3x 환산 +1.6%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·수수료 미차감(편도 0.07%).`,
+          `[SOXX 신모델 결산] ${phase} — 오늘 ${pct(sc.p)}${sc.protT !== null ? "(이익 보호 발동)" : ""} · 보호없음 ${pct(scNP.p)} · 역진입판 ${pct(sc.pRe)} · 무rebox ${pct(scV0.p)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stopT ? `·스탑 ${st.stopT}` : ""}${st.protT ? `·보호 ${st.protT}` : ""}${sc.ovn ? "·1박 중" : ""})` : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준(보호) ${pct(sum((s) => s.p))} · 보호없음 ${pct(sum((s) => s.pNP ?? s.p))} · 역진입판 ${pct(sum((s) => s.pRe))} · 무rebox ${pct(sum((s) => s.pV0 ?? s.p))}. 백테스트 궤도(비용차감) 일당 +0.48%(SOXX·3x 환산 +1.4%). 1박 자격일은 다음 세션 시가로 확정치 갱신. 산식: 스탑 -2%·표시 채점은 그로스(V5 궤도만 순 기준).${v5L ? ` ${v5L}.` : ""}`,
           `결산 수정안 ${pct(sc.p)}${sc.ovn ? " (1박 중)" : ""}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
