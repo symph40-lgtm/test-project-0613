@@ -180,7 +180,83 @@ export function atrSeries(bars: Bar10[], p = 14): (number | null)[] {
   return out;
 }
 
-export type Pg1cOpts = { n: number; p: number; a: number }; // n = ATR 배수, p = ATR 기간, a = 활성화 임계(ATR 배수)
+// ── A1 증보 도구 (docs/pg1-spec-amendment-a1.md) ──
+
+// Kaufman 효율비 (A1.3): |m봉 순변위| / m봉 경로합. 결측·워밍업 구간 null.
+export function erAt(bars: Bar10[], t: number, m = 10): number | null {
+  if (t - m < 0) return null;
+  let path = 0;
+  for (let i = t - m + 1; i <= t; i++) {
+    if (bars[i].nMin === 0 || bars[i - 1].nMin === 0) return null;
+    path += Math.abs(bars[i].close - bars[i - 1].close);
+  }
+  if (path === 0) return 0;
+  return Math.abs(bars[t].close - bars[t - m].close) / path;
+}
+
+// Elder SafeZone 하방노이즈 (A1.4): 최근 L봉 중 불리 방향 침투 봉들의 침투폭 평균. 침투 없으면 null.
+export function safeZoneDist(bars: Bar10[], t: number, dir: 1 | -1, L = 10): number | null {
+  const pens: number[] = [];
+  for (let i = Math.max(1, t - L + 1); i <= t; i++) {
+    if (bars[i].nMin === 0 || bars[i - 1].nMin === 0) continue;
+    const pen = dir === 1 ? bars[i - 1].low - bars[i].low : bars[i].high - bars[i - 1].high;
+    if (pen > 0) pens.push(pen);
+  }
+  return pens.length ? pens.reduce((a, x) => a + x, 0) / pens.length : null;
+}
+
+// CUSUM 드리프트 전환 감지 (A1.5, PG-1D): S(t) = max(0, S(t-1) − r(t) − κ), S > h → 알람.
+// r = 보유 방향 기준 10분 수익률(%). κ·h는 % 단위. resetOnAlarm=true면 오경보율 측정용(알람 후 S=0).
+export function cusumScan(bars: Bar10[], t0: number, t1: number, dir: 1 | -1, kappaPct: number, hPct: number, resetOnAlarm = false): number[] {
+  let S = 0; let prevClose: number | null = null;
+  const alarms: number[] = [];
+  for (let t = t0; t <= t1 && t < bars.length; t++) {
+    const b = bars[t];
+    if (b.nMin === 0 || !isFinite(b.close)) continue;
+    if (prevClose !== null) {
+      const r = (b.close / prevClose - 1) * 100 * dir;
+      S = Math.max(0, S - r - kappaPct);
+      if (S > hPct) { alarms.push(t); if (resetOnAlarm) S = 0; else return alarms; }
+    }
+    prevClose = b.close;
+  }
+  return alarms;
+}
+
+// VSA 시그니처 (A2.1): t 시점 7봉 창의 Upthrust·No-Demand 카운트. 방향 대칭(CLV는 불리 마감 위치로 환산).
+export function vsaCounts(bars: Bar10[], t: number, dir: 1 | -1, win = 7, refWin = 20): { upthrust: number; noDemand: number } | null {
+  if (t - win + 1 < 0) return null;
+  const w = bars.slice(t - win + 1, t + 1);
+  if (w.some((b) => b.nMin === 0)) return null;
+  const refs = bars.slice(Math.max(0, t - refWin + 1), t + 1).filter((b) => b.nMin > 0);
+  if (refs.length < 5) return null;
+  const avgRange = refs.reduce((a, b) => a + (b.high - b.low), 0) / refs.length;
+  const vols = refs.map((b) => b.volume).sort((a, b) => a - b);
+  const vRef = vols[Math.floor(vols.length / 2)];
+  let upthrust = 0, noDemand = 0;
+  for (let j = 0; j < w.length; j++) {
+    const b = w[j];
+    const gi = t - win + 1 + j; // 전 기간 인덱스
+    const range = b.high - b.low;
+    const clv = range > 0 ? (b.close - b.low) / range : 0.5;
+    const clvAdv = dir === 1 ? clv : 1 - clv; // 불리 쪽 마감 위치 (낮을수록 불리 마감)
+    const prior = bars.slice(Math.max(0, gi - refWin), gi).filter((x) => x.nMin > 0);
+    const nearExt = prior.length ? (dir === 1 ? b.high >= Math.max(...prior.map((x) => x.high)) : b.low <= Math.min(...prior.map((x) => x.low))) : false;
+    if (range >= 1.5 * avgRange && clvAdv <= 0.3 && b.volume >= vRef * 1.3 && nearExt) upthrust++;
+    const favBody = dir === 1 ? b.close > b.open : b.close < b.open;
+    const p1 = gi - 1 >= 0 ? bars[gi - 1] : null, p2 = gi - 2 >= 0 ? bars[gi - 2] : null;
+    if (favBody && range <= 0.7 * avgRange && p1 && p2 && b.volume < p1.volume && b.volume < p2.volume) noDemand++;
+  }
+  return { upthrust, noDemand };
+}
+
+export type Pg1cOpts = {
+  n: number; p: number; a: number; // n = ATR 배수, p = ATR 기간, a = 활성화 임계(ATR 배수)
+  tiers?: { profitAtr: number; n: number }[]; // A1.2 이익 계단 조임 (도달 이익별 n, 하향 단조 — 위반 시 하드스톱)
+  dist?: "atr" | "safezone";                   // A1.4 거리 척도 (기본 atr)
+  szK?: number; szL?: number;                  // SafeZone 배수·창
+  erGate?: { theta: number; j: number; m: number; step: number }; // A1.3 ER 소모 시 n 조임 (영구, 하향 단조)
+};
 export const PG1C_DEFAULT: Pg1cOpts = { n: 3.0, p: 14, a: 1.5 };
 
 // 보유 구간 [t0, t1] (완결 10분봉 인덱스)에서의 첫 TS 이탈. 없으면 null.
@@ -188,21 +264,42 @@ export const PG1C_DEFAULT: Pg1cOpts = { n: 3.0, p: 14, a: 1.5 };
 // TS 단조성(§6.1 헌법 후보)은 구성상 보장 + 위반 시 하드스톱. 활성화(§6.3): 미실현 ≥ a×ATR 도달 후.
 // dir=-1(인버스) 거울상: LL 앵커·TS = LL + n×ATR·종가 상향 이탈.
 export function pg1cExit(bars: Bar10[], atr: (number | null)[], t0: number, t1: number, dir: 1 | -1, entryPx: number, opts: Pg1cOpts = PG1C_DEFAULT): { i: number; px: number; ts: number } | null {
-  const { n, a } = opts;
+  const { n, a, tiers, dist = "atr", szK = 2.5, szL = 10, erGate } = opts;
   let hh = entryPx, ts: number | null = null, active = false;
   let prevTs = dir === 1 ? -Infinity : Infinity;
+  let maxProfAtr = 0, erRun = 0, erTight = 0, prevN = Infinity;
   for (let t = t0; t <= t1 && t < bars.length; t++) {
     const b = bars[t];
     if (b.nMin === 0 || !isFinite(b.close)) continue;
     const A = atr[t];
     if (A === null) continue;
     hh = dir === 1 ? Math.max(hh, b.high) : Math.min(hh, b.low);
-    const cand = dir === 1 ? hh - n * A : hh + n * A;
-    ts = ts === null ? cand : dir === 1 ? Math.max(ts, cand) : Math.min(ts, cand);
-    if (dir === 1 ? ts < prevTs - 1e-9 : ts > prevTs + 1e-9) throw new Error(`pg1cExit: TS 단조성 위반 ${b.date} ${b.time}`);
-    prevTs = ts;
+    // A1.2 이익 계단 + A1.3 ER 조임 — n(t)는 하향 단조 (불변식 하드스톱)
+    maxProfAtr = Math.max(maxProfAtr, ((b.close - entryPx) * dir) / A);
+    let nEff = n;
+    if (tiers) for (const tr of tiers) if (maxProfAtr >= tr.profitAtr) nEff = tr.n;
+    if (erGate) {
+      const er = erAt(bars, t, erGate.m);
+      erRun = er !== null && er < erGate.theta ? erRun + 1 : 0;
+      if (erRun >= erGate.j) erTight = erGate.step; // 영구 조임
+      nEff = Math.max(2.0, nEff - erTight);
+    }
+    if (nEff > prevN + 1e-9) throw new Error(`pg1cExit: n(t) 하향 단조 위반 ${b.date} ${b.time}`);
+    prevN = nEff;
+    let cand: number | null = null;
+    if (dist === "safezone") {
+      const dp = safeZoneDist(bars, t, dir, szL);
+      if (dp !== null) cand = dir === 1 ? b.low - szK * dp : b.high + szK * dp;
+    } else {
+      cand = dir === 1 ? hh - nEff * A : hh + nEff * A;
+    }
+    if (cand !== null) ts = ts === null ? cand : dir === 1 ? Math.max(ts, cand) : Math.min(ts, cand);
+    if (ts !== null) {
+      if (dir === 1 ? ts < prevTs - 1e-9 : ts > prevTs + 1e-9) throw new Error(`pg1cExit: TS 단조성 위반 ${b.date} ${b.time}`);
+      prevTs = ts;
+    }
     if (!active && (b.close - entryPx) * dir >= a * A) active = true;
-    if (active && (dir === 1 ? b.close < ts : b.close > ts)) return { i: t, px: b.close, ts };
+    if (active && ts !== null && (dir === 1 ? b.close < ts : b.close > ts)) return { i: t, px: b.close, ts };
   }
   return null;
 }
