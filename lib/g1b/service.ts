@@ -66,6 +66,9 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
   if (probe.error) return { ok: false, window: "none", notes: ["마이그레이션 035 미적용"] };
 
   const W = C.windows;
+  // 신호 알림 발송 (사용자 지시 2026-08-09: G1A·G1B 개발 문자는 발송 — 전역 정지의 발주자 승인 예외).
+  // 회차당 두 종목 통합 1건 (LMS). 00~07시 금지 규칙과 무충돌 (R1 07:20·R2 08:55).
+  const outbox: { subject: string; texts: string[] } = { subject: "", texts: [] };
   for (const symbol of G1B_SYMBOLS) {
     const row = await loadRow(date, symbol);
     let st: LearnState;
@@ -129,6 +132,8 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         sent_at: new Date().toISOString(),
       };
       await saveRow(row);
+      outbox.subject = "[G1B R1] 야간 번역 (가상·log-only)";
+      outbox.texts.push(row.r1.report as string);
       notes.push(`${symbol} R1 발행 (FairGap ${row.r1.fair_gap_pct ?? "결측"}%)`);
     } else if (hhmm >= W.morningStart && hhmm < C.cutoff.r2 && !row.morning) {
       row.morning = await collectMorning(symbol);
@@ -152,6 +157,8 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       }
       row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, virtual: true, report: buildR2(symbol, date, fair2, est, residual, resSigma, signal), sent_at: new Date().toISOString() };
       await saveRow(row);
+      outbox.subject = "[G1B R2] 잔차 판정 (가상·log-only)";
+      outbox.texts.push(row.r2.report as string);
       notes.push(`${symbol} R2 발행 (${signal})`);
     } else if (hhmm >= W.labelStart && hhmm <= W.labelEnd && row.r1 && !row.labels) {
       const kr = await krDaily(symbol);
@@ -177,6 +184,20 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         notes.push(`${symbol} 라벨·학습 (실측 ${actual}% · TE_r1 ${row.labels.te_r1_pct}%)`);
       }
     }
+  }
+  // 통합 발송 (신호 알림 — 발주자 승인 예외)
+  if (outbox.texts.length) {
+    try {
+      const { sendSms, hasSmsProvider } = await import("@/lib/sms");
+      if (hasSmsProvider()) {
+        const { data: ch } = await admin.from("alert_channels").select("contact")
+          .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
+        for (const c of ch ?? []) {
+          if (c.contact) await sendSms({ to: c.contact, subject: outbox.subject, text: outbox.texts.join("\n\n") });
+        }
+        notes.push(`문자 발송 (${outbox.subject})`);
+      }
+    } catch (e) { notes.push(`문자 발송 실패: ${e instanceof Error ? e.message : e}`); }
   }
   // 게이트 계기판 (T4) — 라벨 창 이후 하루 1회 집계
   if (hhmm >= W.labelStart && hhmm <= "11:00") {

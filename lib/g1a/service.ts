@@ -86,6 +86,19 @@ async function runT1(date: string): Promise<string[]> {
   return notes;
 }
 
+// 신호 문자 (사용자 지시 2026-08-09: G1A·G1B 개발 문자 발송 — 전역 정지의 발주자 승인 예외)
+async function sendSignal(subject: string, text: string, notes: string[]): Promise<void> {
+  try {
+    const { sendSms, hasSmsProvider } = await import("@/lib/sms");
+    if (!hasSmsProvider()) return;
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const { data: ch } = await createAdminClient().from("alert_channels").select("contact")
+      .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
+    for (const c of ch ?? []) if (c.contact) await sendSms({ to: c.contact, subject, text });
+    notes.push(`문자 발송 (${subject})`);
+  } catch (e) { notes.push(`문자 발송 실패: ${e instanceof Error ? e.message : e}`); }
+}
+
 // ── T2 사이클 (§5) ──
 async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string[]> {
   const notes: string[] = [];
@@ -118,12 +131,14 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2.verdict = verdict;
         t2.report_r1 = buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date);
         notes.push(`${symbol} T2-${t2.trigger_type} ${verdict.direction}·${verdict.confidence} (score ${verdict.gap_score})`);
+        await sendSignal(`[G1A T2-${t2.trigger_type}] 저녁 갭 판정 (가상·log-only)`, t2.report_r1, notes);
       } else if (isFinal) {
         t2.trigger_type = "F";
         t2.trigger_time = hhmmss;
         t2.verdict = verdict; // NEUTRAL 확정 (abstain 사유 포함)
         t2.report_r1 = buildT2Report(symbol, "F", hhmm, verdict, f, date);
         notes.push(`${symbol} T2-F NEUTRAL (${blocked ?? verdict.abstain_reason ?? "θ 미달"})`);
+        await sendSignal(`[G1A T2-F] NEUTRAL 확정 (가상·log-only)`, t2.report_r1, notes);
       } else {
         notes.push(`${symbol} 대기 (${blocked})`);
       }
@@ -136,8 +151,10 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const rev = reversalCheck(t2.verdict.direction, f);
       if (rev.fired) {
         t2.reversal_watch = { fired: true, time: hhmmss, action: "19:55 전 전량 청산(가상)" };
-        t2.report_r1 = (t2.report_r1 ?? "") + "\n\n" + buildReversalReport(symbol, hhmm, rev.why!, t2);
+        const revReport = buildReversalReport(symbol, hhmm, rev.why!, t2);
+        t2.report_r1 = (t2.report_r1 ?? "") + "\n\n" + revReport;
         notes.push(`${symbol} 반전 감시 발동 — ${rev.why}`);
+        await sendSignal(`[G1A 반전] 청산 기록 (가상·log-only)`, revReport, notes);
       }
     }
     row.t2 = t2;
