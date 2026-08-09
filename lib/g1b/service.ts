@@ -68,7 +68,27 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
   const W = C.windows;
   for (const symbol of G1B_SYMBOLS) {
     const row = await loadRow(date, symbol);
-    const st = await loadState(symbol);
+    let st: LearnState;
+    try {
+      st = await loadState(symbol);
+    } catch (e) {
+      // "정지는 시끄럽게" (발주자 원칙): 상태 오류 정지 시 발행 실패+사유를 동일 채널로.
+      // 미발행은 계기판 가동률 결손으로 자동 집계됨 (r1/r2 부재 → uptime 하락).
+      const msg = e instanceof Error ? e.message : String(e);
+      notes.push(`${symbol} 상태 오류 정지 — ${msg}`);
+      try {
+        const { sendSms, hasSmsProvider } = await import("@/lib/sms");
+        if (hasSmsProvider()) {
+          // 수신처는 기존 알림 체계와 동일 (alert_channels 검증·동의 완료 sms 채널)
+          const { data: ch } = await admin.from("alert_channels").select("contact")
+            .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
+          for (const c of ch ?? []) {
+            if (c.contact) await sendSms({ to: c.contact, text: `[G1B 정지] ${date.slice(5)} ${symbol} R1/R2 발행 실패 — 상태 오류: ${msg.slice(0, 50)}` });
+          }
+        }
+      } catch { /* 알림 실패는 notes로만 */ }
+      continue;
+    }
     const regime = regimeToday(date);
 
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —

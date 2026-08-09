@@ -19,3 +19,17 @@ async function main() {
   console.log("스냅샷:", JSON.stringify(snaps));
 }
 main();
+// --restore-test: 전일 스냅샷을 스크래치 복원 → 해시 대조 (발주자 요건 — 롤백 "실증").
+// 사용: npx tsx scripts/g1b-state-hash.ts --restore-test
+if (process.argv.includes("--restore-test")) {
+  (async () => {
+    const { createAdminClient } = await import("../lib/supabase/admin");
+    const admin = createAdminClient();
+    const { data: snaps } = await admin.from("g1b_state_snapshots").select("*").order("date", { ascending: false }).limit(2);
+    for (const s of snaps ?? []) {
+      const rehash = createHash("sha256").update(JSON.stringify(s.state)).digest("hex").slice(0, 16);
+      const ok = rehash === s.state_hash;
+      console.log(`복원검증 ${s.symbol} ${s.date}: 저장해시=${s.state_hash} 재계산=${rehash} → ${ok ? "일치 ✓ (복원 경로 실증)" : "불일치 ✗ — 드라이런 불통과 사유"}`);
+    }
+  })();
+}
