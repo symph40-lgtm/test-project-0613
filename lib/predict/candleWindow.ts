@@ -463,7 +463,10 @@ export async function runCandleWindowMonitor(): Promise<void> {
     // 신사다리(오늘 채점분)·0930판 사다리(F만 rebox 주입) vs 현행 계층 지침(F/M/본 각자 레그 손익
     // 20/30/50 가중 — 계층 구조는 각 계층이 자기 신호로 진입·전환하므로 가중합이 곧 계층 성적).
     // ladToday가 있는 실행에서만 = 하루 1회. 실패는 본 흐름 무관.
-    if (ladToday && today >= PREDICT_CONFIG.newModel.cmpFrom && today <= PREDICT_CONFIG.newModel.cmpTo) {
+    // ⚠기록은 cmpTo 이후에도 계속 (2026-08-08 교정): 원래 `today <= cmpTo` 게이트라 hier(기존 계층
+    // 20/30/50 레그) 채점이 8/5에 멈춰 있었다 — 기존계층 30% 실전(8/7)과 10일 평가(perf10, 8/17 보고,
+    // 하닉 원천이 이 predict_nm_cmp)가 이 데이터를 쓰므로 매일 적재로 복구. 문자만 테스트 기간(≤cmpTo) 한정.
+    if (ladToday && today >= PREDICT_CONFIG.newModel.cmpFrom) {
       try {
         const C = PREDICT_CONFIG;
         const close = krx[krx.length - 1].close;
@@ -512,8 +515,9 @@ export async function runCandleWindowMonitor(): Promise<void> {
         const sum = (f: (r: CmpRow) => number) => cArr.reduce((a, r) => a + f(r), 0);
         // 마지막 테스트일(8/5)엔 내일 시범 시작 예고 + go/no-go 기준 동봉 (사용자 확정 8/1 밤:
         // "효과가 예상대로 나오면 목요일부터" — 3일 손익은 표본이 작아 참고, 기준은 무사고·재현 정합)
+        // cmpTo 이후는 기록만 — 비교 문자는 테스트 기간(8/3~5) 전용 (10일 평가 보고는 perf10이 전담)
         const lastDay = today >= PREDICT_CONFIG.newModel.cmpTo;
-        await send("predict_nm_cmp", lastDay ? "medium" : "low",
+        if (today <= PREDICT_CONFIG.newModel.cmpTo) await send("predict_nm_cmp", lastDay ? "medium" : "low",
           // 문자에는 실시행판(0930)만 표기 (사용자 지시 8/5 밤 "내일 시행되는 판만 적어줘 — 앞의 것은 헷갈려,
           // 모니터는 하고") — 구사다리·현행계층은 predict_nm_cmp 기록으로만 추적 (웹 /newmodel·결산 대조용)
           `[예측·하닉 신모델] 시행판(0930 사다리) 오늘 ${pct(lad93.pnl)}\n${lastDay ? "▶내일(8/6) 아침부터 시범 자동 시작 — 중단하려면 회신\n" : ""}무응답=${lastDay ? "예정대로 시범 시작" : "관찰만"}\n----\n시행판 누적 ${cArr.length}일 ${pct(sum((r) => r.l93))} · 백테스트 227일 기대 +122.0%p·컷일 52일(23%). 규칙: F 확인 30% → 진행성 충족 70% → 전진 0.3/창동의 100%·스탑 본주 -2.5%(ETF -5%)·종가청산. 구판·현행계층 성적은 기록으로만 추적 중(웹 신모델 현황 참조).`);

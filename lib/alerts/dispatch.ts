@@ -115,7 +115,7 @@ export async function dispatchToChannels(
   // G1A/G1B는 dispatch를 거치지 않는 직접 발송(발주자 승인 예외)이라 영향 없음. 해제 = strict를 false로.
   if (PREDICT_CONFIG.smsNewModelStrict) {
     // morning_ 추가 (사용자 지시 2026-08-08 "브리핑은 보내야지") — 아침브리핑 시장/지표/레짐/이슈/갭경고
-    const NM_STRICT_ALLOW = /^(morning_|predict_cw_|predict_gap_hx|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_(hxF|hxM|hxB|ssF|ssM|ssB)_|predict_prog5_hxF_|predict_ss_delay_entry|uspredict_dipbuy|predict_sell_1510|predict_promote_|predict_now_|nm_audit$)/;
+    const NM_STRICT_ALLOW = /^(morning_|predict_cw_|predict_gap_hx|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_(hxF|hxM|hxB|ssF|ssM|ssB)_|predict_prog5_hxF_|predict_ss_delay_entry|uspredict_dipbuy|predict_sell_1510|predict_promote_|predict_now_|nm_audit$|nm_perf10$)/;
     if (!NM_STRICT_ALLOW.test(alert.key)) return 0;
   }
   if (PREDICT_CONFIG.smsNewModelOnly) {
