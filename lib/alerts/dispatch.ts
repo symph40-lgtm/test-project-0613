@@ -78,7 +78,10 @@ const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vre
 // smsLegacyRef=true면 대체분을 차단 대신 '참고(기존모델)' 제목으로 병행 발송 (8/4 저녁 방식).
 // TOP10(396500 모니터링 스트림) 문자도 차단 (사용자 지시 2026-08-06 "TOP10 관련 문자는 꺼줘" —
 // 기록·채점·60일 승격 검토는 계속, 실시간 버튼 응답(fisher_now_etf)은 사용자 문의라 유지)
-const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_tr_etf|^predict_etf_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_)|^uspredict_(tr_|prog2_|rev9_|recut_)/;
+// predict_flat_*·uspredict_flat_* 추가 (사용자 지적 2026-08-08 "predict_flat_*은 기존 모델 아닌가"):
+// 기존 피셔 스트림의 '방향 없음(가동 확인)' 통지인데 이 목록에서 빠져 있어 신모델 전용 정책을
+// 그대로 통과해 왔다 — 8/06 프리장 문자 실사례. 이제 기존 계층 취급(legacyTier 제목 또는 차단).
+const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_tr_etf|^predict_etf_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_|flat_)|^uspredict_(tr_|prog2_|rev9_|recut_|flat_)/;
 // 참고 제목 대상 (신모델과 무관하지만 구모델 산출물 표시): 미국일봉·애프터장
 const NM_REF_SUBJECT = /^usdaily_|^predict_ah_|^predict_ss_ah/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;

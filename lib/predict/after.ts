@@ -171,7 +171,7 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ah_${prev}_${cur}`,
               severity: "medium",
-              text: `[예측·삼전 애프터] ${head} (강도 ${strength}%${ssAcc})${cur !== "none" ? ssGuide : ""}`,
+              text: `[예측·삼전 애프터·본피셔] ${head} (강도 ${strength}%${ssAcc})${cur !== "none" ? ssGuide : ""}`,
               smsSubject: "예측 애프터",
             });
           } catch { /* 발송 실패 무시 */ }
@@ -190,7 +190,7 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
             await dispatchToChannels("signal", today, {
               key: `predict_ss_ah_final_${cur}`,
               severity: "medium",
-              text: `[예측·삼전 애프터] 오늘 애프터 최종(${AH.finalCp} 확정): ${V_KO[cur]} (강도 ${strength}%${ssAcc})\n▶이 문자는 기록·내일 아침 대비용 — 지금 진입하라는 뜻 아님(과거 이 시각 진입 수익 사실상 0).${ssGapLine}`,
+              text: `[예측·삼전 애프터·본피셔] ${V_KO[cur]} 최종 확정(${AH.finalCp}) (강도 ${strength}%${ssAcc})\n▶이 문자는 기록·내일 아침 대비용 — 지금 진입하라는 뜻 아님(과거 이 시각 진입 수익 사실상 0).${ssGapLine}`,
               smsSubject: "예측 애프터",
             });
           } catch { /* 발송 실패 무시 */ }
@@ -300,7 +300,7 @@ export async function runAfterService(): Promise<{ judged: boolean; scored: stri
     if (!PREDICT_CONFIG.sms.enabled) return;
     const head = isFinal ? `확정(${AH.finalCp})` : whenLabel;
     let text = prev === null
-      ? `[예측·하닉 애프터] ${head} 첫 판정: ${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`
+      ? `[예측·하닉 애프터·본피셔] ${V_KO[v.verdict]} 첫 판정 — ${head} (강도 ${v.strength}%${afterAccTail})`
       : `[예측·하닉 애프터] ${head} 판정 변경: ${V_KO[prev]}→${V_KO[v.verdict]} (강도 ${v.strength}%${afterAccTail})`;
     if (v.verdict !== "none") {
       text += isFinal

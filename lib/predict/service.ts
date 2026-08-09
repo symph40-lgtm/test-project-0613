@@ -757,7 +757,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_rev9_${rc.sym}_${rc.bState}_${f9.verdict}`,
             severity: "high",
-            text: `[예측·${rc.symKo} 반전경보] 본피셔 ${V_KO[rc.bState]} 유지 중인데, 9시 이후 흐름만 보면 ${V_KO[f9.verdict]} 신호가 떴습니다${confT9 ? `(${confT9} 확인)` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지\n※아래 상태줄 F·M은 아침(08시)창 기준이라 이 경보와 다르게 보일 수 있음${bothLines}`,
+            text: `[예측·${rc.symKo} 반전경보·본피셔] ${V_KO[rc.bState]} 유지 중인데, 9시 이후 흐름만 보면 ${V_KO[f9.verdict]} 신호가 떴습니다${confT9 ? `(${confT9} 확인)` : ""}${postFinal9 ? ` · 피셔M 재확인 ${mSame9 ? "O" : "X"}` : ""}. ${guide9} 무응답=현행 유지\n※아래 상태줄 F·M은 아침(08시)창 기준이라 이 경보와 다르게 보일 수 있음${bothLines}`,
             smsSubject: "예측 반전경보",
           });
         }
@@ -795,7 +795,7 @@ async function checkpointStream(
           await dispatchToChannels("signal", today, {
             key: `predict_recut_${rc.sym}_${rc.bState}`,
             severity: "medium",
-            text: `[예측·${rc.symKo} 회복] 스탑컷 후 원판정가 회복 — 본피셔 ${V_KO[rc.bState]} 유지 중 (판정 ${confT} ${entry.toLocaleString()}원 · 컷 ${afterConf[cutIdx].time} → 회복 ${rec.time}). ${guideR} 무응답=미진입${staleR ? "" : gapLine(rc.sym)}${stopLineR}${bothLines}`,
+            text: `[예측·${rc.symKo} 회복·본피셔] ${V_KO[rc.bState]} 유지 — 스탑컷 후 원판정가 회복 (판정 ${confT} ${entry.toLocaleString()}원 · 컷 ${afterConf[cutIdx].time} → 회복 ${rec.time}). ${guideR} 무응답=미진입${staleR ? "" : gapLine(rc.sym)}${stopLineR}${bothLines}`,
             smsSubject: "예측 회복",
           });
         }
@@ -830,8 +830,8 @@ async function checkpointStream(
               key: preWindow ? "predict_flat_pre" : "predict_flat_reg",
               severity: "low",
               text: preWindow
-                ? `[예측] 프리장 방향 없음 (가동 확인·측정 ${nowHHMM2}) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
-                : `[예측] 정규장 방향 없음 (측정 ${nowHHMM2}) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${crossLabel}${bothLines}`,
+                ? `[예측·피셔] 프리장 방향 없음 (가동 확인·측정 ${nowHHMM2}) — 하닉·삼전 피셔F 미확인. 방향 확인 시 즉시 문자.${bothLines}`
+                : `[예측·피셔] 정규장 방향 없음 (측정 ${nowHHMM2}) — 하닉·삼전 F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${crossLabel}${bothLines}`,
               smsSubject: "예측 상태",
             });
           } catch { /* 발송 실패 무시 */ }

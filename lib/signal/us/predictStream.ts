@@ -306,7 +306,8 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
               await dispatchToChannels("signal", today, {
                 key: isFinal ? `uspredict_ah_final_${out.verdict}` : `uspredict_ah_${out.verdict}`,
                 severity: "medium",
-                text: `[미국예측·${head}] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${headKst(out.reason.split(" — ")[0])} (16~20시 ET·한국 05~09시). ${guideA} 무응답=현행 유지`,
+                // 머리말 = [채널·모델명] 판정결과 (사용자 지시 2026-08-08 — 어느 모델이 낸 판정인지 먼저 보이게)
+                text: `[미국예측·${head} 피셔] SOXX ${V_KO[out.verdict]} (강도 ${Math.round(out.confidence * 100)}%·라이브 채점 축적 중) — ${headKst(out.reason.split(" — ")[0])} (16~20시 ET·한국 05~09시). ${guideA} 무응답=현행 유지`,
                 smsSubject: "미국 애프터",
                 suppressSms: quietA,
               }, undefined, undefined, { dedupHours: 16 });
@@ -610,7 +611,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
             await dispatchToChannels("signal", today, {
               key: `uspredict_rev9_${curB}_${f9.verdict}`,
               severity: "high",
-              text: `[미국예측·SOXX 반전경보] 본피셔 ${V_KO[curB]} 유지 중 — 정규장창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${etk(confT9)})` : ""}. ${guide9} 무응답=현행 유지${stateLine}`,
+              text: `[미국예측·SOXX 반전경보·본피셔] ${V_KO[curB]} 유지 중 — 정규장창 피셔F ${V_KO[f9.verdict]} 확인${confT9 ? `(${etk(confT9)})` : ""}. ${guide9} 무응답=현행 유지${stateLine}`,
               smsSubject: "미국 반전경보",
               suppressSms: quiet,
             }, undefined, undefined, { dedupHours: 16 });
@@ -631,8 +632,8 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
               key: preWindow ? "uspredict_flat_pre" : "uspredict_flat_reg",
               severity: "low",
               text: preWindow
-                ? `[미국예측] 프리장 방향 없음 (가동 확인) — SOXX 피셔F 미확인. 방향 확인 시 즉시 문자.${stateLine}`
-                : `[미국예측] 정규장 방향 없음 (${etk("10:00")} 확인) — SOXX F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${stateLine}`,
+                ? `[미국예측·피셔] 프리장 방향 없음 (가동 확인) — SOXX 피셔F 미확인. 방향 확인 시 즉시 문자.${stateLine}`
+                : `[미국예측·피셔] 정규장 방향 없음 (${etk("10:00")} 확인) — SOXX F/M/본 모두 미확인. 진입 대기, 방향 확인 시 즉시 문자.${stateLine}`,
               smsSubject: "미국 예측",
               suppressSms: quiet,
             }, undefined, undefined, { dedupHours: 16 });
@@ -783,7 +784,7 @@ export async function runUsPredictStream(): Promise<{ judged: boolean; scored: s
           await dispatchToChannels("signal", today, {
             key: `uspredict_recut_${lastV}`,
             severity: "medium",
-            text: `[미국예측·회복] 스탑컷 후 원판정가 회복 — ${V_KO[lastV]} 판정 유지 중 (판정가 ${entry.toFixed(2)}$ · 컷 후 ${etk(rec.time)} 회복). ▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 스탑 ETF -${stopEtfPct.toFixed(1)}% 재설정 · 한국 실측 승률 ~50% 이식 — 소액만. 무응답=미진입`,
+            text: `[미국예측·회복·본피셔] ${V_KO[lastV]} 판정 유지 — 스탑컷 후 원판정가 회복 (판정가 ${entry.toFixed(2)}$ · 컷 후 ${etk(rec.time)} 회복). ▶동일 방향 추세 지속 — 재진입 검토: 새 진입가 스탑 ETF -${stopEtfPct.toFixed(1)}% 재설정 · 한국 실측 승률 ~50% 이식 — 소액만. 무응답=미진입`,
             smsSubject: "미국 회복",
             suppressSms: quiet,
           }, undefined, undefined, { dedupHours: 16 });

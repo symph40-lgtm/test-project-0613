@@ -178,7 +178,7 @@ export async function runEtfTop10Monitor(): Promise<void> {
         await dispatchToChannels("signal", today, {
           key: "predict_etf_flat_reg",
           severity: "low",
-          text: `[예측·TOP10] 정규장 방향 없음 (측정 ${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}) — F/M/본 모두 미확인. 방향 확인 시 즉시 문자.${crossLabel} (모니터링 스트림 — 프리장은 NXT 미거래로 판정 없음)${stateLine}`,
+          text: `[예측·TOP10 피셔] 정규장 방향 없음 (측정 ${String(Math.floor(minuteOfDay / 60)).padStart(2, "0")}:${String(minuteOfDay % 60).padStart(2, "0")}) — F/M/본 모두 미확인. 방향 확인 시 즉시 문자.${crossLabel} (모니터링 스트림 — 프리장은 NXT 미거래로 판정 없음)${stateLine}`,
           smsSubject: "예측 TOP10",
         });
       } catch { /* 발송 실패 무시 */ }
