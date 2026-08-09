@@ -1,10 +1,11 @@
-// PG-1 이익 보호 매도신호 — 오프라인 리플레이 (기획 docs/pg1-profit-guard-spec.md v0.2 §7):
-//   npx tsx scripts/pg1-replay.ts --baseline    ← 현행 청산의 반납률 분포만 (사전등록용, PG 계산 안 함)
-//   npx tsx scripts/pg1-replay.ts --ablation    ← 베이스라인 vs +PG-1A vs +PG-1B vs 둘 다 + 제외크로스 검증
-// 레그 재구성은 simLadder(하닉 4단 사다리)·simV2(삼전)를 미러링하되, 일별 레그 합계가 원본 시뮬레이터
-// 출력과 일치함을 하드 assert — 미러가 어긋나면 즉시 중단(기획서 §7 베이스라인 정합).
-// lookahead 가드: PG 판정은 마감 10분봉만 참조(profitGuard.ts 구조 보장), 10분봉 종가 = 해당 버킷 마지막
-// 1분봉 종가임을 이벤트마다 assert. 당일 고점 참조는 사후 반납률 '측정'에만 사용(신호에 미사용).
+// PG-1 이익 보호 매도신호 — 오프라인 리플레이 v0.2 (기획 docs/pg1-profit-guard-spec.md §11):
+//   npx tsx scripts/pg1-replay.ts             ← ablation 사다리: base → +C → +C+래칫 → +C+래칫+A → +FULL(B⅓분할)
+//                                                + 민감도 격자(n×p) + 게이트 지표 (사전등록 §10.1 대비)
+//   npx tsx scripts/pg1-replay.ts --baseline  ← 베이스라인만 (v0.1에서 등록 완료 — 재확인용)
+// v0.1판(A·B 전량 청산)은 게이트 전패 기각(c3b8cca) — 본 판은 발주자 v0.2 개정(PG-1C 샹들리에·본전 래칫·
+// B⅓ 분할·거래량 등급)을 검증한다. A·B 단독 성적은 기지(旣知) 상태에서 진행(스펙 §14.1).
+// 레그 재구성은 simLadder/simV2 미러 + 일별 parity 하드 assert. lookahead 가드: PG 판정은 마감 10분봉만,
+// C의 HH는 보유 후 완결 봉만(진입 부분 버킷 제외), 10분 종가 = 버킷 마지막 1분 종가 assert.
 import { readdirSync, readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 for (const line of readFileSync(resolve(process.cwd(), ".env.local"), "utf8").split(/\r?\n/)) {
@@ -15,21 +16,23 @@ import { isHighVolDay } from "../lib/predict/indicators";
 import { simV2, cumStream, ssv2FisherCfg } from "../lib/predict/ssV2";
 import { runFisher } from "../lib/predict/models/fisher";
 import { PREDICT_CONFIG as C } from "../lib/predict/config";
-import { agg10m, smaSeries, pg1aStream, pg1bStream, PG1A_DEFAULT, PG1B_DEFAULT, type Bar10, type Pg1aEvent, type Pg1bEvent } from "../lib/predict/profitGuard";
+import {
+  agg10m, smaSeries, atrSeries, pg1aStream, pg1bStream, pg1cExit,
+  PG1A_DEFAULT, PG1B_DEFAULT, PG1C_DEFAULT, type Bar10, type Pg1aEvent, type Pg1bEvent, type Pg1cOpts,
+} from "../lib/predict/profitGuard";
 import type { MinuteBar, PredictDailyBar } from "../lib/predict/types";
 
 const CACHE = resolve(process.cwd(), ".predict-cache");
-const MODE = process.argv.includes("--ablation") ? "ablation" : "baseline";
+const MODE = process.argv.includes("--baseline") ? "baseline" : "ablation";
+const FEE_RT = 0.02; // 왕복비용 % (국장 0.01%/편도×2) — 본전 래칫 레벨에만 사용
 const s1 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)}`;
 const s2 = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
 const load = (f: string): MinuteBar[] | null => existsSync(resolve(CACHE, f)) ? JSON.parse(readFileSync(resolve(CACHE, f), "utf8")) : null;
 const hm = (s: string) => parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
 const median = (a: number[]) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
-const mean = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
 
 type Day = { date: string; reg: MinuteBar[]; bars: MinuteBar[]; hist: PredictDailyBar[]; r10: number; d: PredictDailyBar };
 
-// kr-overnight-sweep.ts collect()와 동일 — 233일 캐시에서 hist 15일 워밍업 후 사용
 function collect(code: string): { days: Day[]; allDates: string[]; regByDate: Map<string, MinuteBar[]> } {
   const files = readdirSync(CACHE).filter((f) => f.startsWith(code + "-2") && f.endsWith(".json") && f.length === code.length + 16).sort();
   const daily: PredictDailyBar[] = []; const out: Day[] = [];
@@ -47,7 +50,7 @@ function collect(code: string): { days: Day[]; allDates: string[]; regByDate: Ma
   return { days: out, allDates, regByDate };
 }
 
-// ── 레그 미러 (simLadder/simV2와 산식 동일 — 일별 parity assert로 보증) ──
+// ── 레그 미러 (v0.1과 동일 — simLadder/simV2 산식, 일별 parity assert로 보증) ──
 type Leg = { pos: number; i0: number; dir: 1 | -1; px: number; size: number; endI?: number; endPx?: number; tag: string };
 
 function ladderLegs(bars: MinuteBar[], r10: number, trs: { i: number; to: string; px: number }[], defense: boolean, highVol: boolean): Leg[] {
@@ -90,7 +93,7 @@ function ladderLegs(bars: MinuteBar[], r10: number, trs: { i: number; to: string
   return legs;
 }
 
-function v2Legs(bars: MinuteBar[], r10: number, trs: { i: number; to: string; px: number }[], fJ: { i: number; t: number; dir: 1 | -1; px: number } | null): Leg[] {
+function v2Legs(bars: MinuteBar[], trs: { i: number; to: string; px: number }[], fJ: { i: number; t: number; dir: 1 | -1; px: number } | null): Leg[] {
   const cw = trs.length ? { i: trs[0].i, t: hm(bars[trs[0].i].time), dir: (trs[0].to === "up" ? 1 : -1) as 1 | -1, px: trs[0].px } : null;
   const legs: Leg[] = [];
   const fFirst = fJ && (!cw || fJ.t < cw.t);
@@ -107,33 +110,49 @@ function v2Legs(bars: MinuteBar[], r10: number, trs: { i: number; to: string; px
   return legs;
 }
 
-// tranche 산식 동일 + 청산 시점·가격 반환. pgExitI 지정 시 그 봉 종가 청산(스탑이 먼저면 스탑 우선 — 컷 헌법)
-function legOutcome(bars: MinuteBar[], close: number, leg: Leg, stopPct: number, pgExitI?: number, pgExitPx?: number): { pnl: number; cut: boolean; exitI: number; exitPx: number; pg: boolean } {
+// tranche 산식 + 본전 래칫(§7) + PG 청산. 스탑/래칫 레벨 터치가 항상 우선(컷 헌법).
+// 래칫: 1분 종가 기준 미실현 ≥1R → 본전+왕복비용 / ≥2R → +1R. 레벨은 상향만(단조).
+type Dyn = { pnl: number; cut: boolean; ratchetHit: boolean; exitI: number; exitPx: number; pg: boolean; stage: number };
+function legOutcomeDyn(bars: MinuteBar[], close: number, leg: Leg, stopPct: number, ratchet: boolean, pgExitI?: number, pgExitPx?: number, initStage = 0): Dyn {
   const s = stopPct / 100;
+  const lvl = (stage: number) => stage >= 2 ? leg.px * (1 + leg.dir * s) : stage === 1 ? leg.px * (1 + leg.dir * (FEE_RT / 100)) : leg.px * (1 - leg.dir * s);
+  let stage = ratchet ? initStage : 0;
+  let level = lvl(stage);
   const baseLim = leg.endI ?? bars.length;
-  const lim = pgExitI !== undefined ? Math.min(baseLim, pgExitI + 1) : baseLim; // 스탑 스캔은 청산 봉까지
+  const lim = pgExitI !== undefined ? Math.min(baseLim, pgExitI + 1) : baseLim;
   for (let k = leg.i0 + 1; k < lim; k++) {
     const b = bars[k];
-    if (leg.dir === 1 ? b.low <= leg.px * (1 - s) : b.high >= leg.px * (1 + s))
-      return { pnl: -stopPct * leg.size, cut: true, exitI: k, exitPx: leg.px * (leg.dir === 1 ? 1 - s : 1 + s), pg: false };
+    if (leg.dir === 1 ? b.low <= level : b.high >= level) {
+      return { pnl: ((level - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: stage === 0, ratchetHit: stage > 0, exitI: k, exitPx: level, pg: false, stage };
+    }
+    if (ratchet && stage < 2) {
+      const unreal = ((b.close - leg.px) / leg.px) * 100 * leg.dir;
+      const next = unreal >= 2 * stopPct ? 2 : unreal >= stopPct ? 1 : 0;
+      if (next > stage) { stage = next; level = lvl(stage); } // 상향만 — 하향 전이 없음(단조)
+    }
   }
+  // 래칫 레벨(≥1단)은 강제청산·PG청산 '당일 그 봉'의 터치도 우선한다 — 전환/PG 확정은 봉 마감,
+  // 레벨 터치는 봉 내 선행 사건. (0단 초기컷은 원본 tranche 시맨틱 유지 — parity)
+  const touchAt = (k: number): boolean => ratchet && stage >= 1 && k < bars.length && (leg.dir === 1 ? bars[k].low <= level : bars[k].high >= level);
+  const lvlExit = (k: number): Dyn => ({ pnl: ((level - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, ratchetHit: true, exitI: k, exitPx: level, pg: false, stage });
   if (pgExitI !== undefined && pgExitI < baseLim) {
+    if (touchAt(pgExitI)) return lvlExit(pgExitI);
     const px = pgExitPx ?? bars[pgExitI].close;
-    return { pnl: ((px - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, exitI: pgExitI, exitPx: px, pg: true };
+    return { pnl: ((px - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, ratchetHit: false, exitI: pgExitI, exitPx: px, pg: true, stage };
   }
   if (leg.endI !== undefined) {
+    if (touchAt(leg.endI)) return lvlExit(leg.endI);
     const px = leg.endPx ?? close;
-    return { pnl: ((px - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, exitI: leg.endI, exitPx: px, pg: false };
+    return { pnl: ((px - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, ratchetHit: false, exitI: leg.endI, exitPx: px, pg: false, stage };
   }
-  return { pnl: ((close - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, exitI: bars.length - 1, exitPx: close, pg: false };
+  return { pnl: ((close - leg.px) / leg.px) * 100 * leg.dir * leg.size, cut: false, ratchetHit: false, exitI: bars.length - 1, exitPx: close, pg: false, stage };
 }
 
-// ── 10분봉 전 기간 시리즈 + PG 이벤트 (일간 연결 MA) ──
+// ── 10분봉 전 기간 시리즈 + PG 이벤트 ──
 type Pg = {
   bars10: Bar10[]; dayRange: Map<string, [number, number]>;
   aUp: Pg1aEvent[]; aDn: Pg1aEvent[]; bUp: Pg1bEvent[]; bDn: Pg1bEvent[];
-  aUp2: Pg1aEvent[]; aDn2: Pg1aEvent[]; // 탐색판: 제외를 갭 수렴 패턴만으로 한정 (사전등록 밖 — 명기)
-  ma20: (number | null)[];
+  atrBy: Map<number, (number | null)[]>;
 };
 function buildPg(allDates: string[], regByDate: Map<string, MinuteBar[]>): Pg {
   const bars10: Bar10[] = []; const dayRange = new Map<string, [number, number]>();
@@ -143,16 +162,15 @@ function buildPg(allDates: string[], regByDate: Map<string, MinuteBar[]>): Pg {
     dayRange.set(date, [s, bars10.length]);
   }
   const ma5 = smaSeries(bars10, 5), ma20 = smaSeries(bars10, 20);
-  const gc = { ...PG1A_DEFAULT, exclusion: "gapConv" as const };
+  const atrBy = new Map<number, (number | null)[]>();
+  for (const p of [14, 22]) atrBy.set(p, atrSeries(bars10, p));
   return {
-    bars10, dayRange, ma20,
+    bars10, dayRange, atrBy,
     aUp: pg1aStream(bars10, ma5, ma20, 1, PG1A_DEFAULT), aDn: pg1aStream(bars10, ma5, ma20, -1, PG1A_DEFAULT),
-    aUp2: pg1aStream(bars10, ma5, ma20, 1, gc), aDn2: pg1aStream(bars10, ma5, ma20, -1, gc),
     bUp: pg1bStream(bars10, 1, PG1B_DEFAULT), bDn: pg1bStream(bars10, -1, PG1B_DEFAULT),
   };
 }
 
-// 10분봉 이벤트 → 그날 1분봉 인덱스(버킷 마지막 봉). 종가 일치 하드 assert (10분 집계 ↔ 1분 정합).
 function evTo1m(dayBars: MinuteBar[], ev: { time: string; px: number }): number {
   const m0 = hm(ev.time), endM = ev.time === "15:20" ? 15 * 60 + 31 : m0 + 10;
   let idx = -1;
@@ -161,43 +179,96 @@ function evTo1m(dayBars: MinuteBar[], ev: { time: string; px: number }): number 
     if (t >= m0 && t < endM && dayBars[i].time >= "09:00") idx = i;
   }
   if (idx < 0) throw new Error(`evTo1m: 버킷 ${ev.time} 1분봉 없음`);
-  if (Math.abs(dayBars[idx].close - ev.px) > 1e-9) throw new Error(`evTo1m: 종가 불일치 ${ev.time} ${dayBars[idx].close} != ${ev.px}`);
+  if (Math.abs(dayBars[idx].close - ev.px) > 1e-9) throw new Error(`evTo1m: 종가 불일치 ${ev.time}`);
   return idx;
 }
 
-// 종가×MA20 하향 이탈 변형 (§3.4 대안 — ablation 전용, 유효성 조건 없음·탐색적)
-function ma20BreakEvents(bars10: Bar10[], ma20: (number | null)[], dir: 1 | -1): { i: number; date: string; time: string; px: number }[] {
-  const out: { i: number; date: string; time: string; px: number }[] = [];
-  for (let t = 1; t < bars10.length; t++) {
-    const p = ma20[t - 1], c = ma20[t];
-    if (p === null || c === null || bars10[t].nMin === 0 || bars10[t - 1].nMin === 0) continue;
-    const crossed = dir === 1 ? bars10[t - 1].close >= p && bars10[t].close < c : bars10[t - 1].close <= p && bars10[t].close > c;
-    if (crossed) out.push({ i: t, date: bars10[t].date, time: bars10[t].time, px: bars10[t].close });
-  }
-  return out;
-}
+// ── 정책 평가 ──
+type Cfg = { c?: Pg1cOpts; ratchet?: boolean; a?: boolean; b13?: boolean };
+const CFGS: [string, Cfg][] = [
+  ["base", {}],
+  ["+R", { ratchet: true }], // 래칫 단독 한계 기여 (발주자 후속 질문 대비)
+  ["+C", { c: PG1C_DEFAULT }],
+  ["+CR", { c: PG1C_DEFAULT, ratchet: true }],
+  ["+CRA", { c: PG1C_DEFAULT, ratchet: true, a: true }],
+  ["FULL", { c: PG1C_DEFAULT, ratchet: true, a: true, b13: true }],
+];
+const GRID: Pg1cOpts[] = [];
+for (const n of [2.5, 3.0, 3.5]) for (const p of [14, 22]) GRID.push({ n, p, a: 1.5 });
 
-type PosRec = {
-  date: string; pos: number; dir: 1 | -1; entryI: number; entryPx: number; sizeMax: number;
-  exitI: number; exitPx: number; pnl: number; cut: boolean; pgExit: boolean; mfePct: number; givebackPct: number;
+type PosCtx = {
+  pos: number; legs: Leg[]; first: Leg; baseEnd: number;
+  evA: { i1m: number; px: number; i: number } | null;
+  evBs: { i1m: number; px: number; i: number; grade: "상" | "하" }[];
+  t0: number; t1: number; // C 스캔 구간 (완결 10분봉, 전 기간 인덱스)
 };
+type DayCtx = { D: Day; posCtxs: PosCtx[] };
+type PosRec = { date: string; pos: number; dir: 1 | -1; pnl: number; cut: boolean; ratchetHit: boolean; pgC: boolean; pgA: boolean; b13: boolean; mfePct: number; givebackPct: number; ratchetViol: boolean };
+
+function evalPos(pg: Pg, D: Day, pc: PosCtx, cfg: Cfg, cOpt?: Pg1cOpts): { pnl: number; rec: PosRec; skipped: number } {
+  const { first } = pc;
+  // C 후보
+  let cEv: { i1m: number; px: number } | null = null;
+  const co = cOpt ?? cfg.c;
+  if (co) {
+    const atr = pg.atrBy.get(co.p)!;
+    const hit = pg1cExit(pg.bars10, atr, pc.t0, pc.t1, first.dir, first.px, co);
+    if (hit) {
+      const i1m = evTo1m(D.bars, { time: pg.bars10[hit.i].time, px: hit.px });
+      if (i1m > first.i0 && i1m < pc.baseEnd) cEv = { i1m, px: hit.px };
+    }
+  }
+  const aEv = cfg.a && pc.evA && pc.evA.i1m > first.i0 && pc.evA.i1m < pc.baseEnd ? pc.evA : null;
+  let pgEv: { i1m: number; px: number; kind: "C" | "A" } | null = null;
+  if (cEv && aEv) pgEv = cEv.i1m <= aEv.i1m ? { ...cEv, kind: "C" } : { ...aEv, kind: "A" };
+  else if (cEv) pgEv = { ...cEv, kind: "C" };
+  else if (aEv) pgEv = { ...aEv, kind: "A" };
+  const bEv = cfg.b13 ? pc.evBs.find(e => e.grade === "상" && e.i1m > first.i0 && e.i1m < (pgEv?.i1m ?? pc.baseEnd)) ?? null : null;
+
+  let pnl = 0, cut = false, ratchetHit = false, pgC = false, pgA = false, viol = false, skipped = 0;
+  let exitI = -1, exitPx = NaN;
+  for (const l of pc.legs) {
+    if (pgEv && l.i0 >= pgEv.i1m) { skipped++; continue; }
+    const sizeMul = bEv && l.i0 >= bEv.i1m ? 2 / 3 : 1; // 트림 후 진입 레그는 ⅔ 규모
+    const leg = sizeMul === 1 ? l : { ...l, size: l.size * sizeMul };
+    let o: Dyn;
+    if (bEv && l.i0 < bEv.i1m) {
+      // 트림 전 구간 → ⅓ 실현 → 잔여 ⅔ 계속 (래칫 단계 승계)
+      const seg1 = legOutcomeDyn(D.bars, D.d.close, leg, stopPctOf(pc), !!cfg.ratchet, bEv.i1m, bEv.px);
+      if (seg1.pg) {
+        pnl += seg1.pnl / 3;
+        const rest = { ...leg, i0: bEv.i1m, size: leg.size * 2 / 3 };
+        o = legOutcomeDyn(D.bars, D.d.close, rest, stopPctOf(pc), !!cfg.ratchet, pgEv?.i1m, pgEv?.px, seg1.stage);
+      } else o = seg1; // 트림 전에 스탑/강제청산으로 종료
+    } else {
+      o = legOutcomeDyn(D.bars, D.d.close, leg, stopPctOf(pc), !!cfg.ratchet, pgEv?.i1m, pgEv?.px);
+    }
+    pnl += o.pnl; cut = cut || o.cut; ratchetHit = ratchetHit || o.ratchetHit;
+    if (o.pg && pgEv) { pgC = pgC || pgEv.kind === "C"; pgA = pgA || pgEv.kind === "A"; }
+    if (o.stage >= 1 && o.pnl < 0) viol = true; // 본전 래칫 위반 (§10 게이트 6 — 0건이어야 함)
+    if (o.exitI > exitI) { exitI = o.exitI; exitPx = o.exitPx; }
+  }
+  // 반납 측정 (사후)
+  let fav = first.px;
+  for (let k = first.i0 + 1; k <= Math.min(exitI, D.bars.length - 1); k++) {
+    const b = D.bars[k];
+    fav = first.dir === 1 ? Math.max(fav, b.high) : Math.min(fav, b.low);
+  }
+  const mfePct = ((fav - first.px) / first.px) * 100 * first.dir;
+  const givebackPct = exitI >= 0 ? ((fav - exitPx) / first.px) * 100 * first.dir : 0;
+  return { pnl, skipped, rec: { date: D.date, pos: pc.pos, dir: first.dir, pnl, cut, ratchetHit, pgC, pgA, b13: !!bEv, mfePct, givebackPct, ratchetViol: viol } };
+}
+// stopPct는 종목 상수 — evalPos에서 참조할 수 있게 클로저 대신 컨텍스트에 심는다
+let STOP_PCT_CUR = 2.5;
+const stopPctOf = (_pc: PosCtx) => STOP_PCT_CUR;
 
 function runSymbol(name: string, code: string, isHx: boolean) {
   const { days, allDates, regByDate } = collect(code);
-  const pg = MODE === "ablation" ? buildPg(allDates, regByDate) : null;
-  const a20Up = pg ? ma20BreakEvents(pg.bars10, pg.ma20, 1) : [];
-  const a20Dn = pg ? ma20BreakEvents(pg.bars10, pg.ma20, -1) : [];
-  const stopPct = isHx ? 2.5 : 1.5;
+  const pg = buildPg(allDates, regByDate);
+  STOP_PCT_CUR = isHx ? 2.5 : 1.5;
+  const stopPct = STOP_PCT_CUR;
   const cuts: boolean[] = [];
-  type Policy = "base" | "A" | "B" | "AB" | "A20" | "A2";
-  const policies: Policy[] = MODE === "ablation" ? ["base", "A", "B", "AB", "A20", "A2"] : ["base"];
-  const dayPnl: Record<Policy, number[]> = { base: [], A: [], B: [], AB: [], A20: [], A2: [] };
-  const posRecs: Record<Policy, PosRec[]> = { base: [], A: [], B: [], AB: [], A20: [], A2: [] };
-  const cutDays: Record<Policy, number> = { base: 0, A: 0, B: 0, AB: 0, A20: 0, A2: 0 };
-  const skippedAdds: Record<Policy, number> = { base: 0, A: 0, B: 0, AB: 0, A20: 0, A2: 0 };
-  const exclChecks: { date: string; time: string; wouldPnl: number; actualPnl: number }[] = [];
-  const exclChecks2: { date: string; time: string; wouldPnl: number; actualPnl: number }[] = [];
-  const bWarnsInHold: { date: string; i: number; time: string; dir: 1 | -1; hit: boolean | null; leadToA: number | null }[] = [];
+  const dayCtxs: DayCtx[] = [];
   let parityMax = 0;
 
   for (const D of days) {
@@ -210,171 +281,113 @@ function runSymbol(name: string, code: string, isHx: boolean) {
     const gapBig = Math.abs(((D.reg[0].open - prevClose) / prevClose) * 100) >= 4;
     const prevCut2 = cuts.slice(-3).filter(Boolean).length >= 2;
     const highVol = isHighVolDay(D.hist);
+    const legs = isHx ? ladderLegs(D.bars, D.r10, trs, prevCut2 || gapBig, highVol) : v2Legs(D.bars, trs, fJ);
 
-    const legs = isHx ? ladderLegs(D.bars, D.r10, trs, prevCut2 || gapBig, highVol) : v2Legs(D.bars, D.r10, trs, fJ);
-
-    // ── parity: 레그 합계 == 원본 시뮬레이터 (하드 assert) ──
+    // parity (베이스라인 = 원본 시뮬레이터)
     const sim = isHx
       ? simLadder(D.bars, D.r10, D.d.close, trs as never, prevCut2 || gapBig, highVol)
       : simV2(D.bars, D.r10, D.d.close, C.newModel.ssV2.tan, fJ, C.newModel.ssV2.win);
-    const basePnl = legs.reduce((a, l) => a + legOutcome(D.bars, D.d.close, l, stopPct).pnl, 0);
+    const basePnl = legs.reduce((a, l) => a + legOutcomeDyn(D.bars, D.d.close, l, stopPct, false).pnl, 0);
     parityMax = Math.max(parityMax, Math.abs(basePnl - sim.pnl));
-    if (Math.abs(basePnl - sim.pnl) > 1e-6) throw new Error(`parity 실패 ${name} ${D.date}: 미러 ${basePnl} vs 원본 ${sim.pnl}`);
-    cuts.push(sim.pnl <= -2.4); // 서킷브레이커 이력은 베이스라인 기준 고정 (스윕과 동일)
+    if (Math.abs(basePnl - sim.pnl) > 1e-6) throw new Error(`parity 실패 ${name} ${D.date}`);
+    cuts.push(sim.pnl <= -2.4);
 
-    // 그날 PG 이벤트 (1분 인덱스로 매핑)
-    const range = pg?.dayRange.get(D.date);
-    const dayEv = (evs: { i: number; date: string; time: string; px: number; kind?: string }[], kindFilter?: string) =>
-      (range ? evs.filter(e => e.i >= range[0] && e.i < range[1] && (!kindFilter || e.kind === kindFilter)) : [])
-        .map(e => ({ ...e, i1m: evTo1m(D.bars, e) }));
-    const evA = { 1: dayEv(pg?.aUp ?? [], "valid"), [-1]: dayEv(pg?.aDn ?? [], "valid") } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
-    const evA2 = { 1: dayEv(pg?.aUp2 ?? [], "valid"), [-1]: dayEv(pg?.aDn2 ?? [], "valid") } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
-    const evB = { 1: dayEv(pg?.bUp ?? [], "warn"), [-1]: dayEv(pg?.bDn ?? [], "warn") } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
-    const evA20 = { 1: dayEv(a20Up), [-1]: dayEv(a20Dn) } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
-    const evAexcl = { 1: dayEv(pg?.aUp ?? [], "excluded"), [-1]: dayEv(pg?.aDn ?? [], "excluded") } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
-    const evA2excl = { 1: dayEv(pg?.aUp2 ?? [], "excluded"), [-1]: dayEv(pg?.aDn2 ?? [], "excluded") } as Record<1 | -1, { i1m: number; px: number; time: string; i: number }[]>;
+    const range = pg.dayRange.get(D.date);
+    if (!range) continue;
+    const [r0, r1] = range;
+    const dayEvA = (dir: 1 | -1) => (dir === 1 ? pg.aUp : pg.aDn).filter(e => e.i >= r0 && e.i < r1 && e.kind === "valid").map(e => ({ i1m: evTo1m(D.bars, e), px: e.px, i: e.i }));
+    const dayEvB = (dir: 1 | -1) => (dir === 1 ? pg.bUp : pg.bDn).filter(e => e.i >= r0 && e.i < r1 && e.kind === "warn").map(e => ({ i1m: evTo1m(D.bars, e), px: e.px, i: e.i, grade: e.grade }));
 
-    for (const pol of policies) {
+    const byPos = new Map<number, Leg[]>();
+    for (const l of legs) byPos.set(l.pos, [...(byPos.get(l.pos) ?? []), l]);
+    const posCtxs: PosCtx[] = [];
+    for (const [posId, posLegs] of byPos) {
+      const first = posLegs[0];
+      const baseEnd = Math.max(...posLegs.map(l => legOutcomeDyn(D.bars, D.d.close, l, stopPct, false).exitI));
+      const entryClock = hm(D.bars[first.i0].time) + 1; // 진입봉 마감 시각
+      let t0 = r1; // C 스캔 시작: 진입 이후 시작하는 첫 완결 버킷
+      for (let t = r0; t < r1; t++) if (hm(pg.bars10[t].time) >= entryClock) { t0 = t; break; }
+      posCtxs.push({
+        pos: posId, legs: posLegs, first, baseEnd, t0, t1: r1 - 1,
+        evA: dayEvA(first.dir).find(e => e.i1m > first.i0 && e.i1m < baseEnd) ?? null,
+        evBs: dayEvB(first.dir).filter(e => e.i1m > first.i0 && e.i1m < baseEnd),
+      });
+    }
+    dayCtxs.push({ D, posCtxs });
+  }
+
+  console.log(`\n════ ${name} — ${days.length}일 · parity 최대오차 ${parityMax.toExponential(1)} ════`);
+
+  // ── ablation 사다리 ──
+  const cfgs = MODE === "baseline" ? CFGS.slice(0, 1) : CFGS;
+  const recsBy = new Map<string, PosRec[]>();
+  for (const [label, cfg] of cfgs) {
+    const dayPnls: number[] = []; const recs: PosRec[] = [];
+    let cutDays = 0, skippedTot = 0;
+    for (const dc of dayCtxs) {
       let pnl = 0, dayCut = false;
-      const byPos = new Map<number, Leg[]>();
-      for (const l of legs) byPos.set(l.pos, [...(byPos.get(l.pos) ?? []), l]);
-      for (const [posId, posLegs] of byPos) {
-        const first = posLegs[0];
-        // 포지션 첫 진입 후 첫 PG 이벤트 (베이스라인 강제청산 이전 것만 유효 — 이후는 이미 청산된 상태)
-        const baseEnd = Math.max(...posLegs.map(l => legOutcome(D.bars, D.d.close, l, stopPct).exitI));
-        const pick = (evs: { i1m: number; px: number }[]) => evs.find(e => e.i1m > first.i0 && e.i1m < baseEnd) ?? null;
-        let pgEv: { i1m: number; px: number } | null = null;
-        if (pol === "A") pgEv = pick(evA[first.dir]);
-        else if (pol === "A2") pgEv = pick(evA2[first.dir]);
-        else if (pol === "B") pgEv = pick(evB[first.dir]);
-        else if (pol === "A20") pgEv = pick(evA20[first.dir]);
-        else if (pol === "AB") {
-          const a = pick(evA[first.dir]), b = pick(evB[first.dir]);
-          pgEv = a && b ? (a.i1m <= b.i1m ? a : b) : a ?? b;
-        }
-        let exitI = -1, exitPx = NaN, posPnl = 0, posCut = false, pgUsed = false, sizeMax = 0;
-        for (const l of posLegs) {
-          if (pgEv && l.i0 >= pgEv.i1m) { skippedAdds[pol]++; continue; } // PG 청산 후 증액 불발
-          const o = legOutcome(D.bars, D.d.close, l, stopPct, pgEv?.i1m, pgEv?.px);
-          posPnl += o.pnl; posCut = posCut || o.cut; pgUsed = pgUsed || o.pg; sizeMax += l.size;
-          if (o.exitI > exitI) { exitI = o.exitI; exitPx = o.exitPx; }
-        }
-        if (exitI < 0) continue;
-        // 반납률 측정 (사후·신호 미사용): 진입 후~청산까지 유리 극값 대비 청산가
-        let fav = first.px;
-        for (let k = first.i0 + 1; k <= Math.min(exitI, D.bars.length - 1); k++) {
-          const b = D.bars[k];
-          fav = first.dir === 1 ? Math.max(fav, b.high) : Math.min(fav, b.low);
-        }
-        const mfePct = ((fav - first.px) / first.px) * 100 * first.dir;
-        const givebackPct = ((fav - exitPx) / first.px) * 100 * first.dir;
-        posRecs[pol].push({ date: D.date, pos: posId, dir: first.dir, entryI: first.i0, entryPx: first.px, sizeMax, exitI, exitPx, pnl: posPnl, cut: posCut, pgExit: pgUsed, mfePct, givebackPct });
-        pnl += posPnl; dayCut = dayCut || posCut;
+      for (const pc of dc.posCtxs) {
+        const r = evalPos(pg, dc.D, pc, cfg);
+        pnl += r.pnl; skippedTot += r.skipped; dayCut = dayCut || r.rec.cut;
+        recs.push(r.rec);
       }
-      dayPnl[pol].push(pnl);
-      if (dayCut) cutDays[pol]++;
+      dayPnls.push(pnl); if (dayCut) cutDays++;
     }
-
-    // 제외 크로스 정당성 (§3.3): 보유 중 발생한 제외 크로스 — 거기서 청산했다면 vs 실제 베이스라인
-    if (MODE === "ablation") {
-      const byPos = new Map<number, Leg[]>();
-      for (const l of legs) byPos.set(l.pos, [...(byPos.get(l.pos) ?? []), l]);
-      for (const [, posLegs] of byPos) {
-        const first = posLegs[0];
-        const baseEnd = Math.max(...posLegs.map(l => legOutcome(D.bars, D.d.close, l, stopPct).exitI));
-        for (const [evsX, sink] of [[evAexcl, exclChecks], [evA2excl, exclChecks2]] as const) {
-          const ex = evsX[first.dir].find(e => e.i1m > first.i0 && e.i1m < baseEnd);
-          if (!ex) continue;
-          let would = 0, actual = 0;
-          for (const l of posLegs) {
-            if (l.i0 >= ex.i1m) continue;
-            would += legOutcome(D.bars, D.d.close, l, stopPct, ex.i1m, ex.px).pnl;
-            actual += legOutcome(D.bars, D.d.close, l, stopPct).pnl;
-          }
-          sink.push({ date: D.date, time: D.bars[ex.i1m].time, wouldPnl: would, actualPnl: actual });
-        }
-        // PG-1B 적중 채점 (§6 정의: 경고 후 12봉 내 유리극값 미갱신 & 역행 진행) + B→A 선행
-        for (const w of evB[first.dir].filter(e => e.i1m > first.i0 && e.i1m < baseEnd)) {
-          const r = pg!.dayRange.get(D.date)!;
-          const M = 12, endT = Math.min(w.i + M, r[1] - 1);
-          let hit: boolean | null = null;
-          if (endT > w.i) {
-            let ext = -Infinity, extBefore = -Infinity;
-            for (let t = r[0]; t <= w.i; t++) extBefore = Math.max(extBefore, first.dir === 1 ? pg!.bars10[t].high : -pg!.bars10[t].low);
-            for (let t = w.i + 1; t <= endT; t++) ext = Math.max(ext, first.dir === 1 ? pg!.bars10[t].high : -pg!.bars10[t].low);
-            const adverse = (pg!.bars10[endT].close - pg!.bars10[w.i].close) * first.dir < 0;
-            hit = ext < extBefore && adverse;
-          }
-          const nextA = evA[first.dir].find(e => e.i1m > w.i1m && e.i1m < baseEnd);
-          bWarnsInHold.push({ date: D.date, i: w.i, time: w.time, dir: first.dir, hit, leadToA: nextA ? nextA.i - w.i : null });
-        }
-      }
-    }
-  }
-
-  // ── 출력 ──
-  console.log(`\n════ ${name} — ${days.length}일 · 미러 parity 최대오차 ${parityMax.toExponential(1)} ════`);
-  const report = (pol: Policy) => {
-    const tot = dayPnl[pol].reduce((a, b) => a + b, 0);
-    const worst = Math.min(...dayPnl[pol]);
-    const recs = posRecs[pol];
-    const gb = recs.map(r => r.givebackPct);
+    recsBy.set(label, recs);
+    const tot = dayPnls.reduce((a, b) => a + b, 0), worst = Math.min(...dayPnls);
     const gbGain = recs.filter(r => r.mfePct >= 1).map(r => r.givebackPct);
-    const pgN = recs.filter(r => r.pgExit).length;
-    console.log(`  [${pol.padEnd(4)}] 합계 ${s1(tot)}%p · 최악일 ${s2(worst)} · 컷일 ${cutDays[pol]} · 포지션 ${recs.length}` +
-      ` · 반납 중앙(전체) ${s2(median(gb))} · 반납 중앙(MFE≥1%) ${s2(median(gbGain))}(n=${gbGain.length}) · 평균 ${s2(mean(gbGain))}` +
-      (pol === "base" ? "" : ` · PG청산 ${pgN}회 · 증액불발 ${skippedAdds[pol]}`));
-  };
-  for (const pol of policies) report(pol);
+    const nC = recs.filter(r => r.pgC).length, nA = recs.filter(r => r.pgA).length;
+    const nR = recs.filter(r => r.ratchetHit).length, nB = recs.filter(r => r.b13).length;
+    const viol = recs.filter(r => r.ratchetViol).length;
+    console.log(`  [${label.padEnd(5)}] 합계 ${s1(tot)}%p · 최악일 ${s2(worst)} · 컷일 ${cutDays} · 반납중앙(MFE≥1%) ${s2(median(gbGain))}(n=${gbGain.length})` +
+      (label === "base" ? "" : ` · C청산 ${nC} · A청산 ${nA} · 래칫청산 ${nR} · B트림 ${nB} · 증액불발 ${skippedTot}${viol ? ` · ⚠래칫위반 ${viol}` : ""}`));
+  }
 
-  if (MODE === "baseline") {
-    // 사전등록용 분포 상세 (PG 미계산)
-    const recs = posRecs.base;
-    const gbGain = recs.filter(r => r.mfePct >= 1).map(r => r.givebackPct).sort((a, b) => a - b);
-    const q = (p: number) => gbGain.length ? gbGain[Math.min(gbGain.length - 1, Math.floor(p * gbGain.length))] : NaN;
-    console.log(`  MFE≥1% 포지션 ${gbGain.length}개 반납 분포: p25 ${s2(q(0.25))} · p50 ${s2(q(0.5))} · p75 ${s2(q(0.75))} · p90 ${s2(q(0.9))}`);
-    const dirSplit = (d: 1 | -1) => {
-      const g = recs.filter(r => r.dir === d && r.mfePct >= 1).map(r => r.givebackPct);
-      return `${d === 1 ? "레버" : "인버"} n=${g.length} 중앙 ${s2(median(g))}`;
-    };
-    console.log(`  방향별: ${dirSplit(1)} / ${dirSplit(-1)}`);
-  } else {
-    // 제외 크로스 정당성 (등록판 / 탐색판)
-    for (const [label, arr] of [["등록판(sameDir)", exclChecks], ["탐색판(gapConv)", exclChecks2]] as const) {
-      const good = arr.filter(e => e.wouldPnl < e.actualPnl).length;
-      console.log(`  제외 크로스 ${label}: ${arr.length}건 — 제외가 옳았음 ${good}건 (${arr.length ? Math.round(good / arr.length * 100) : 0}%)`);
-    }
-    // PG-1B 적중률·선행
-    const judged = bWarnsInHold.filter(w => w.hit !== null);
-    const hits = judged.filter(w => w.hit).length;
-    const leads = bWarnsInHold.filter(w => w.leadToA !== null).map(w => w.leadToA!);
-    console.log(`  PG-1B 보유 중 경고 ${bWarnsInHold.length}건 · 적중 ${hits}/${judged.length} (${judged.length ? Math.round(hits / judged.length * 100) : 0}%) · B→A 선행 중앙 ${median(leads).toFixed(0)}봉 (n=${leads.length})`);
-    // 조기청산 비용 vs 반납 감소: PG로 청산된 포지션의 (해당 정책 pnl - 베이스라인 pnl) 분해
-    const baseByKey = new Map(posRecs.base.map(r => [`${r.date}#${r.pos}`, r]));
-    // 방향별 순효과 — SOXX 인버스 한정 보호청산(8/4 채택) 선례 대응: 인버스 레그만 적용했을 때의 delta
-    for (const pol of ["A", "A2", "B", "AB", "A20"] as const) {
-      let dLev = 0, dInv = 0;
-      for (const r of posRecs[pol]) {
-        const b = baseByKey.get(`${r.date}#${r.pos}`);
-        if (!b) continue;
-        if (r.dir === 1) dLev += r.pnl - b.pnl; else dInv += r.pnl - b.pnl;
-      }
-      console.log(`  방향별 순효과 [${pol}]: 레버 ${s1(dLev)}%p / 인버 ${s1(dInv)}%p`);
-    }
-    for (const pol of ["A", "A2"] as const) {
-      let oppLoss = 0, saved = 0, nWorse = 0, nBetter = 0;
-      for (const r of posRecs[pol].filter(x => x.pgExit)) {
-        const b = baseByKey.get(`${r.date}#${r.pos}`);
-        if (!b) continue;
-        const d = r.pnl - b.pnl;
-        if (d >= 0) { saved += d; nBetter++; } else { oppLoss += -d; nWorse++; }
-      }
-      console.log(`  PG-1${pol === "A" ? "A(등록판)" : "A 탐색판(gapConv)"} 청산 포지션: 개선 ${nBetter}건 +${saved.toFixed(1)}%p vs 악화 ${nWorse}건 -${oppLoss.toFixed(1)}%p (순 ${s1(saved - oppLoss)}%p)`);
+  if (MODE === "baseline") return;
+
+  // ── 게이트 지표 ──
+  // C vs A 선행성 (§10.1-3): 같은 보유에서 둘 다 발동 가능한 케이스
+  let cFirst = 0, both = 0;
+  for (const dc of dayCtxs) for (const pc of dc.posCtxs) {
+    const co = PG1C_DEFAULT;
+    const hit = pg1cExit(pg.bars10, pg.atrBy.get(co.p)!, pc.t0, pc.t1, pc.first.dir, pc.first.px, co);
+    const cI = hit ? evTo1m(dc.D.bars, { time: pg.bars10[hit.i].time, px: hit.px }) : null;
+    const cOk = cI !== null && cI > pc.first.i0 && cI < pc.baseEnd;
+    const aOk = !!pc.evA;
+    if (cOk && aOk) { both++; if (cI! < pc.evA!.i1m) cFirst++; }
+  }
+  console.log(`  C vs A 선행성: 둘 다 발동 ${both}건 중 C 선행 ${cFirst}건 (${both ? Math.round(cFirst / both * 100) : 0}%)`);
+
+  // B 등급별 적중률 (§10.1-4) — 보유 중 경고, 적중 = 12봉 내 유리극값 미갱신 & 종가 역행
+  const gradeStat = { 상: { n: 0, hit: 0 }, 하: { n: 0, hit: 0 } };
+  for (const dc of dayCtxs) for (const pc of dc.posCtxs) {
+    const [r0d, r1d] = pg.dayRange.get(dc.D.date)!;
+    for (const w of pc.evBs) {
+      const endT = Math.min(w.i + 12, r1d - 1);
+      if (endT <= w.i) continue;
+      let extBefore = -Infinity, ext = -Infinity;
+      for (let t = r0d; t <= w.i; t++) extBefore = Math.max(extBefore, pc.first.dir === 1 ? pg.bars10[t].high : -pg.bars10[t].low);
+      for (let t = w.i + 1; t <= endT; t++) ext = Math.max(ext, pc.first.dir === 1 ? pg.bars10[t].high : -pg.bars10[t].low);
+      const adverse = (pg.bars10[endT].close - pg.bars10[w.i].close) * pc.first.dir < 0;
+      gradeStat[w.grade].n++;
+      if (ext < extBefore && adverse) gradeStat[w.grade].hit++;
     }
   }
-  return { dayPnl, posRecs };
+  for (const g of ["상", "하"] as const) {
+    const s = gradeStat[g];
+    console.log(`  PG-1B 등급 ${g}: ${s.hit}/${s.n} 적중 (${s.n ? Math.round(s.hit / s.n * 100) : 0}%)`);
+  }
+
+  // 민감도 격자 (§10.1-6): +C 단독, n×p — 합계 부호 평탄성
+  const cells: string[] = [];
+  for (const co of GRID) {
+    let tot = 0;
+    for (const dc of dayCtxs) for (const pc of dc.posCtxs) tot += evalPos(pg, dc.D, pc, { c: co }, co).pnl;
+    cells.push(`n${co.n}/p${co.p} ${s1(tot)}`);
+  }
+  console.log(`  +C 민감도(합계): ${cells.join(" · ")}  [base ${s1(dayCtxs.reduce((a, dc) => a + dc.posCtxs.reduce((x, pc) => x + evalPos(pg, dc.D, pc, {}).pnl, 0), 0))}]`);
 }
 
-console.log(`PG-1 리플레이 — 모드: ${MODE} (사전등록 순서: baseline → §6.1 기입 → ablation)`);
+console.log(`PG-1 리플레이 v0.2 — 모드: ${MODE} (사전등록 §10.1 → ablation 사다리 → 게이트)`);
 runSymbol("하이닉스(4단 사다리)", "000660", true);
 runSymbol("삼성전자(v2)", "005930", false);

@@ -111,26 +111,27 @@ export function pg1aStream(bars: Bar10[], ma5: (number | null)[], ma20: (number 
   return out;
 }
 
-export type Pg1bOpts = { win: number; need: number; mult: number; cooldown: number };
-export const PG1B_DEFAULT: Pg1bOpts = { win: 7, need: 4, mult: 1.5, cooldown: 6 };
+export type Pg1bOpts = { win: number; need: number; mult: number; cooldown: number; volMult: number; volRefWin: number };
+export const PG1B_DEFAULT: Pg1bOpts = { win: 7, need: 4, mult: 1.5, cooldown: 6, volMult: 1.3, volRefWin: 20 };
 
 export type Pg1bEvent = {
   i: number; date: string; time: string; px: number;
   kind: "warn" | "hold" | "cooldown";                       // hold = 창 내 결측으로 판정 보류(§4.2)
   c1: number; c2: number; c3: number;                        // 조건별 충족 봉 수 (진단용)
+  grade: "상" | "하";                                        // 거래량 오버레이 (v0.2 §5.4, Wyckoff effort-vs-result)
 };
 
 // PG-1B 꼬리 클러스터 스트림. dir=1: 윗꼬리(고점 전환 경고) / dir=-1: 아랫꼬리 거울상.
 // 매 봉 최근 win개 마감 봉을 검사, 3조건 전부 need개 이상이면 경고. 쿨다운 내 재충족은 kind=cooldown으로 기록만.
 export function pg1bStream(bars: Bar10[], dir: 1 | -1, opts: Pg1bOpts = PG1B_DEFAULT): Pg1bEvent[] {
-  const { win, need, mult, cooldown } = opts;
+  const { win, need, mult, cooldown, volMult, volRefWin } = opts;
   const out: Pg1bEvent[] = [];
   let lastWarn = -Infinity;
   for (let t = win - 1; t < bars.length; t++) {
     const w = bars.slice(t - win + 1, t + 1);
     if (w.some((b) => b.nMin === 0)) {
       // 결측 포함 창 — 판정 보류 (해당 창에서 조건 계산 자체를 하지 않는다)
-      out.push({ i: t, date: bars[t].date, time: bars[t].time, px: bars[t].close, kind: "hold", c1: -1, c2: -1, c3: -1 });
+      out.push({ i: t, date: bars[t].date, time: bars[t].time, px: bars[t].close, kind: "hold", c1: -1, c2: -1, c3: -1, grade: "하" });
       continue;
     }
     let c1 = 0, c2 = 0, c3 = 0;
@@ -147,8 +148,61 @@ export function pg1bStream(bars: Bar10[], dir: 1 | -1, opts: Pg1bOpts = PG1B_DEF
     if (c1 >= need && c2 >= need && c3 >= need) {
       const kind = t - lastWarn <= cooldown ? "cooldown" : "warn";
       if (kind === "warn") lastWarn = t;
-      out.push({ i: t, date: bars[t].date, time: bars[t].time, px: bars[t].close, kind, c1, c2, c3 });
+      // 거래량 등급 (§5.4): V_ref = 최근 volRefWin봉 거래량 중앙값, 창 과반이 V_ref×m 이상이면 '상'
+      const refBars = bars.slice(Math.max(0, t - volRefWin + 1), t + 1).filter((b) => b.nMin > 0);
+      const vols = refBars.map((b) => b.volume).sort((a, b) => a - b);
+      const vRef = vols.length ? vols[Math.floor(vols.length / 2)] : 0;
+      const nHeavy = w.filter((b) => b.volume >= vRef * volMult).length;
+      const grade: "상" | "하" = vRef > 0 && nHeavy >= need ? "상" : "하";
+      out.push({ i: t, date: bars[t].date, time: bars[t].time, px: bars[t].close, kind, c1, c2, c3, grade });
     }
   }
   return out;
+}
+
+// ── PG-1C: ATR 트레일링 스톱 (v0.2 §6, Chandelier Exit 변형) ──
+
+// Wilder RMA 방식 ATR — 일간 연결 평탄 배열 위에서. 결측 봉은 null(갱신 없음), 워밍업 p봉.
+export function atrSeries(bars: Bar10[], p = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null);
+  let prevClose: number | null = null, atr: number | null = null;
+  const warm: number[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    if (b.nMin === 0 || !isFinite(b.close)) continue;
+    const tr = prevClose === null ? b.high - b.low : Math.max(b.high - b.low, Math.abs(b.high - prevClose), Math.abs(b.low - prevClose));
+    prevClose = b.close;
+    if (atr === null) {
+      warm.push(tr);
+      if (warm.length === p) { atr = warm.reduce((a, x) => a + x, 0) / p; out[i] = atr; }
+    } else { atr = (atr * (p - 1) + tr) / p; out[i] = atr; }
+  }
+  return out;
+}
+
+export type Pg1cOpts = { n: number; p: number; a: number }; // n = ATR 배수, p = ATR 기간, a = 활성화 임계(ATR 배수)
+export const PG1C_DEFAULT: Pg1cOpts = { n: 3.0, p: 14, a: 1.5 };
+
+// 보유 구간 [t0, t1] (완결 10분봉 인덱스)에서의 첫 TS 이탈. 없으면 null.
+// HH는 진입가로 초기화 후 완결 봉 고가로만 갱신(§2.1-6 — 진입 부분 버킷 제외는 호출측이 t0로 보장).
+// TS 단조성(§6.1 헌법 후보)은 구성상 보장 + 위반 시 하드스톱. 활성화(§6.3): 미실현 ≥ a×ATR 도달 후.
+// dir=-1(인버스) 거울상: LL 앵커·TS = LL + n×ATR·종가 상향 이탈.
+export function pg1cExit(bars: Bar10[], atr: (number | null)[], t0: number, t1: number, dir: 1 | -1, entryPx: number, opts: Pg1cOpts = PG1C_DEFAULT): { i: number; px: number; ts: number } | null {
+  const { n, a } = opts;
+  let hh = entryPx, ts: number | null = null, active = false;
+  let prevTs = dir === 1 ? -Infinity : Infinity;
+  for (let t = t0; t <= t1 && t < bars.length; t++) {
+    const b = bars[t];
+    if (b.nMin === 0 || !isFinite(b.close)) continue;
+    const A = atr[t];
+    if (A === null) continue;
+    hh = dir === 1 ? Math.max(hh, b.high) : Math.min(hh, b.low);
+    const cand = dir === 1 ? hh - n * A : hh + n * A;
+    ts = ts === null ? cand : dir === 1 ? Math.max(ts, cand) : Math.min(ts, cand);
+    if (dir === 1 ? ts < prevTs - 1e-9 : ts > prevTs + 1e-9) throw new Error(`pg1cExit: TS 단조성 위반 ${b.date} ${b.time}`);
+    prevTs = ts;
+    if (!active && (b.close - entryPx) * dir >= a * A) active = true;
+    if (active && (dir === 1 ? b.close < ts : b.close > ts)) return { i: t, px: b.close, ts };
+  }
+  return null;
 }
