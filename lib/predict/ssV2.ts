@@ -128,7 +128,11 @@ export async function runSsV2Monitor(): Promise<void> {
     // 커버리지 가드 (candleWindow와 동일 — 결손 호출로 오판정 방지)
     const expectKrx = Math.min(minuteOfDay, hhmmToMin("15:30")) - 9 * 60 - 1;
     if (expectKrx > 10 && krx.length < expectKrx * 0.8) return;
-    if (minuteOfDay >= hhmmToMin("09:05") && krx.length > 10 && (pre?.length ?? 0) < 40) return;
+    // 프리장 결손 가드 강화 (8/6 실사고 교정): 정규장이 시작됐는데 프리장 봉이 결손이면 판정 보류.
+    // 종전 조건(≥09:05 && krx>10)은 krx>10이 09:12 이후에야 참이라 09:00~09:11 구간이 무방비였고,
+    // 8/6 삼전이 그 틈에 프리장 없는 데이터로 '09:00 상승'을 첫판정으로 오인·레버 진입(-3.0%).
+    // 완전 데이터 재현의 첫판정은 08:46 하락이었다 (scripts/kr-nm-day-report.ts --date 2026-08-06).
+    if (krx.length > 0 && (pre?.length ?? 0) < 40) return;
     const bars = [...(pre ?? []).filter((b) => b.time < nowHHMM), ...krx];
     if (bars.length < 8) return;
 
@@ -172,10 +176,22 @@ export async function runSsV2Monitor(): Promise<void> {
           const lag = minuteOfDay - cw.t;
           const nm = cw.dir === 1 ? "삼전 레버리지 ETF" : "삼전 인버스 ETF";
           const when = cw.t < hhmmToMin("09:00") ? "09:00 개장 직후 개장가로 매수 (프리장 판정)" : "지금 즉시 매수";
+          // 슬리피지 가드 (8/6 실사고 후속 — 판정 09:00 240,000 → 수신 후 매수 시점엔 이미 +1%대):
+          // 현재가가 판정가에서 0.7% 이상 불리하게 이탈했으면 추격 금지. 시각 지연(30분)과 별개 축.
+          const curPx = bars[bars.length - 1].close;
+          const slip = ((curPx - cw.px) / cw.px) * 100 * cw.dir;
+          const slipNote = slip >= 0.7 ? `\n⚠현재가 ${curPx.toLocaleString()}원 — 판정가 대비 이미 ${slip.toFixed(1)}% 진행. 추격 매수 금지, 다음 문자 대기` : "";
           const lagNote = lag >= 30 ? `\n⚠지연 통지(확인 ${st.entryT}, ${lag}분 경과) — 위 ①② 실행 금지, 다음 문자 대기` : "";
           const stopPx = cw.dir === 1 ? cw.px * (1 - STOP_PCT / 100) : cw.px * (1 + STOP_PCT / 100);
+          // 하이닉스 신모델 현재 방향 교차 표기 (사용자 8/6 혼란 — 하닉 인버·삼전 레버 동시): 방향이 다르면 명시
+          let hxLine = "";
+          try {
+            const { data: hxRow } = await admin.from("ops_settings").select("value").eq("key", "predict_cw_state").maybeSingle();
+            const hxSt = (hxRow?.value ?? null) as { date?: string; dir?: "up" | "down" } | null;
+            if (hxSt?.date === today && hxSt.dir) hxLine = `\n참고: 하이닉스 신모델은 현재 ${hxSt.dir === "up" ? "상승(레버)" : "하락(인버)"} — 종목별 독립 판정이라 방향이 다를 수 있음`;
+          } catch { /* 교차 표기 실패 무시 */ }
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동스탑설정 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${lagNote}\n무응답=진입\n----\n${st.entryT} ${cw.px.toLocaleString()}원 — 직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 시범: 232일 +115.4%p(5봉 rebox판).`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입 (판정 ${st.entryT} ${cw.px.toLocaleString()}원)\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동스탑설정 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${slipNote}${lagNote}\n무응답=진입\n----\n직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 이 문자 = 신모델(배정 70%). 기존계층(30%)은 10:00 진입 별도 문자.${hxLine} 시범: 232일 +115.4%p(5봉 rebox판).`);
         }
       }
       // ② 정찰 레그 스탑

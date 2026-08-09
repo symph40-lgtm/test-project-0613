@@ -316,7 +316,9 @@ export async function runCandleWindowMonitor(): Promise<void> {
     // 커버리지 가드 (checkpointStream 이식 — 결손 호출로 오판정 방지)
     const expectKrx = Math.min(minuteOfDay, hhmmToMin("15:30")) - 9 * 60 - 1;
     if (expectKrx > 10 && krx.length < expectKrx * 0.8) return;
-    if (minuteOfDay >= hhmmToMin("09:05") && krx.length > 10 && (pre?.length ?? 0) < 40) return;
+    // 프리장 결손 가드 강화 (8/6 삼전 실사고 교정 — ssV2.ts 동일): krx>10 조건이 09:12 이후에야 참이라
+    // 09:00~09:11 구간이 무방비였다. 정규장 시작 후 프리장 결손이면 판정 보류.
+    if (krx.length > 0 && (pre?.length ?? 0) < 40) return;
     const bars = [...(pre ?? []).filter((b) => b.time < nowHHMM), ...krx];
     if (bars.length < 8) return;
 
@@ -366,7 +368,7 @@ export async function runCandleWindowMonitor(): Promise<void> {
       const stopPx = st.dir === "up" ? e.px * (1 - STOP_PCT / 100) : e.px * (1 + STOP_PCT / 100);
       const lagNote = lag >= 30 ? ` ⚠지연 통지(${lag}분 경과) — 추격 기준가 아님.` : "";
       await send(`predict_cw_entry_${st.entryT.replace(":", "")}`, "medium",
-        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정\n▶페이퍼 관찰만(실투자 지침 아님) — ${st.entryT} ${e.px.toLocaleString()}원·스탑 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%)\n무응답=관찰만\n----\n6봉 형태 조건 충족.${lagNote} 오늘 청산 기준(레짐): ${hv ? "★전환청산(고변동 예상일 — 반대 판정 시 청산)" : "★종가보유(저변동 예상일 — 전환 신호 무시)"}, 다른 기준은 대조 기록. ${paperNote}`);
+        `[예측·하닉 창판정] ${DIR_KO[st.dir]} 판정 (판정 ${st.entryT} ${e.px.toLocaleString()}원)\n▶이 문자로는 매매하지 않습니다 — 하닉 실전 진입은 [피셔F] 문자(사다리 1단계 30%)가 지시. 창판정 100% 증액 문자는 2단계 가동 전\n▶채점 기준: 스탑 ${Math.round(stopPx).toLocaleString()}원(-${STOP_PCT}%)\n무응답=관찰만\n----\n6봉 형태 조건 충족.${lagNote} 오늘 청산 기준(레짐): ${hv ? "★전환청산(고변동 예상일 — 반대 판정 시 청산)" : "★종가보유(저변동 예상일 — 전환 신호 무시)"}, 다른 기준은 대조 기록. ${paperNote}`);
     }
 
     // ⑤ 가상 4단 사다리 일일 채점 (사용자 확정 2026-08-01) — 창판정 유무와 무관하게 매 거래일 기록.
