@@ -1,0 +1,72 @@
+{
+  "createdAt": "2026-08-09",
+  "note": "소급 대장 — 가이드 기각표·커밋·스크립트 헤더에 문서화된 시도만 집계. 개별 시도의 일별 수익 시계열은 미보존(대장 한계). 이후 신규 백테스트는 실행 전 등록.",
+  "families": [
+    {
+      "model": "하닉",
+      "family": "기각표 13항목(가이드 §7)",
+      "trials": 13,
+      "source": "docs/new-model-guide.md §7"
+    },
+    {
+      "model": "하닉",
+      "family": "창판정 눈금 k 스윕(0.5/0.75/1.0/1.5)·창 5/6/7봉",
+      "trials": 7,
+      "source": "scripts/candle-window-judge.ts 헤더"
+    },
+    {
+      "model": "하닉",
+      "family": "사다리·서킷·레짐·완충·0930 OR·박스시각 평원 스윕",
+      "trials": 40,
+      "source": "ladder3/circuit-breaker/vol-regime/or0930-live-sweep (추정 하한)"
+    },
+    {
+      "model": "하닉",
+      "family": "1박 자격·비중 9축·애프터 청산 7임계·F정의 2종",
+      "trials": 20,
+      "source": "kr-overnight-* 스크립트군"
+    },
+    {
+      "model": "하닉",
+      "family": "PG-1 v0.1·v0.2·A1 (이익보호 계열)",
+      "trials": 18,
+      "source": "pg1-replay/pg1-a1 (2026-08-09)"
+    },
+    {
+      "model": "삼전",
+      "family": "하닉 이식 320조합",
+      "trials": 320,
+      "source": "가이드 §7 '합격 0/320'"
+    },
+    {
+      "model": "삼전",
+      "family": "v2 창크기·문턱·rebox 스윕(30여)",
+      "trials": 35,
+      "source": "가이드 §11·ss-cw-* 스크립트군"
+    },
+    {
+      "model": "삼전",
+      "family": "1박·PG-1 계열",
+      "trials": 30,
+      "source": "kr-overnight-*·pg1-*"
+    },
+    {
+      "model": "SOXX",
+      "family": "창크기 격자·5분/1분·E0/E1·심판 방향",
+      "trials": 20,
+      "source": "가이드 §12·soxx-* 스크립트군"
+    },
+    {
+      "model": "SOXX",
+      "family": "rebox 시각 스윕·보호청산 T스윕·프리장 진입·컷오프·재난선",
+      "trials": 45,
+      "source": "soxx-f-rebox/open-protect/pre-entry/pregate-sweep (추정 하한)"
+    },
+    {
+      "model": "SOXX",
+      "family": "기각 언급(재점화·반대점화·횡보필터·저녁신호 등)",
+      "trials": 15,
+      "source": "가이드 §12·커밋 로그"
+    }
+  ]
+}
