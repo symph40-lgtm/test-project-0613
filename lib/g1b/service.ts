@@ -76,6 +76,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       // 미발행은 계기판 가동률 결손으로 자동 집계됨 (r1/r2 부재 → uptime 하락).
       const msg = e instanceof Error ? e.message : String(e);
       notes.push(`${symbol} 상태 오류 정지 — ${msg}`);
+      // 알림 2계급 (발주자 판정): 이것은 '장애 알림' — 전역 정지 무관 상시 발송.
+      // 단 판정·가격·방향 등 예측 내용 포함 금지 (사유 = 시스템 오류 문자열만).
+      // 중복 억제: 동일 사유 모듈당 일 1회 — 연속 장애는 count 합산("지속 중"), 재발송 안 함.
+      const prevHalt = (row.learn as { halt?: { reason: string; count: number } } | null)?.halt;
+      const sameReason = prevHalt?.reason === msg.slice(0, 80);
+      row.learn = { ...(row.learn ?? {}), halt: { reason: msg.slice(0, 80), count: (sameReason ? prevHalt!.count : 0) + 1, last_ts: new Date().toISOString() } };
+      await saveRow(row);
+      if (sameReason) continue; // 일 1회 원칙
       try {
         const { sendSms, hasSmsProvider } = await import("@/lib/sms");
         if (hasSmsProvider()) {
