@@ -88,8 +88,10 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       await saveRow(row);
       if (sameReason) continue; // 일 1회 원칙
       try {
+        const { smsPauseActive } = await import("@/lib/alerts/pause");
         const { sendSms, hasSmsProvider } = await import("@/lib/sms");
-        if (hasSmsProvider()) {
+        // 정지 예외 철회 (발주자 지시 2026-08-08) — sms_pause 기간엔 보류
+        if (hasSmsProvider() && !(await smsPauseActive())) {
           // 수신처는 기존 알림 체계와 동일 (alert_channels 검증·동의 완료 sms 채널)
           const { data: ch } = await admin.from("alert_channels").select("contact")
             .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
@@ -185,11 +187,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       }
     }
   }
-  // 통합 발송 (신호 알림 — 발주자 승인 예외)
+  // 통합 발송 (신호 알림). 정지 예외 철회 (발주자 지시 2026-08-08 "15일 보류 기간에는 보내지 말고")
+  // — sms_pause 기간엔 보류, 해제(8/21~) 후 정상 발송. 판정·기록·notes는 계속.
   if (outbox.texts.length) {
     try {
+      const { smsPauseActive } = await import("@/lib/alerts/pause");
       const { sendSms, hasSmsProvider } = await import("@/lib/sms");
-      if (hasSmsProvider()) {
+      if (await smsPauseActive()) { notes.push(`문자 보류(sms_pause): ${outbox.subject}`); }
+      else if (hasSmsProvider()) {
         const { data: ch } = await admin.from("alert_channels").select("contact")
           .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
         for (const c of ch ?? []) {
