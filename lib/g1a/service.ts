@@ -90,17 +90,10 @@ async function runT1(date: string): Promise<string[]> {
 // 정지 예외 철회 (발주자 지시 2026-08-08 "보내되 15일 보류 기간에는 보내지 말고"):
 // sms_pause 활성 기간(~8/21)에는 보류 — 판정·기록은 계속, 해제 후 정상 발송.
 async function sendSignal(subject: string, text: string, notes: string[]): Promise<void> {
-  try {
-    const { smsPauseActive } = await import("@/lib/alerts/pause");
-    if (await smsPauseActive()) { notes.push(`문자 보류(sms_pause): ${subject}`); return; }
-    const { sendSms, hasSmsProvider } = await import("@/lib/sms");
-    if (!hasSmsProvider()) return;
-    const { createAdminClient } = await import("@/lib/supabase/admin");
-    const { data: ch } = await createAdminClient().from("alert_channels").select("contact")
-      .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
-    for (const c of ch ?? []) if (c.contact) await sendSms({ to: c.contact, subject, text });
-    notes.push(`문자 발송 (${subject})`);
-  } catch (e) { notes.push(`문자 발송 실패: ${e instanceof Error ? e.message : e}`); }
+  // 이메일 절충 (사용자 결정 2026-08-10): 보류 기간 이메일 대체·해제 후 문자 자동 복귀
+  const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+  const r = await sendG1Notify(subject, text);
+  notes.push(`발송(${r.via}) ${r.sent}건${r.errors.length ? ` · 오류 ${r.errors.join("; ")}` : ""} — ${subject}`);
 }
 
 // ── T2 사이클 (§5) ──

@@ -92,6 +92,18 @@ export async function collectNight(symbol: G1BSymbol): Promise<Record<string, Ob
   };
 }
 
+// 야간선물 단독 스냅샷 — 8/10 실측: 폐장(05:00) 후엔 output1이 빈 응답이라 06시 배치에선 항상 결측.
+// 04:50~05:59 창에서 마지막 체결 스냅샷을 선확보한다 (07:15 절단 이전이므로 late_arrival 아님).
+export async function fetchNightFutSnapshot(): Promise<Obs> {
+  const c = G1B_CONFIG.cutoff.r1;
+  try {
+    if (!hasKisKeys()) return mark(null, c, "KIS 키 없음");
+    const f = await fetchKisNightFutures();
+    const fx = f as { changePercent?: number | null } | null;
+    return mark(typeof fx?.changePercent === "number" ? fx.changePercent / 100 : null, c, "KIS 야간선물 04:50 스냅샷");
+  } catch { return mark(null, c, "KIS 야간선물 예외"); }
+}
+
 // ── 아침 배치 (08:00~08:45 절단) ──
 export async function collectMorning(symbol: G1BSymbol): Promise<Record<string, Obs>> {
   const c = G1B_CONFIG.cutoff.r2;

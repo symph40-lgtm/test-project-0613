@@ -87,23 +87,24 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       row.learn = { ...(row.learn ?? {}), halt: { reason: msg.slice(0, 80), count: (sameReason ? prevHalt!.count : 0) + 1, last_ts: new Date().toISOString() } };
       await saveRow(row);
       if (sameReason) continue; // 일 1회 원칙
-      try {
-        const { smsPauseActive } = await import("@/lib/alerts/pause");
-        const { sendSms, hasSmsProvider } = await import("@/lib/sms");
-        // 정지 예외 철회 (발주자 지시 2026-08-08) — sms_pause 기간엔 보류
-        if (hasSmsProvider() && !(await smsPauseActive())) {
-          // 수신처는 기존 알림 체계와 동일 (alert_channels 검증·동의 완료 sms 채널)
-          const { data: ch } = await admin.from("alert_channels").select("contact")
-            .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
-          for (const c of ch ?? []) {
-            if (c.contact) await sendSms({ to: c.contact, text: `[G1B 정지] ${date.slice(5)} ${symbol} R1/R2 발행 실패 — 상태 오류: ${msg.slice(0, 50)}` });
-          }
-        }
-      } catch { /* 알림 실패는 notes로만 */ }
+      // 장애 알림 — 보류 기간엔 이메일 대체 (이메일 절충, 사용자 결정 8/10)
+      const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+      const hr = await sendG1Notify("[G1B 정지] 시스템 장애", `[G1B 정지] ${date.slice(5)} ${symbol} R1/R2 발행 실패 — 상태 오류: ${msg.slice(0, 50)}`);
+      notes.push(`장애 알림(${hr.via}) ${hr.sent}건`);
       continue;
     }
     const regime = regimeToday(date);
 
+    // 야간선물 폐장 직전 스냅샷 (04:50~06:00) — 8/10 실측: 06시 배치는 폐장 후 빈 응답
+    if (hhmm >= "04:50" && hhmm < W.nightStart && (row.night?.night_fut?.v == null)) {
+      const { fetchNightFutSnapshot } = await import("./data");
+      const nf = await fetchNightFutSnapshot();
+      if (nf.v != null) {
+        row.night = { ...(row.night ?? {}), night_fut: nf } as Record<string, Obs>;
+        await saveRow(row);
+        notes.push(`${symbol} 야간선물 스냅샷 ${(nf.v * 100).toFixed(2)}%`);
+      }
+    }
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
     // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
     const coreMissing = (n: Record<string, Obs> | null) => !n || n.r_spx?.v == null || n.r_soxx?.v == null;
@@ -187,22 +188,12 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       }
     }
   }
-  // 통합 발송 (신호 알림). 정지 예외 철회 (발주자 지시 2026-08-08 "15일 보류 기간에는 보내지 말고")
-  // — sms_pause 기간엔 보류, 해제(8/21~) 후 정상 발송. 판정·기록·notes는 계속.
+  // 통합 발송 — 이메일 절충 (사용자 결정 2026-08-10): 문자 보류(~8/21) 기간엔 이메일 대체로
+  // 침묵 규칙 유지, 해제 후 자동 문자 복귀. 발송 결과는 notes에 명시 (무음 실패 금지 — 8/10 교훈).
   if (outbox.texts.length) {
-    try {
-      const { smsPauseActive } = await import("@/lib/alerts/pause");
-      const { sendSms, hasSmsProvider } = await import("@/lib/sms");
-      if (await smsPauseActive()) { notes.push(`문자 보류(sms_pause): ${outbox.subject}`); }
-      else if (hasSmsProvider()) {
-        const { data: ch } = await admin.from("alert_channels").select("contact")
-          .eq("channel_type", "sms").eq("verified", true).eq("consent_given", true).limit(3);
-        for (const c of ch ?? []) {
-          if (c.contact) await sendSms({ to: c.contact, subject: outbox.subject, text: outbox.texts.join("\n\n") });
-        }
-        notes.push(`문자 발송 (${outbox.subject})`);
-      }
-    } catch (e) { notes.push(`문자 발송 실패: ${e instanceof Error ? e.message : e}`); }
+    const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+    const r = await sendG1Notify(outbox.subject, outbox.texts.join("\n\n"));
+    notes.push(`발송(${r.via}) ${r.sent}건${r.errors.length ? ` · 오류 ${r.errors.join("; ")}` : ""} — ${outbox.subject}`);
   }
   // 게이트 계기판 (T4) — 라벨 창 이후 하루 1회 집계
   if (hhmm >= W.labelStart && hhmm <= "11:00") {
