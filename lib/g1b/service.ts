@@ -37,7 +37,10 @@ async function saveRow(r: Row): Promise<void> {
 }
 async function loadState(symbol: G1BSymbol): Promise<LearnState> {
   const admin = createAdminClient();
-  const { data } = await admin.from("g1b_state").select("state").eq("symbol", symbol).maybeSingle();
+  const { data, error } = await admin.from("g1b_state").select("state").eq("symbol", symbol).maybeSingle();
+  // 영속성 훈련(발주자 요건) 핵심: DB '오류'와 '행 없음'을 구분한다.
+  // 오류 시 initState 폴백은 조용한 리셋 = 60일 오염이므로 즉시 정지가 옳다.
+  if (error) throw new Error(`g1b_state 로드 실패 — 조용한 리셋 방지 위해 정지: ${error.message}`);
   return (data?.state as LearnState | undefined) ?? initState(symbol);
 }
 async function saveState(symbol: G1BSymbol, st: LearnState): Promise<void> {
@@ -68,10 +71,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
     const st = await loadState(symbol);
     const regime = regimeToday(date);
 
-    if (hhmm >= W.nightStart && hhmm < C.cutoff.r1 && !row.night) {
-      row.night = await collectNight(symbol);
+    // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
+    // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
+    const coreMissing = (n: Record<string, Obs> | null) => !n || n.r_spx?.v == null || n.r_soxx?.v == null;
+    if (hhmm >= W.nightStart && hhmm < C.cutoff.r1 && coreMissing(row.night)) {
+      const fresh = await collectNight(symbol);
+      row.night = row.night ? { ...fresh, ...Object.fromEntries(Object.entries(row.night).filter(([, o]) => o.v != null)) } : fresh;
       await saveRow(row);
-      notes.push(`${symbol} 야간 수집`);
+      notes.push(`${symbol} 야간 수집${row.night.r_spx?.v == null ? " (핵심 결측 — 재시도 예정)" : ""}`);
     } else if (hhmm >= W.r1Publish && hhmm < W.morningStart && !row.r1) {
       if (!row.night) { row.night = await collectNight(symbol); for (const k of Object.keys(row.night)) row.night[k].late_arrival = true; notes.push(`${symbol} 야간 수집 지연 — late_arrival 전량`); }
       const ex = expertsR1(symbol, row.night, st);
@@ -134,6 +141,10 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const st2 = dailyUpdate(symbol, st, ex, row.r1.fair_gap_pct as number | null, actual, regime, row.night ?? {});
         row.learn = { hedge_w: st2.hedge_w, sigma_ewma: st2.sigma_ewma, bias: st2.bias, cusum: st2.cusum, pit_last: st2.pit_hist.at(-1), kalman_b1: st2.kalman.b1, clamp_hits: st2.kalman.clamp_hits };
         await saveState(symbol, st2);
+        // 일 1회 상태 스냅샷 + 해시 (발주자 요건 §3 — 롤백이 상태까지 복원 가능하게)
+        const { createHash } = await import("crypto");
+        const hash = createHash("sha256").update(JSON.stringify(st2)).digest("hex").slice(0, 16);
+        await admin.from("g1b_state_snapshots").upsert({ date, symbol, state: st2, pack_ref: "pack_v1.0", state_hash: hash });
         await saveRow(row);
         notes.push(`${symbol} 라벨·학습 (실측 ${actual}% · TE_r1 ${row.labels.te_r1_pct}%)`);
       }
