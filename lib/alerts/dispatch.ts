@@ -83,6 +83,10 @@ const M7_MUTED_KEYS = /^((us_)?(trend_up|trend_down|range_day|vrebound_early|vre
 // 그대로 통과해 왔다 — 8/06 프리장 문자 실사례. 이제 기존 계층 취급(legacyTier 제목 또는 차단).
 const NM_REPLACED = /^predict_tr_(hxM|hxB|ssF|ssM|ssB)_|^predict_tr_etf|^predict_etf_|^predict_prog5_(?!hxF)|^predict_(reconf_|rev9_|recut_|flat_)|^uspredict_(tr_|prog2_|rev9_|recut_|flat_)/;
 // 참고 제목 대상 (신모델과 무관하지만 구모델 산출물 표시): 미국일봉·애프터장
+// 애프터장 F·M 사다리 문자 차단 (사용자 지시 2026-08-08 "애프터장 F M 모두 꺼줘" — 8/6 16:14
+// 삼전 애프터 피셔F 문자 실사례). 본피셔 확정·전이(predict_ah_final/HHmm·predict_ss_ah_*)는 유지 —
+// 끄려면 이 정규식에 합치면 된다. 판정·기록·채점은 계속.
+const AH_LADDER_MUTED = /^predict_(ss_ahF_|ss_ahM_|ah_hxF_|ah_hxM_)/;
 const NM_REF_SUBJECT = /^usdaily_|^predict_ah_|^predict_ss_ah/;
 const NM_LIVE_SUBJECT = /^(predict_cw_|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_hxF_|predict_prog5_hxF_)/;
 // 제목 종목명은 정식 명칭 (사용자 지시 2026-08-05 저녁 — 하닉→하이닉스·삼전→삼성전자)
@@ -102,6 +106,7 @@ export async function dispatchToChannels(
   opts?: { dedupHours?: number },
 ): Promise<number> {
   if (M7_MUTED_KEYS.test(alert.key)) return 0; // M7 판정·방향 계열 음소거 (2026-07-20)
+  if (AH_LADDER_MUTED.test(alert.key)) return 0; // 애프터장 F·M 사다리 문자 차단 (2026-08-08)
   if (PREDICT_CONFIG.smsNewModelOnly) {
     // 기존 계층 30% 실전 승격 (사용자 확정 2026-08-07 — config.legacyTier): 신모델 70%와 고정 배합으로
     // 병행하므로 대체 채널을 차단하지 않고 '실전(기존계층 30%)' 제목으로 발송한다. live: false면 종전대로.
