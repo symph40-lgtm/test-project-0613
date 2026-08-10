@@ -113,7 +113,10 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
     const slot = hhmm.slice(0, 4) + String(Math.floor(parseInt(hhmm.slice(3, 5), 10) / W.slotMinutes) * W.slotMinutes).padStart(2, "0");
     const already = t2.evals.some((e) => e.time.startsWith(slot.slice(0, 3)) && e.time.slice(3, 5) >= slot.slice(4));
 
-    if (!t2.trigger_type && hhmm <= W.t2Final) {
+    // 최종 확정 유예 (2026-08-10 실측 버그 수정): 종전 `hhmm <= W.t2Final`은 크론이 정확히 19:40에
+    // 와야만 최종 분기가 열렸다 — 실제 크론은 19:35 → 19:45라 8/10 저녁 두 종목 모두 T2-F 확정·발송 누락.
+    // t2End(19:55)까지 유예 — isFinal 판정은 그대로 19:40 기준.
+    if (!t2.trigger_type && hhmm <= W.t2End) {
       if (already && hhmm < W.t2Final) continue;
       const f = await collectT2Features(symbol);
       const ctx = await buildAbstainCtx(f);
