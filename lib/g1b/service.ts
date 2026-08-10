@@ -95,15 +95,19 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
     }
     const regime = regimeToday(date);
 
-    // 야간선물 폐장 직전 스냅샷 (04:50~06:00) — 8/10 실측: 06시 배치는 폐장 후 빈 응답
+    // 야간선물 폐장 직전 스냅샷 (04:50~06:00) — 8/10 실측: 06시 배치는 폐장 후 빈 응답.
+    // 8/11 첫 검증 실패 (night_fut 여전히 null·스냅샷 src 흔적 없음): 크론 권장창이 06:00~11:00라
+    // 이 창을 호출하는 주체가 없는 것이 유력 — 크론 시작 04:45 확장은 발주자 설정(cron-job.org) 필요.
+    // probe: 시도 자체를 기록해 '호출 없음'과 '호출됐지만 빈 응답'을 다음 검증에서 구분한다.
     if (hhmm >= "04:50" && hhmm < W.nightStart && (row.night?.night_fut?.v == null)) {
       const { fetchNightFutSnapshot } = await import("./data");
       const nf = await fetchNightFutSnapshot();
+      row.night = { ...(row.night ?? {}), night_fut_probe: { t: hhmm, v: nf.v, src: nf.src } } as unknown as Record<string, Obs>;
       if (nf.v != null) {
         row.night = { ...(row.night ?? {}), night_fut: nf } as Record<string, Obs>;
-        await saveRow(row);
         notes.push(`${symbol} 야간선물 스냅샷 ${(nf.v * 100).toFixed(2)}%`);
       }
+      await saveRow(row);
     }
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
     // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
