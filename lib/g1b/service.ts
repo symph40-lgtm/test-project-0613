@@ -146,6 +146,17 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       row.morning = await collectMorning(symbol);
       await saveRow(row);
       notes.push(`${symbol} 아침 수집`);
+    } else if (hhmm >= "08:31" && hhmm < C.cutoff.r2 && row.morning && row.morning.auction_est_px?.v == null && !row.r2) {
+      // 예상체결 보충 (2026-08-11 결측 감사 — 최근 4거래일 4/4 결측 발견): 아침 수집이 08:00~08:29에
+      // 완료되면 동시호가(08:30~) 전이라 예상체결이 null인데, !row.morning 게이트 탓에 영영 안 갱신됐다.
+      // 동시호가 개시 후~절단(08:45) 사이에 이 필드만 보충한다. R2(08:55) 잔차 판정의 원천이라 중요.
+      const { refetchAuction } = await import("./data");
+      const a = await refetchAuction(symbol);
+      if (a.v != null) {
+        row.morning = { ...row.morning, auction_est_px: a };
+        await saveRow(row);
+        notes.push(`${symbol} 예상체결 보충 ${a.v}`);
+      }
     } else if (hhmm >= W.r2Publish && hhmm < W.labelStart && row.r1 && !row.r2) {
       if (!row.morning) { row.morning = await collectMorning(symbol); for (const k of Object.keys(row.morning)) row.morning[k].late_arrival = true; }
       const asx = row.morning.r_asx?.late_arrival ? null : row.morning.r_asx?.v;

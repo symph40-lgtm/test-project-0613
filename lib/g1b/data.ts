@@ -148,6 +148,12 @@ export async function collectMorning(symbol: G1BSymbol): Promise<Record<string, 
   };
 }
 
+// 예상체결 단독 보충 (2026-08-11 결측 감사): 아침 수집이 동시호가(08:30) 전에 완료되면 이 필드만
+// null로 남는다 — service의 08:31~08:45 보충 분기에서 호출. 실패 시 null 유지(정직 운영).
+export async function refetchAuction(symbol: G1BSymbol): Promise<Obs> {
+  return mark(await fetchKisAuctionEstimate(symbol), G1B_CONFIG.cutoff.r2, "KIS 예상체결 08:31 보충");
+}
+
 // KIS 호가/예상체결 — output2.antc_cnpr(예상 체결가). 동시호가(08:30~09:00)에만 유의미.
 async function fetchKisAuctionEstimate(code: string): Promise<number | null> {
   try {
