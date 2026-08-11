@@ -98,9 +98,17 @@ export async function fetchNightFutSnapshot(): Promise<Obs> {
   const c = G1B_CONFIG.cutoff.r1;
   try {
     if (!hasKisKeys()) return mark(null, c, "KIS 키 없음");
-    const f = await fetchKisNightFutures();
-    const fx = f as { changePercent?: number | null } | null;
-    return mark(typeof fx?.changePercent === "number" ? fx.changePercent / 100 : null, c, "KIS 야간선물 04:50 스냅샷");
+    // 시장구분 후보 순차 시도 (2026-08-11 — 크론은 04:50에 정상 호출됐는데 주간 코드 "F"가 빈 응답.
+    // 야간(CME 연계) 구분 코드가 문서로 확정되지 않아 후보를 돌며 응답하는 코드를 probe로 판별한다.
+    // 첫 성공 시 src에 코드가 남으므로, 확정되면 그 코드 하나로 고정할 것)
+    for (const div of ["F", "CM", "CF", "JF"]) {
+      const f = await fetchKisNightFutures(div);
+      const fx = f as { changePercent?: number | null } | null;
+      if (typeof fx?.changePercent === "number") {
+        return mark(fx.changePercent / 100, c, `KIS 야간선물 04:50(${div})`);
+      }
+    }
+    return mark(null, c, "KIS 야간선물 04:50 전코드 빈응답(F·CM·CF·JF)");
   } catch { return mark(null, c, "KIS 야간선물 예외"); }
 }
 

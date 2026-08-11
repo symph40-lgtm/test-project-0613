@@ -39,7 +39,10 @@ export function frontMonthNightFutCode(now = new Date()): string {
     const secondThu = 1 + ((4 - firstDow + 7) % 7) + 7;
     if (kst.getUTCDate() >= secondThu) [qy, qm] = nextQuarter(qm);
   }
-  return `1A01${qy % 10}${String(qm).padStart(2, "0")}`;
+  // 코드 형식 교정 (2026-08-11 실측): 종전 "1A01…"는 자리 하나 과잉으로 KIS가 항상 빈 응답 —
+  // "A01" + 연도끝자리 + 월(2자리)이 정상 (A01609 = 2026년 9월물, 가격 989.8 응답 확인).
+  // 이것이 night_fut 상시 결측의 근본 원인이었다 (04:50 창·시장구분은 무관).
+  return `A01${qy % 10}${String(qm).padStart(2, "0")}`;
 }
 
 // changePercent null = 등락률 필드 파싱 실패 (실측 2026-07-15 아침 브리핑: 야간 마감 후 응답에
@@ -47,7 +50,10 @@ export function frontMonthNightFutCode(now = new Date()): string {
 export type KisFutures = { price: number; changePercent: number | null } | null;
 
 // 야간 코스피200 선물 현재가·전일대비율. 키 미설정/실패 시 null(호출부에서 네이버 폴백).
-export async function fetchKisNightFutures(): Promise<KisFutures> {
+// div: 시장구분 코드 (2026-08-11 진단 — 크론이 04:50에 정상 호출했는데도 빈 응답이었음이 확인됨.
+// 종목코드는 야간물(1A01…)인데 시장구분이 주간 "F"라 야간 세션 시간대엔 응답이 없을 가능성 —
+// KIS 문서에서 야간 구분 코드를 확정하지 못해 호출부(g1b)가 후보를 순차 시도하며 probe로 판별한다).
+export async function fetchKisNightFutures(div = "F"): Promise<KisFutures> {
   const appkey = process.env.KIS_APP_KEY;
   const appsecret = process.env.KIS_APP_SECRET;
   // 수동 지정(KIS_FUT_CODE)이 있으면 우선, 없으면 최근월물 자동 산출 (분기 만기 자동 교체)
@@ -57,7 +63,7 @@ export async function fetchKisNightFutures(): Promise<KisFutures> {
   if (!token) return null;
   try {
     const url = new URL(`${KIS_BASE}/uapi/domestic-futureoption/v1/quotations/inquire-price`);
-    url.searchParams.set("FID_COND_MRKT_DIV_CODE", "F"); // 선물
+    url.searchParams.set("FID_COND_MRKT_DIV_CODE", div); // 선물 — 주간 "F", 야간 후보는 호출부에서 시도
     url.searchParams.set("FID_INPUT_ISCD", code);
     const r = await fetch(url, {
       headers: {
