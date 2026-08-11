@@ -225,6 +225,20 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const byDate = new Map<string, Row[]>();
   for (const r of rows) byDate.set(r.date, [...(byDate.get(r.date) ?? []), r]);
   const days = [...byDate.keys()].sort().reverse();
+  // 기능별 유효 개시일 (발주자 판정 8/11 §2 — 표본 회계 정직성):
+  // 각 기능의 '첫 정상 가동일'을 기록 — 60일·게이트 판정의 해당 항목은 이 날짜부터 집계한다.
+  // (예: R2 잔차 적중률 ≥65% 의 시계는 D+0이 아니라 effective_start.r2_residual부터)
+  const firstDate = (pred: (r: Row) => boolean): string | null => {
+    for (const d of [...byDate.keys()].sort()) if (byDate.get(d)!.some(pred)) return d;
+    return null;
+  };
+  const effectiveStart = {
+    night_fut: firstDate((r) => (r.night?.night_fut as Obs | undefined)?.v != null),
+    auction_est: firstDate((r) => (r.morning?.auction_est_px as Obs | undefined)?.v != null),
+    r2_residual: firstDate((r) => (r.r2 as { residual_sigma?: number | null } | null)?.residual_sigma != null),
+    ah_excess: firstDate((r) => (r.night?.ah_excess as Obs | undefined)?.v != null),
+    gdr: firstDate((r) => (r.night?.r_gdr as Obs | undefined)?.v != null),
+  };
   const per = days.map((d) => {
     const rs = byDate.get(d)!;
     const r1ok = rs.filter((r) => r.r1).length, r2ok = rs.filter((r) => r.r2).length;
@@ -239,6 +253,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     te_r1_median_pct: med, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
+    effective_start: effectiveStart,
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };

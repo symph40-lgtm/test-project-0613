@@ -160,6 +160,20 @@ export async function fetchDayCharacter(symbol: G1ASymbol): Promise<{
 }
 
 // ── F08: 외인 감속률 (마감 확정치 — T2 시점 가용) ──
+// F08_frn_decel_prev (발주자 판정 2026-08-11 / A1-8): T1(15:05) 시점엔 당일 확정치가 없어 4일 전결측
+// → 전일 확정 기준 감속률을 '별도 필드'로 기록·가상점수 입력. 당일 확정 원 정의(F08)는 T2 전용 유지.
+export async function fetchFrnDecelPrev(symbol: G1ASymbol): Promise<number | null> {
+  const flow = await fetchRecentFlow(symbol);
+  if (flow.length < 12) return null;
+  const today = kstDate();
+  const past = flow.filter((f) => f.date < today);
+  if (past.length < 11) return null;
+  const last = past[past.length - 1];
+  const prevs = past.slice(-21, -1).map((f) => Math.abs(f.frgn));
+  const avg = prevs.reduce((a, b) => a + b, 0) / prevs.length;
+  return avg > 0 ? Math.round((last.frgn / avg) * 100) / 100 : null;
+}
+
 export async function fetchFrnDecel(symbol: G1ASymbol): Promise<number | null> {
   const flow = await fetchRecentFlow(symbol);
   if (flow.length < 12) return null;
