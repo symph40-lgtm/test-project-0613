@@ -130,12 +130,22 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         B1: row.night.r_soxx && !row.night.r_soxx.late_arrival && row.night.r_soxx.v != null ? Math.round(row.night.r_soxx.v * (symbol === "005930" ? 0.49 : 0.76) * 10000) / 100 : null,
         B2: row.night.r_spx && !row.night.r_spx.late_arrival && row.night.r_spx.v != null ? Math.round(st.kalman.beta_mkt * st.kalman.b1 * row.night.r_spx.v * 10000) / 100 : null,
       };
+      // B: R1 행동 지시선 — 전일 저녁 G1A 판정(가상 포지션) 대조 (스펙 §5 조정 매트릭스)
+      const { r1Action, phaseTag } = await import("@/lib/g1/action");
+      const g1aRef = await admin.from("g1a_days").select("date,t2").eq("symbol", symbol)
+        .lt("date", date).order("date", { ascending: false }).limit(1).maybeSingle();
+      const refT2 = (g1aRef.data?.t2 ?? null) as { verdict?: { direction?: string }; entry_px_virtual?: number | null } | null;
+      const act = r1Action(
+        refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null } : null,
+        expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
+      );
       row.r1 = {
         fair_gap_pct: fair != null ? Math.round(fair * 100) / 100 : null,
         sigma_pct: sigma, q80_pct: q80, regime, w_used: wUsed,
         expected_open: expOpen, prev_close: kr.prevClose,
         experts: ex, virtual: true,
-        report: buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
+        action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual } : null,
+        report: act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
         sent_at: new Date().toISOString(),
       };
       await saveRow(row);
@@ -186,7 +196,10 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         resSigma = Math.round((residual / sigma) * 100) / 100;
         signal = Math.abs(resSigma) < C.thresholds.r2NoSignal ? "무신호" : Math.abs(resSigma) >= C.thresholds.r2Fire ? (resSigma < 0 ? "과소반영 — 시가 매수 후보(가상)" : "과잉반영 — 페이드 후보(가상·금지조건 미검)") : "관망";
       }
-      row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, virtual: true, report: buildR2(symbol, date, fair2, est, residual, resSigma, signal), sent_at: new Date().toISOString() };
+      const { r2Action, phaseTag: pt2 } = await import("@/lib/g1/action");
+      const expOpen2 = fair2 != null && prevClose ? Math.round(prevClose * (1 + fair2 / 100)) : null;
+      const act2 = r2Action(resSigma, expOpen2, est == null, await pt2("r2"));
+      row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, action: act2, virtual: true, report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal), sent_at: new Date().toISOString() };
       await saveRow(row);
       outbox.subject = "[G1B R2] 잔차 판정 (가상·log-only)";
       outbox.texts.push(row.r2.report as string);
@@ -260,13 +273,38 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     return { date: d, r1ok, r2ok, late_arrival: late, te_r1: tes };
   });
   const allTe = per.flatMap((p) => p.te_r1).sort((a, b) => a - b);
+  // 중앙값 규약 (발주자 Q2 답변, 2026-08-12 문서화): **상위 중앙값(upper median)** —
+  // 짝수 표본에서 보간(평균) 없이 sorted[floor(n/2)]의 실존 관측값을 쓴다.
+  // 근거: ①실제 발생한 오차값만 보고(합성값 금지) ②짝수일 때 큰 쪽을 취해 성능을 후하게 보이지 않게(보수).
+  // 예: [0.62, 1.00, 1.08, 2.75] → 보간 1.04가 아니라 1.08. D+15 게이트 판정도 이 규약.
   const med = allTe.length ? allTe[Math.floor(allTe.length / 2)] : null;
   const complete = per.filter((p) => p.r1ok === 2 && p.r2ok === 2).length;
+  // D1 (발주자 8/12): G1A 보류 밤 집계 — θ 캘리브레이션의 공식 증거 + E2 T2+ 섀도 비교 + E1 개시일
+  const ga = await admin.from("g1a_days").select("date,symbol,t2,labels").order("date", { ascending: true }).limit(120);
+  type GaRow = { date: string; symbol: string; t2: Record<string, unknown> | null; labels: Record<string, unknown> | null };
+  const gaRows = (ga.data ?? []) as GaRow[];
+  const abst = gaRows.filter((r) => (r.t2?.verdict as { direction?: string } | undefined)?.direction === "NEUTRAL" && r.labels);
+  const gaps = abst.map((r) => Math.abs(Number(r.labels?.L1 ?? NaN))).filter((x) => isFinite(x));
+  const missed = abst.map((r) => Number(r.labels?.L1p ?? NaN)).filter((x) => isFinite(x));
+  const g1aAbstain = {
+    nights: abst.length,
+    avg_abs_gap_pct: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length * 100) / 100 : null,
+    max_abs_gap_pct: gaps.length ? Math.round(Math.max(...gaps) * 100) / 100 : null,
+    missed_virtual_sum_pct: missed.length ? Math.round(missed.reduce((a, b) => a + Math.abs(b), 0) * 100) / 100 : null, // 가상 진입가→시가 |수익| 합
+  };
+  const t2plus = {
+    // E2 비교표 재료: 방향 적중(라벨 있는 밤·베팅 방향 낸 밤 한정)과 보류 수
+    base_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.verdict as { direction?: string })?.direction))).length,
+    shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.shadow as { last?: { dir?: string } } | undefined)?.last?.dir))).length,
+    nights_tracked: gaRows.length,
+  };
+  const nfEveStart = gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null;
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
+    g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
-    effective_start: effectiveStart,
+    effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart },
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };

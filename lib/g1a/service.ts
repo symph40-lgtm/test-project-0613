@@ -13,7 +13,7 @@ import {
   fetchFrnDecel, fetchFrnDecelPrev, fetchMacroZ, fetchNxtState, fetchPremarketBasket, fetchT1Globals, fetchTsmcResidual, fetchUsFutDelta,
 } from "./data";
 import { buildReversalReport, buildT2Report } from "./report";
-import { evaluateT2, gapScoreT1, isExpiryDay, reversalCheck, type AbstainCtx } from "./score";
+import { evaluateT2, gapScoreT1, isExpiryDay, reversalCheck, thetaAt, type AbstainCtx } from "./score";
 import { g1aTablesReady, loadDay, loadUnlabeled, upsertDay } from "./store";
 import type { G1ARow, G1ASymbol, T2Features, T2State } from "./types";
 
@@ -125,21 +125,51 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const other = [...rows.values()].some((r) => r.symbol !== symbol && r.t2?.trigger_type && r.t2.verdict?.direction !== "NEUTRAL");
       const { verdict, blocked } = evaluateT2(symbol, f, ctx, hhmm, isFinal, other);
       t2.evals.push({ time: hhmm, gap_score: verdict.gap_score, blocked_by: blocked });
+      // E1 (발주자 8/12): 저녁 야간선물 초반 세션 스냅샷 — 본 판정 미사용, 기록·effective_start 대상
+      if (!(t2 as Record<string, unknown>).nf_evening && hhmm >= "18:00") {
+        try {
+          const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
+          if (hasKisKeys()) {
+            const nf = await fetchKisNightFutures();
+            const pct = (nf as { changePercent?: number | null })?.changePercent;
+            if (typeof pct === "number") (t2 as Record<string, unknown>).nf_evening = { t: hhmm, pct };
+          }
+        } catch { /* 결측 허용 */ }
+      }
+      // E2 (발주자 8/12): "T2+" 섀도 — 현행 점수 + 야간선물 초반 피처. 본 판정 미반영 (검증 오염 방지).
+      // 사전 등록: g1br/challengers/t2plus_nightfut.md — w_nf 1.0·scale 0.4%
+      {
+        const nfe = (t2 as Record<string, unknown>).nf_evening as { pct: number } | undefined;
+        const sScore = nfe ? Math.round((verdict.gap_score + 1.0 * Math.tanh(nfe.pct / 0.4)) * 100) / 100 : verdict.gap_score;
+        const th = thetaAt(hhmm);
+        const sh = (t2 as Record<string, unknown>).shadow as Record<string, unknown> | undefined ?? {};
+        const sDir = Math.abs(sScore) >= th.low && !verdict.abstain_reason ? (sScore > 0 ? "UP" : "DOWN") : "NEUTRAL";
+        if (!sh.first_trigger && sDir !== "NEUTRAL") sh.first_trigger = { t: hhmm, dir: sDir, score: sScore };
+        sh.last = { t: hhmm, score: sScore, dir: sDir };
+        (t2 as Record<string, unknown>).shadow = sh;
+      }
+      const { t2Action, phaseTag } = await import("@/lib/g1/action");
+      const phase = await phaseTag("t2");
       if (!blocked && verdict.direction !== "NEUTRAL") {
         t2.trigger_type = isFinal ? "F" : "E";
         t2.trigger_time = hhmmss;
         t2.entry_px_virtual = f.nxt_last_px;
         t2.verdict = verdict;
-        t2.report_r1 = buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date);
-        notes.push(`${symbol} T2-${t2.trigger_type} ${verdict.direction}·${verdict.confidence} (score ${verdict.gap_score})`);
-        await sendSignal(`[G1A T2-${t2.trigger_type}] 저녁 갭 판정 (가상·log-only)`, t2.report_r1, notes);
+        const act = t2Action(verdict, blocked, phase);
+        (t2 as Record<string, unknown>).action = act;                       // B3: 지시 이력 저장
+        t2.report_r1 = act.line + "\n" + buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date); // B5: 첫 줄 동일
+        notes.push(`${symbol} T2-${t2.trigger_type} ${act.code} (score ${verdict.gap_score})`);
+        await sendSignal(`[G1A T2-${t2.trigger_type}] 저녁 갭 판정 (${phase}·log-only)`, t2.report_r1, notes);
       } else if (isFinal) {
         t2.trigger_type = "F";
         t2.trigger_time = hhmmss;
-        t2.verdict = verdict; // NEUTRAL 확정 (abstain 사유 포함)
-        t2.report_r1 = buildT2Report(symbol, "F", hhmm, verdict, f, date);
-        notes.push(`${symbol} T2-F NEUTRAL (${blocked ?? verdict.abstain_reason ?? "θ 미달"})`);
-        await sendSignal(`[G1A T2-F] NEUTRAL 확정 (가상·log-only)`, t2.report_r1, notes);
+        t2.entry_px_virtual = f.nxt_last_px; // C3: 보류 밤도 가상 기준가 기록 — 기회비용 채점의 정본
+        t2.verdict = verdict;
+        const act = t2Action(verdict, blocked, phase);
+        (t2 as Record<string, unknown>).action = act;
+        t2.report_r1 = act.line + "\n" + buildT2Report(symbol, "F", hhmm, verdict, f, date);
+        notes.push(`${symbol} T2-F ${act.code}`);
+        await sendSignal(`[G1A T2-F] 베팅 보류 확정 (${phase}·log-only)`, t2.report_r1, notes);
       } else {
         notes.push(`${symbol} 대기 (${blocked})`);
       }
