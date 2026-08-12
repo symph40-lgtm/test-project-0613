@@ -186,6 +186,19 @@ export function evaluateT2(
   };
 }
 
+// ── T2 4등급 (발주자 8/12 "판정은 항상, 베팅은 조건부") ──
+// High/Low = 기존 진입 등급 (문턱·사이징 불변 — 검증 오염 없음)
+// Lean = 베팅 없음 + 방향 기울기 발표 (|score| ≥ leanMin·비무방향) / Flat = 무방향 또는 이벤트 밤
+export const LEAN_MIN = 0.5; // 초기값 — Lean 채점(계기판)으로 재조정
+export function t2Grade(v: { direction: string; confidence: string | null; gap_score: number; abstain_reason: string | null }):
+  { grade: "High" | "Low" | "Lean" | "Flat"; lean_dir: "UP" | "DOWN" | null; lean_score: number } {
+  if (v.direction === "UP" || v.direction === "DOWN")
+    return { grade: v.confidence === "High" ? "High" : "Low", lean_dir: v.direction, lean_score: v.gap_score };
+  const dir = v.gap_score >= LEAN_MIN ? "UP" : v.gap_score <= -LEAN_MIN ? "DOWN" : null;
+  const isEvent = (v.abstain_reason ?? "").startsWith("보류1") || (v.abstain_reason ?? "").includes("이벤트");
+  return { grade: dir && !isEvent ? "Lean" : "Flat", lean_dir: dir, lean_score: v.gap_score };
+}
+
 // ── 반전 감시 (§5.5) ──
 export function reversalCheck(entryDir: Direction, f: T2Features): { fired: boolean; why: string | null } {
   const gs = gapScore(f);

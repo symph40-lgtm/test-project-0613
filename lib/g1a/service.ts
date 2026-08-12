@@ -136,26 +136,59 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
           }
         } catch { /* 결측 허용 */ }
       }
-      // E2 (발주자 8/12): "T2+" 섀도 — 현행 점수 + 야간선물 초반 피처. 본 판정 미반영 (검증 오염 방지).
-      // 사전 등록: g1br/challengers/t2plus_nightfut.md — w_nf 1.0·scale 0.4%
+      // 저녁 정보 조각 P1~P5 (발주자 8/12 §3 — 확보분 기록, 본 판정 미사용)
+      try {
+        const { fetchEveningPieces } = await import("./data");
+        (t2 as Record<string, unknown>).pieces = await fetchEveningPieces(symbol);
+      } catch { /* 결측 허용 */ }
+      // E2 (발주자 8/12): "T2+" 섀도(+야간선물) 및 "T2-모자이크"(+P 조각) — 본 판정 미반영.
+      // 사전 등록: challengers/t2plus_nightfut.md · challengers/t2mosaic.md (가중 등록 시점 고정)
+      const th = thetaAt(hhmm);
       {
         const nfe = (t2 as Record<string, unknown>).nf_evening as { pct: number } | undefined;
+        const pieces = (t2 as Record<string, unknown>).pieces as Record<string, number | null> | undefined;
         const sScore = nfe ? Math.round((verdict.gap_score + 1.0 * Math.tanh(nfe.pct / 0.4)) * 100) / 100 : verdict.gap_score;
-        const th = thetaAt(hhmm);
         const sh = (t2 as Record<string, unknown>).shadow as Record<string, unknown> | undefined ?? {};
         const sDir = Math.abs(sScore) >= th.low && !verdict.abstain_reason ? (sScore > 0 ? "UP" : "DOWN") : "NEUTRAL";
         if (!sh.first_trigger && sDir !== "NEUTRAL") sh.first_trigger = { t: hhmm, dir: sDir, score: sScore };
         sh.last = { t: hhmm, score: sScore, dir: sDir };
         (t2 as Record<string, unknown>).shadow = sh;
+        const p1 = pieces?.p1_eu_semi_avg;
+        const mScore = p1 != null ? Math.round((sScore + 0.75 * Math.tanh(p1 / 0.5)) * 100) / 100 : sScore;
+        const mo = (t2 as Record<string, unknown>).mosaic as Record<string, unknown> | undefined ?? {};
+        const mDir = Math.abs(mScore) >= th.low && !verdict.abstain_reason ? (mScore > 0 ? "UP" : "DOWN") : "NEUTRAL";
+        if (!mo.first_trigger && mDir !== "NEUTRAL") mo.first_trigger = { t: hhmm, dir: mDir, score: mScore };
+        mo.last = { t: hhmm, score: mScore, dir: mDir };
+        (t2 as Record<string, unknown>).mosaic = mo;
       }
       const { t2Action, phaseTag } = await import("@/lib/g1/action");
+      const { t2Grade } = await import("./score");
       const phase = await phaseTag("t2");
+      const grade = t2Grade(verdict);
+      (t2 as Record<string, unknown>).grade = grade;   // 4등급 + Lean 채점 원천 (발주자 8/12 §1·2)
+      // 즉시 시행 b (이벤트 밤): beat/miss 시나리오 2줄 — IM 미조달이라 G1B 이벤트 σ를 대용 (명기).
+      if ((verdict.abstain_reason ?? "").startsWith("보류1") && !(t2 as Record<string, unknown>).event_scenario) {
+        const { G1B_CONFIG } = await import("@/lib/g1b/config");
+        const se = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"].event;
+        (t2 as Record<string, unknown>).event_scenario = {
+          event: verdict.abstain_reason,
+          beat: `호재 시 +${se.toFixed(1)}% 안팎 갭 예상 (IM 미조달 — G1B 이벤트 σ 대용)`,
+          miss: `악재 시 −${se.toFixed(1)}% 안팎 갭 예상`,
+        };
+        // 즉시 시행 c: E-등급 섀도 — E-Low 조건(IM<1.5x·High 문턱·포지셔닝 비극단) 중 검사 가능분만
+        (t2 as Record<string, unknown>).e_shadow = {
+          grade: Math.abs(verdict.gap_score) >= th.high
+            ? "E-Low 후보 (1/12 가상 — IM·포지셔닝 미검, 헌법 발효 전 섀도)"
+            : grade.lean_dir ? `E-Lean (${grade.lean_dir === "UP" ? "상방" : "하방"} 기울기)` : "E-Flat",
+          score: verdict.gap_score, virtual_size: Math.abs(verdict.gap_score) >= th.high ? "1/12" : "0",
+        };
+      }
       if (!blocked && verdict.direction !== "NEUTRAL") {
         t2.trigger_type = isFinal ? "F" : "E";
         t2.trigger_time = hhmmss;
         t2.entry_px_virtual = f.nxt_last_px;
         t2.verdict = verdict;
-        const act = t2Action(verdict, blocked, phase);
+        const act = t2Action(verdict, blocked, phase, grade);
         (t2 as Record<string, unknown>).action = act;                       // B3: 지시 이력 저장
         t2.report_r1 = act.line + "\n" + buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date); // B5: 첫 줄 동일
         notes.push(`${symbol} T2-${t2.trigger_type} ${act.code} (score ${verdict.gap_score})`);
@@ -165,7 +198,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2.trigger_time = hhmmss;
         t2.entry_px_virtual = f.nxt_last_px; // C3: 보류 밤도 가상 기준가 기록 — 기회비용 채점의 정본
         t2.verdict = verdict;
-        const act = t2Action(verdict, blocked, phase);
+        const act = t2Action(verdict, blocked, phase, grade);
         (t2 as Record<string, unknown>).action = act;
         t2.report_r1 = act.line + "\n" + buildT2Report(symbol, "F", hhmm, verdict, f, date);
         notes.push(`${symbol} T2-F ${act.code}`);

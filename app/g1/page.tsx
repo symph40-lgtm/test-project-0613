@@ -104,14 +104,21 @@ export default async function G1Page() {
         return (
           <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${r.date} 저녁 결정`} badge="G1A T2">
             <ActionLine line={r.t2?.action?.line} />
-            {/* A3: 완전 표기 헤드라인 */}
+            {/* A3 + 4등급제 헤드라인 (발주자 8/12 — 판정은 항상, 베팅은 조건부) */}
             <p className="mb-1 text-[14px] font-semibold text-ink-80">
-              {v ? (
-                v.direction === "NEUTRAL"
-                  ? <>베팅 보류 <span className="font-normal text-ink-48">({v.abstain_reason ?? "θ 미달"})</span></>
-                  : <>{v.direction === "UP" ? "매수" : "매도"}·{v.confidence} — 권장 {SIZE_KO[v.size ?? "0"]}</>
-              ) : "저녁 감시 대기"}
+              {v ? (() => {
+                const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string | null; lean_score?: number } })?.grade;
+                if (v.direction !== "NEUTRAL")
+                  return <>{g?.grade ?? v.confidence} — {v.direction === "UP" ? "매수" : "매도"} · 권장 {SIZE_KO[v.size ?? "0"]}</>;
+                if (g?.grade === "Lean")
+                  return <>Lean — {g.lean_dir === "UP" ? "상방" : "하방"} 기울기 (score {g.lean_score}) · 베팅 없음 <span className="font-normal text-ink-48">({v.abstain_reason ?? "θ 미달"})</span></>;
+                return <>Flat — {g?.lean_dir ? `${g.lean_dir === "UP" ? "상방" : "하방"} 기울기 (score ${g.lean_score}) · ` : "무방향 · "}베팅 없음 <span className="font-normal text-ink-48">({v.abstain_reason ?? "θ 미달"})</span></>;
+              })() : "저녁 감시 대기"}
             </p>
+            {(() => {
+              const sc = (r.t2 as { event_scenario?: { beat?: string; miss?: string } })?.event_scenario;
+              return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
+            })()}
             {v ? (
               <Row label={`예상잔여갭${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
                 value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
@@ -119,6 +126,16 @@ export default async function G1Page() {
             <Row label="GapScore / 기준가" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}</>} />
             <Row label="야간선물 초반 (E1·기록만)" value={r.t2?.nf_evening ? `${r.t2.nf_evening.t} ${pp(r.t2.nf_evening.pct)}` : "18:00~ 대기"} />
             <Row label="T2+ 섀도 (E2·본판정 미반영)" value={r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"} />
+            {(() => {
+              const p = (r.t2 as { pieces?: Record<string, number | null> })?.pieces;
+              const mo = (r.t2 as { mosaic?: { last?: { dir?: string; score?: number } } })?.mosaic;
+              const es = (r.t2 as { e_shadow?: { grade?: string } })?.e_shadow;
+              return (<>
+                <Row label="정보 조각 P1 유럽반도체" value={p?.p1_eu_semi_avg != null ? `${pp(p.p1_eu_semi_avg)} (ASML ${pp(p.p1_asml)}·IFX ${pp(p.p1_ifx)}·STM ${pp(p.p1_stm)})` : "수집 대기"} />
+                <Row label="T2-모자이크 섀도" value={mo?.last ? `${mo.last.dir} (score ${mo.last.score})` : "—"} />
+                {es ? <Row label="E-등급 섀도 (헌법 발효 전)" value={es.grade ?? "—"} /> : null}
+              </>);
+            })()}
             {r.t2?.report_r1 ? (
               <details className="mt-2 text-[12px] text-ink-48"><summary>리포트 전문</summary>
                 <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[11px] leading-relaxed text-ink-80">{r.t2.report_r1}</pre>
@@ -176,6 +193,11 @@ export default async function G1Page() {
         <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
         <Row label="절단 위반 (late)" value={String(m?.late_arrival_total ?? "—")} />
         <Row label="기능별 개시일" value={<span className="text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
+        <Row label="Lean 채점 (θ 인하 심사 증거)" value={(() => {
+          const t = (m?.t2plus_compare ?? null) as { lean_score?: { n: number; hits: number; rate: number | null }; base_bets?: number; shadow_bets?: number; mosaic_bets?: number; nights_tracked?: number } | null;
+          if (!t) return "집계 전";
+          return <span className="text-[11px]">Lean {t.lean_score?.n ?? 0}밤 적중 {t.lean_score?.hits ?? 0} ({t.lean_score?.rate != null ? Math.round(t.lean_score.rate * 100) + "%" : "—"}) · 베팅가능밤 T2 {t.base_bets}/{t.nights_tracked} vs T2+ {t.shadow_bets} vs 모자이크 {t.mosaic_bets}</span>;
+        })()} />
         <Row label="보류 밤 집계 (D1)" value={abstain
           ? <span className="text-[11px]">{String(abstain.nights)}밤 · 실제 갭 평균 {pp(abstain.avg_abs_gap_pct as number)} / 최대 {pp(abstain.max_abs_gap_pct as number)} · 가상 놓친 |수익| 합 {pp(abstain.missed_virtual_sum_pct as number)}</span>
           : "집계 전"} />

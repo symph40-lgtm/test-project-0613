@@ -6,7 +6,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type ActionCode =
-  | "T2_BUY" | "T2_SELL" | "T2_HOLD_OFF"
+  | "T2_BUY" | "T2_SELL" | "T2_LEAN" | "T2_FLAT"   // 4등급제 (발주자 8/12) — "베팅 보류" 단독 표기 폐지
   | "R1_KEEP" | "R1_HALF" | "R1_EXIT_PREOPEN" | "R1_NOPOS_WATCH"
   | "R2_OPEN_BUY" | "R2_FADE_CANDIDATE" | "R2_NO_SIGNAL";
 
@@ -29,12 +29,17 @@ const fmt = (code: ActionCode, body: string, phase: "가상" | "실사용"): Act
 export function t2Action(
   v: { direction: string; confidence: string | null; size: string; abstain_reason: string | null; expected_residual_gap: number | null },
   blocked: string | null, phase: "가상" | "실사용",
+  grade?: { grade: string; lean_dir: "UP" | "DOWN" | null; lean_score: number },
 ): ActionLine {
   if (v.direction === "UP")
     return fmt("T2_BUY", `매수 진입 (${v.size}·NXT 지정가·19:55까지 반전 감시)`, phase);
   if (v.direction === "DOWN")
     return fmt("T2_SELL", `매도 진입 (${v.size}·NXT 지정가·19:55까지 반전 감시)`, phase);
-  return fmt("T2_HOLD_OFF", `베팅 보류(${v.abstain_reason ?? blocked ?? "θ 미달"})`, phase);
+  // 4등급제: 베팅 없는 밤에도 판단은 항상 — 기울기+점수 발표 (베팅 문턱·사이징 불변)
+  const why = v.abstain_reason ?? blocked ?? "θ 미달";
+  if (grade?.grade === "Lean" && grade.lean_dir)
+    return fmt("T2_LEAN", `베팅 없음 — ${grade.lean_dir === "UP" ? "상방" : "하방"} 기울기 발표 (score ${grade.lean_score >= 0 ? "+" : ""}${grade.lean_score}·${why})`, phase);
+  return fmt("T2_FLAT", `베팅 없음 — ${grade?.lean_dir ? (grade.lean_dir === "UP" ? "상방 기울기·" : "하방 기울기·") : "무방향·"}${why}`, phase);
 }
 
 // ── R1 (아침 재판 — 스펙 G1B v0.3 §5 조정 매트릭스의 행동어 사상) ──

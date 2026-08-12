@@ -292,19 +292,33 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     max_abs_gap_pct: gaps.length ? Math.round(Math.max(...gaps) * 100) / 100 : null,
     missed_virtual_sum_pct: missed.length ? Math.round(missed.reduce((a, b) => a + Math.abs(b), 0) * 100) / 100 : null, // 가상 진입가→시가 |수익| 합
   };
+  // Lean 채점 (발주자 8/12 §2): 베팅 없는 밤의 기울기 방향 vs 실측 갭 부호 — θ 인하 심사 1급 증거
+  const leanRows = gaRows.filter((r) => {
+    const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string } } | null)?.grade;
+    return g?.grade === "Lean" && g.lean_dir && r.labels?.L1 != null;
+  });
+  const leanHits = leanRows.filter((r) => {
+    const g = (r.t2 as { grade?: { lean_dir?: string } }).grade!;
+    return (g.lean_dir === "UP") === (Number(r.labels!.L1) > 0);
+  }).length;
+  const dirOf = (o: unknown) => String((o as { last?: { dir?: string } } | undefined)?.last?.dir ?? "");
   const t2plus = {
-    // E2 비교표 재료: 방향 적중(라벨 있는 밤·베팅 방향 낸 밤 한정)과 보류 수
-    base_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.verdict as { direction?: string })?.direction))).length,
-    shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.shadow as { last?: { dir?: string } } | undefined)?.last?.dir))).length,
+    // E2·모자이크 비교표: 베팅 가능 밤 비율이 승격 심사 명시 지표 (발주자 8/12 §5)
     nights_tracked: gaRows.length,
+    base_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.verdict as { direction?: string })?.direction))).length,
+    shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf(r.t2?.shadow))).length,
+    mosaic_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf((r.t2 as { mosaic?: unknown } | null)?.mosaic))).length,
+    lean_score: { n: leanRows.length, hits: leanHits, rate: leanRows.length ? Math.round((leanHits / leanRows.length) * 100) / 100 : null },
+    e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
   const nfEveStart = gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null;
+  const p1Start = gaRows.find((r) => ((r.t2 as { pieces?: Record<string, unknown> } | null)?.pieces)?.p1_eu_semi_avg != null)?.date ?? null;
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
-    effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart },
+    effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };

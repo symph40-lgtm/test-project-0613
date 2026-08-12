@@ -233,6 +233,38 @@ export async function fetchT1Globals(): Promise<{ tsmcRaw: number | null; nqAsia
   return { tsmcRaw, nqAsia };
 }
 
+// ── 저녁 정보 조각 P1~P5 (발주자 8/12 §3 — 확보분부터 기록, T2 본 판정 미사용) ──
+// 소스 조사 결과: P1 유럽 반도체 3종(ASML.AS·IFX.DE·STMPA.PA — 야후 실시간) 확보 /
+// P3 프리마켓 거래량(바스켓 prepost 봉 합) 부분 확보 /
+// P2 TAIFEX(공개 API 없음 — 1주차 판정 유지)·P4 목표가/공매도(무료 실시간 소스 없음)·
+// P5 옵션 스큐(소스 없음) 미확보 — 확보 시 effective_start 자동 태깅.
+export async function fetchEveningPieces(symbol: G1ASymbol): Promise<Record<string, number | null>> {
+  async function sessionChg(sym: string): Promise<number | null> {
+    try {
+      const r = await yf.chart(sym, { period1: new Date(Date.now() - 86400e3), interval: "5m" });
+      const q = (r.quotes ?? []).filter((x) => x.close != null);
+      return q.length >= 2 ? Math.round(((q[q.length - 1].close as number) / (q[0].close as number) - 1) * 10000) / 100 : null;
+    } catch { return null; }
+  }
+  const [asml, ifx, stm] = await Promise.all([sessionChg("ASML.AS"), sessionChg("IFX.DE"), sessionChg("STMPA.PA")]);
+  const eu = [asml, ifx, stm].filter((x): x is number => x != null);
+  // P3: 바스켓 프리마켓 누적 거래량 (유동성 프록시 — 방향 아님)
+  let pmVol: number | null = null;
+  try {
+    const main = symbol === "000660" ? "MU" : "NVDA";
+    const r = await yf.chart(main, { period1: new Date(Date.now() - 2 * 86400e3), interval: "5m", includePrePost: true });
+    const pm = premarketBars((r.quotes ?? []).filter((x) => x.close != null).map((x) => ({ ts: x.date instanceof Date ? x.date : new Date(x.date), close: x.close as number })));
+    void pm;
+    const vols = (r.quotes ?? []).filter((x) => x.volume != null && (x.volume as number) > 0);
+    pmVol = vols.length ? vols.slice(-24).reduce((a, x) => a + (x.volume as number), 0) : null;
+  } catch { /* 결측 */ }
+  return {
+    p1_asml: asml, p1_ifx: ifx, p1_stm: stm,
+    p1_eu_semi_avg: eu.length ? Math.round(eu.reduce((a, b) => a + b, 0) / eu.length * 100) / 100 : null,
+    p3_pm_vol: pmVol,
+  };
+}
+
 // ── 서킷브레이커 프록시 (v0.1 반사실 검정 통과 규칙) ──
 export async function fetchCircuitBreaker(): Promise<boolean> {
   try {
