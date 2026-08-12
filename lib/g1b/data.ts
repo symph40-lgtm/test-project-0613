@@ -154,6 +154,29 @@ export async function refetchAuction(symbol: G1BSymbol): Promise<Obs> {
   return mark(await fetchKisAuctionEstimate(symbol), G1B_CONFIG.cutoff.r2, "KIS 예상체결 08:31 보충");
 }
 
+// 예상체결 공표 시각 진단 (2026-08-12 저녁): 08:31~08:45 보충으로도 결측 지속 → 공표 개시가
+// 절단(08:45)보다 늦다는 가설. 원시 문자열까지 기록해 "0/빈값/실값"을 구분한다.
+export async function fetchAuctionRaw(code: string): Promise<{ raw: string | null; v: number | null }> {
+  try {
+    if (!hasKisKeys()) return { raw: "no-keys", v: null };
+    const token = await getKisToken();
+    if (!token) return { raw: "no-token", v: null };
+    const base = process.env.KIS_BASE || "https://openapi.koreainvestment.com:9443";
+    const url = new URL(`${base}/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn`);
+    url.searchParams.set("FID_COND_MRKT_DIV_CODE", "J");
+    url.searchParams.set("FID_INPUT_ISCD", code);
+    const res = await fetch(url, {
+      headers: { authorization: `Bearer ${token}`, appkey: process.env.KIS_APP_KEY ?? "", appsecret: process.env.KIS_APP_SECRET ?? "", tr_id: "FHKST01010200", custtype: "P" },
+      cache: "no-store",
+    });
+    if (!res.ok) return { raw: `http-${res.status}`, v: null };
+    const j = (await res.json()) as { output2?: { antc_cnpr?: string } };
+    const raw = j.output2?.antc_cnpr ?? null;
+    const v = parseFloat(raw ?? "");
+    return { raw, v: isFinite(v) && v > 0 ? v : null };
+  } catch (e) { return { raw: `err-${e instanceof Error ? e.message.slice(0, 30) : "?"}`, v: null }; }
+}
+
 // KIS 호가/예상체결 — output2.antc_cnpr(예상 체결가). 동시호가(08:30~09:00)에만 유의미.
 async function fetchKisAuctionEstimate(code: string): Promise<number | null> {
   try {
