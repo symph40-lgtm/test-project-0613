@@ -104,15 +104,24 @@ export default async function G1Page() {
         return (
           <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${r.date} 저녁 결정`} badge="G1A T2">
             <ActionLine line={r.t2?.action?.line} />
-            {/* A3 + 4등급제 헤드라인 (발주자 8/12 — 판정은 항상, 베팅은 조건부) */}
-            <p className="mb-1 text-[14px] font-semibold text-ink-80">
+            {/* 방향+등급 복합 표기 (발주자 용어 확정판 8/13): ▲▼갭상승/갭하락, △▽ Lean, ─ Flat, [E] 접두.
+                색 규약: 갭상승 적색·갭하락 청색·Lean 연한 톤·Flat 회색 */}
+            <p className="mb-1 text-[14px] font-semibold">
               {v ? (() => {
-                const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string | null; lean_score?: number } })?.grade;
-                if (v.direction !== "NEUTRAL")
-                  return <>{g?.grade ?? v.confidence} — {v.direction === "UP" ? "매수" : "매도"} · 권장 {SIZE_KO[v.size ?? "0"]}</>;
-                if (g?.grade === "Lean")
-                  return <>Lean — {g.lean_dir === "UP" ? "상방" : "하방"} 기울기 (score {g.lean_score}) · 베팅 없음 <span className="font-normal text-ink-48">({v.abstain_reason ?? "θ 미달"})</span></>;
-                return <>Flat — {g?.lean_dir ? `${g.lean_dir === "UP" ? "상방" : "하방"} 기울기 (score ${g.lean_score}) · ` : "무방향 · "}베팅 없음 <span className="font-normal text-ink-48">({v.abstain_reason ?? "θ 미달"})</span></>;
+                const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string | null; lean_score?: number; label?: string } })?.grade;
+                const label = g?.label ?? "─ Flat (무방향)";
+                const color = g?.lean_dir === "UP"
+                  ? (g?.grade === "Lean" ? "text-red-400" : "text-red-600")
+                  : g?.lean_dir === "DOWN"
+                    ? (g?.grade === "Lean" ? "text-blue-400" : "text-blue-600")
+                    : "text-ink-48";
+                return (<>
+                  <span className={color}>{label}</span>
+                  <span className="text-ink-80"> {v.direction !== "NEUTRAL"
+                    ? <>· {v.direction === "UP" ? `매수 권장 ${SIZE_KO[v.size ?? "0"]}` : "보유분 방어 전용 (신규 숏 없음)"}</>
+                    : <>· 베팅 없음{g?.lean_score != null ? ` (score ${g.lean_score})` : ""}</>}</span>
+                  {v.abstain_reason ? <span className="font-normal text-[12px] text-ink-48"> ({v.abstain_reason})</span> : null}
+                </>);
               })() : "저녁 감시 대기"}
             </p>
             {(() => {

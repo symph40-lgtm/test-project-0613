@@ -297,6 +297,12 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string } } | null)?.grade;
     return g?.grade === "Lean" && g.lean_dir && r.labels?.L1 != null;
   });
+  // 갭상승/갭하락 분리 집계 (발주자 8/13 §4 — 갭하락 판정 검증이 NXT ETF 재검토의 전제조건)
+  const leanSplit = (dir: "UP" | "DOWN") => {
+    const rows2 = leanRows.filter((r) => (r.t2 as { grade?: { lean_dir?: string } }).grade!.lean_dir === dir);
+    const hits = rows2.filter((r) => (dir === "UP") === (Number(r.labels!.L1) > 0)).length;
+    return { n: rows2.length, hits, rate: rows2.length ? Math.round((hits / rows2.length) * 100) / 100 : null };
+  };
   const leanHits = leanRows.filter((r) => {
     const g = (r.t2 as { grade?: { lean_dir?: string } }).grade!;
     return (g.lean_dir === "UP") === (Number(r.labels!.L1) > 0);
@@ -308,7 +314,8 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     base_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.verdict as { direction?: string })?.direction))).length,
     shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf(r.t2?.shadow))).length,
     mosaic_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf((r.t2 as { mosaic?: unknown } | null)?.mosaic))).length,
-    lean_score: { n: leanRows.length, hits: leanHits, rate: leanRows.length ? Math.round((leanHits / leanRows.length) * 100) / 100 : null },
+    lean_score: { n: leanRows.length, hits: leanHits, rate: leanRows.length ? Math.round((leanHits / leanRows.length) * 100) / 100 : null,
+                  갭상승: leanSplit("UP"), 갭하락: leanSplit("DOWN") },
     e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
   const nfEveStart = gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null;

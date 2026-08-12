@@ -6,11 +6,22 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type ActionCode =
-  | "T2_BUY" | "T2_SELL" | "T2_LEAN" | "T2_FLAT"   // 4등급제 (발주자 8/12) — "베팅 보류" 단독 표기 폐지
+  // 방향-수단 매트릭스 (a) 확정 (발주자 8/13): 신규 숏 없음 — "매도 진입" 제거,
+  // 갭하락 판정은 보유분 방어(T2_SELL_HOLDINGS) 또는 경계(T2_DOWN_ALERT)로만.
+  | "T2_BUY" | "T2_SELL_HOLDINGS" | "T2_DOWN_ALERT" | "T2_LEAN" | "T2_FLAT"
   | "R1_KEEP" | "R1_HALF" | "R1_EXIT_PREOPEN" | "R1_NOPOS_WATCH"
   | "R2_OPEN_BUY" | "R2_FADE_CANDIDATE" | "R2_NO_SIGNAL";
 
-export type ActionLine = { code: ActionCode; line: string; phase: "가상" | "실사용" };
+// 판정 방향 표기 규격 (발주자 용어 확정판 8/13): ▲갭상승/▼갭하락+High/Low, △▽+Lean, ─ Flat, [E] 접두.
+// "상방/하방"·"기울기" 표기 금지. 화면·문자·로그 3곳 동일 규격 — 이 함수가 유일 원천.
+export function gradeLabel(grade: string, dir: "UP" | "DOWN" | null, isEvent: boolean): string {
+  const e = isEvent ? "[E] " : "";
+  if (grade === "High" || grade === "Low") return `${e}${dir === "UP" ? "▲ 갭상승" : "▼ 갭하락"} ${grade}`;
+  if (grade === "Lean" && dir) return `${e}${dir === "UP" ? "△ 갭상승" : "▽ 갭하락"} Lean`;
+  return `${e}─ Flat (무방향)`;
+}
+
+export type ActionLine = { code: ActionCode; line: string; phase: "가상" | "실사용"; dir?: "UP" | "DOWN" | null }; // dir = 갭하락 분리 채점 집계 키 (발주자 8/13 §2)
 
 // B4: 단계 꼬리표 — 기본 "가상". 게이트 전환은 ops_settings.g1_phase = {"r1":"live"} 식으로만.
 export async function phaseTag(step: "t2" | "r1" | "r2"): Promise<"가상" | "실사용"> {
@@ -30,16 +41,21 @@ export function t2Action(
   v: { direction: string; confidence: string | null; size: string; abstain_reason: string | null; expected_residual_gap: number | null },
   blocked: string | null, phase: "가상" | "실사용",
   grade?: { grade: string; lean_dir: "UP" | "DOWN" | null; lean_score: number },
+  hasHoldings = false, // log-only 기간 무보유 전제 — 가상 보유 추적 도입 시 전일 미청산분 전달
 ): ActionLine {
   if (v.direction === "UP")
-    return fmt("T2_BUY", `매수 진입 (${v.size}·NXT 지정가·19:55까지 반전 감시)`, phase);
-  if (v.direction === "DOWN")
-    return fmt("T2_SELL", `매도 진입 (${v.size}·NXT 지정가·19:55까지 반전 감시)`, phase);
-  // 4등급제: 베팅 없는 밤에도 판단은 항상 — 기울기+점수 발표 (베팅 문턱·사이징 불변)
+    return { ...fmt("T2_BUY", `매수 진입 (${v.size}·NXT 지정가·19:55까지 반전 감시)`, phase), dir: "UP" };
+  if (v.direction === "DOWN") {
+    // (a) 현상 유지 확정 (발주자 8/13): 신규 숏 없음 — 보유분 방어 전용 / 무보유 시 경계 발표
+    if (hasHoldings)
+      return { ...fmt("T2_SELL_HOLDINGS", `보유분 저녁 매도 (갭하락 방어·${v.size} 상당·NXT 지정가)`, phase), dir: "DOWN" };
+    return { ...fmt("T2_DOWN_ALERT", `베팅 없음 — 갭하락 경계 (${v.confidence}·score ${v.expected_residual_gap != null ? "" : ""}신규 숏 수단 없음)`, phase), dir: "DOWN" };
+  }
+  // 4등급제: 베팅 없는 밤에도 판단은 항상 (베팅 문턱·사이징 불변)
   const why = v.abstain_reason ?? blocked ?? "θ 미달";
   if (grade?.grade === "Lean" && grade.lean_dir)
-    return fmt("T2_LEAN", `베팅 없음 — ${grade.lean_dir === "UP" ? "상방" : "하방"} 기울기 발표 (score ${grade.lean_score >= 0 ? "+" : ""}${grade.lean_score}·${why})`, phase);
-  return fmt("T2_FLAT", `베팅 없음 — ${grade?.lean_dir ? (grade.lean_dir === "UP" ? "상방 기울기·" : "하방 기울기·") : "무방향·"}${why}`, phase);
+    return { ...fmt("T2_LEAN", `베팅 없음 — ${grade.lean_dir === "UP" ? "갭상승" : "갭하락"} Lean 발표 (score ${grade.lean_score >= 0 ? "+" : ""}${grade.lean_score}·${why})`, phase), dir: grade.lean_dir };
+  return { ...fmt("T2_FLAT", `베팅 없음 — ${grade?.lean_dir ? (grade.lean_dir === "UP" ? "갭상승 Lean·" : "갭하락 Lean·") : "무방향·"}${why}`, phase), dir: grade?.lean_dir ?? null };
 }
 
 // ── R1 (아침 재판 — 스펙 G1B v0.3 §5 조정 매트릭스의 행동어 사상) ──

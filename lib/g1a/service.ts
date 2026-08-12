@@ -161,10 +161,12 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         mo.last = { t: hhmm, score: mScore, dir: mDir };
         (t2 as Record<string, unknown>).mosaic = mo;
       }
-      const { t2Action, phaseTag } = await import("@/lib/g1/action");
+      const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
       const { t2Grade } = await import("./score");
       const phase = await phaseTag("t2");
-      const grade = t2Grade(verdict);
+      const grade0 = t2Grade(verdict);
+      const isEventN = (verdict.abstain_reason ?? "").startsWith("보류1");
+      const grade = { ...grade0, label: gradeLabel(grade0.grade, grade0.lean_dir, isEventN) }; // 용어 확정판 8/13 — 3곳 동일 규격
       (t2 as Record<string, unknown>).grade = grade;   // 4등급 + Lean 채점 원천 (발주자 8/12 §1·2)
       // 즉시 시행 b (이벤트 밤): beat/miss 시나리오 2줄 — IM 미조달이라 G1B 이벤트 σ를 대용 (명기).
       if ((verdict.abstain_reason ?? "").startsWith("보류1") && !(t2 as Record<string, unknown>).event_scenario) {
@@ -190,7 +192,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2.verdict = verdict;
         const act = t2Action(verdict, blocked, phase, grade);
         (t2 as Record<string, unknown>).action = act;                       // B3: 지시 이력 저장
-        t2.report_r1 = act.line + "\n" + buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date); // B5: 첫 줄 동일
+        t2.report_r1 = act.line + "\n" + grade.label + "\n" + buildT2Report(symbol, t2.trigger_type, hhmm, verdict, f, date); // B5: 첫 줄 동일·둘째 줄 등급 규격
         notes.push(`${symbol} T2-${t2.trigger_type} ${act.code} (score ${verdict.gap_score})`);
         await sendSignal(`[G1A T2-${t2.trigger_type}] 저녁 갭 판정 (${phase}·log-only)`, t2.report_r1, notes);
       } else if (isFinal) {
@@ -200,7 +202,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2.verdict = verdict;
         const act = t2Action(verdict, blocked, phase, grade);
         (t2 as Record<string, unknown>).action = act;
-        t2.report_r1 = act.line + "\n" + buildT2Report(symbol, "F", hhmm, verdict, f, date);
+        t2.report_r1 = act.line + "\n" + grade.label + "\n" + buildT2Report(symbol, "F", hhmm, verdict, f, date);
         notes.push(`${symbol} T2-F ${act.code}`);
         await sendSignal(`[G1A T2-F] 베팅 보류 확정 (${phase}·log-only)`, t2.report_r1, notes);
       } else {
