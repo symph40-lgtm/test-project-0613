@@ -129,10 +129,10 @@ export default async function G1Page() {
               return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
             })()}
             {v ? (
-              <Row label={`예상잔여갭${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
+              <Row label={`예상잔여갭 · 번역 추정(G1B)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
                 value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
             ) : null}
-            <Row label="GapScore / 기준가" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}</>} />
+            <Row label="GapScore · 방향 판단(G1A) / 기준가" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}</>} />
             <Row label="야간선물 초반 (E1·기록만)" value={r.t2?.nf_evening ? `${r.t2.nf_evening.t} ${pp(r.t2.nf_evening.pct)}` : "18:00~ 대기"} />
             <Row label="T2+ 섀도 (E2·본판정 미반영)" value={r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"} />
             {(() => {

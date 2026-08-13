@@ -168,6 +168,10 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const isEventN = (verdict.abstain_reason ?? "").startsWith("보류1");
       const grade = { ...grade0, label: gradeLabel(grade0.grade, grade0.lean_dir, isEventN) }; // 용어 확정판 8/13 — 3곳 동일 규격
       (t2 as Record<string, unknown>).grade = grade;   // 4등급 + Lean 채점 원천 (발주자 8/12 §1·2)
+      // 상충 플래그 (발주자 8/13 §2): 방향 판단(score) vs 번역 추정(잔여갭) 부호 불일치 — 3자 대조 표본
+      (t2 as Record<string, unknown>).conflict =
+        verdict.expected_residual_gap != null && verdict.gap_score !== 0 &&
+        Math.sign(verdict.gap_score) !== Math.sign(verdict.expected_residual_gap);
       // 즉시 시행 b (이벤트 밤): beat/miss 시나리오 2줄 — IM 미조달이라 G1B 이벤트 σ를 대용 (명기).
       if ((verdict.abstain_reason ?? "").startsWith("보류1") && !(t2 as Record<string, unknown>).event_scenario) {
         const { G1B_CONFIG } = await import("@/lib/g1b/config");

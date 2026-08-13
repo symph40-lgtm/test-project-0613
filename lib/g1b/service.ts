@@ -268,9 +268,14 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const per = days.map((d) => {
     const rs = byDate.get(d)!;
     const r1ok = rs.filter((r) => r.r1).length, r2ok = rs.filter((r) => r.r2).length;
-    const late = rs.reduce((a, r) => a + Object.values({ ...(r.night ?? {}), ...(r.morning ?? {}) }).filter((o) => (o as Obs).late_arrival).length, 0);
+    // late 분해 (발주자 8/13 저녁 검수 §1): '절단 위반'(late인데 판정 사용 — 엔진이 late를 제외하므로
+    // 구조상 0이어야 하며 게이트 기준) vs '격리 기록'(진단 프로브 등 — 무해, 격리 장치 작동 증거)
+    const lateEntries = rs.flatMap((r) => Object.entries({ ...(r.night ?? {}), ...(r.morning ?? {}) }).filter(([, o]) => (o as Obs).late_arrival));
+    const late = lateEntries.filter(([k]) => !k.startsWith("auction_probe")).length; // 격리(비프로브)
+    const lateProbe = lateEntries.length - late;
+    void lateProbe;
     const tes = rs.map((r) => r.labels?.te_r1_pct as number | null).filter((x): x is number => x != null);
-    return { date: d, r1ok, r2ok, late_arrival: late, te_r1: tes };
+    return { date: d, r1ok, r2ok, late_arrival: late, late_probe: lateProbe, te_r1: tes };
   });
   const allTe = per.flatMap((p) => p.te_r1).sort((a, b) => a - b);
   // 중앙값 규약 (발주자 Q2 답변, 2026-08-12 문서화): **상위 중앙값(upper median)** —
@@ -286,7 +291,18 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const abst = gaRows.filter((r) => (r.t2?.verdict as { direction?: string } | undefined)?.direction === "NEUTRAL" && r.labels);
   const gaps = abst.map((r) => Math.abs(Number(r.labels?.L1 ?? NaN))).filter((x) => isFinite(x));
   const missed = abst.map((r) => Number(r.labels?.L1p ?? NaN)).filter((x) => isFinite(x));
+  // D1 사유별 분해 (발주자 8/13 §3): 정당 보류(이벤트) vs 아까운 보류(점수/DC-PM) 구분 — θ 심사용
+  const reasonOf = (t2: Record<string, unknown> | null): string => {
+    const a = String((t2?.verdict as { abstain_reason?: string } | undefined)?.abstain_reason ?? "");
+    if (a.startsWith("보류")) return a.startsWith("보류1") ? "이벤트" : "기타 보류규칙";
+    const l = String((t2?.action as { line?: string } | undefined)?.line ?? "");
+    if (l.includes("DC-PM")) return "DC-PM 미달";
+    return "점수/θ 미달";
+  };
+  const byReason: Record<string, number> = {};
+  for (const r of abst) byReason[reasonOf(r.t2)] = (byReason[reasonOf(r.t2)] ?? 0) + 1;
   const g1aAbstain = {
+    by_reason: byReason,
     nights: abst.length,
     avg_abs_gap_pct: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length * 100) / 100 : null,
     max_abs_gap_pct: gaps.length ? Math.round(Math.max(...gaps) * 100) / 100 : null,
@@ -324,7 +340,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
-    late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
+    cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
