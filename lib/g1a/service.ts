@@ -125,16 +125,25 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const other = [...rows.values()].some((r) => r.symbol !== symbol && r.t2?.trigger_type && r.t2.verdict?.direction !== "NEUTRAL");
       const { verdict, blocked } = evaluateT2(symbol, f, ctx, hhmm, isFinal, other);
       t2.evals.push({ time: hhmm, gap_score: verdict.gap_score, blocked_by: blocked });
-      // E1 (발주자 8/12): 저녁 야간선물 초반 세션 스냅샷 — 본 판정 미사용, 기록·effective_start 대상
-      if (!(t2 as Record<string, unknown>).nf_evening && hhmm >= "18:00") {
-        try {
-          const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
-          if (hasKisKeys()) {
-            const nf = await fetchKisNightFutures();
-            const pct = (nf as { changePercent?: number | null })?.changePercent;
-            if (typeof pct === "number") (t2 as Record<string, unknown>).nf_evening = { t: hhmm, pct };
-          }
-        } catch { /* 결측 허용 */ }
+      // E1 확장 (발주자 8/14 §2): 야간선물 저녁 스냅샷 4점 — 18:05/18:30/19:00/19:35(T2 직전).
+      // 목적: 조기 트리거 시각별 대응값 + 시점 선택 실증. 기록 전용 (본판정 미반영).
+      if (hhmm >= "18:00") {
+        const slot = hhmm >= "19:35" ? "1935" : hhmm >= "19:00" ? "1900" : hhmm >= "18:30" ? "1830" : "1805";
+        const snaps = ((t2 as Record<string, unknown>).nf_evening_snaps ?? {}) as Record<string, { t: string; pct: number }>;
+        if (!snaps[slot]) {
+          try {
+            const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
+            if (hasKisKeys()) {
+              const nf = await fetchKisNightFutures();
+              const pct = (nf as { changePercent?: number | null })?.changePercent;
+              if (typeof pct === "number") {
+                snaps[slot] = { t: hhmm, pct };
+                (t2 as Record<string, unknown>).nf_evening_snaps = snaps;
+                if (!(t2 as Record<string, unknown>).nf_evening) (t2 as Record<string, unknown>).nf_evening = { t: hhmm, pct };
+              }
+            }
+          } catch { /* 결측 허용 */ }
+        }
       }
       // 저녁 정보 조각 P1~P5 (발주자 8/12 §3 — 확보분 기록, 본 판정 미사용)
       try {
@@ -147,18 +156,27 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       {
         const nfe = (t2 as Record<string, unknown>).nf_evening as { pct: number } | undefined;
         const pieces = (t2 as Record<string, unknown>).pieces as Record<string, number | null> | undefined;
+        // 섀도 등급 매핑 = 본판정과 동일 기준 (발주자 8/14 §3): 베팅 문턱 θ + Lean 문턱 0.5 + gradeLabel
+        const { gradeLabel: gl } = await import("@/lib/g1/action");
+        const isEvt = (verdict.abstain_reason ?? "").startsWith("보류1");
+        const shadowGrade = (score: number) => {
+          const dir0 = score >= 0.5 ? "UP" as const : score <= -0.5 ? "DOWN" as const : null;
+          const bet = Math.abs(score) >= th.low && !verdict.abstain_reason;
+          const g = bet ? (Math.abs(score) >= th.high ? "High" : "Low") : dir0 && !isEvt ? "Lean" : "Flat";
+          return { dir: bet ? (score > 0 ? "UP" : "DOWN") : dir0, grade: g, label: gl(g, bet ? (score > 0 ? "UP" : "DOWN") : dir0, isEvt) };
+        };
         const sScore = nfe ? Math.round((verdict.gap_score + 1.0 * Math.tanh(nfe.pct / 0.4)) * 100) / 100 : verdict.gap_score;
         const sh = (t2 as Record<string, unknown>).shadow as Record<string, unknown> | undefined ?? {};
-        const sDir = Math.abs(sScore) >= th.low && !verdict.abstain_reason ? (sScore > 0 ? "UP" : "DOWN") : "NEUTRAL";
-        if (!sh.first_trigger && sDir !== "NEUTRAL") sh.first_trigger = { t: hhmm, dir: sDir, score: sScore };
-        sh.last = { t: hhmm, score: sScore, dir: sDir };
+        const sg = shadowGrade(sScore);
+        if (!sh.first_trigger && (sg.grade === "High" || sg.grade === "Low")) sh.first_trigger = { t: hhmm, dir: sg.dir, score: sScore };
+        sh.last = { t: hhmm, score: sScore, dir: sg.dir ?? "NEUTRAL", label: sg.label };
         (t2 as Record<string, unknown>).shadow = sh;
         const p1 = pieces?.p1_eu_semi_avg;
         const mScore = p1 != null ? Math.round((sScore + 0.75 * Math.tanh(p1 / 0.5)) * 100) / 100 : sScore;
         const mo = (t2 as Record<string, unknown>).mosaic as Record<string, unknown> | undefined ?? {};
-        const mDir = Math.abs(mScore) >= th.low && !verdict.abstain_reason ? (mScore > 0 ? "UP" : "DOWN") : "NEUTRAL";
-        if (!mo.first_trigger && mDir !== "NEUTRAL") mo.first_trigger = { t: hhmm, dir: mDir, score: mScore };
-        mo.last = { t: hhmm, score: mScore, dir: mDir };
+        const mg = shadowGrade(mScore);
+        if (!mo.first_trigger && (mg.grade === "High" || mg.grade === "Low")) mo.first_trigger = { t: hhmm, dir: mg.dir, score: mScore };
+        mo.last = { t: hhmm, score: mScore, dir: mg.dir ?? "NEUTRAL", label: mg.label };
         (t2 as Record<string, unknown>).mosaic = mo;
       }
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");

@@ -165,7 +165,7 @@ export function evaluateT2(
   ];
   for (const [ok, why] of checks) {
     if (!ok && !isFinal) return { verdict: base, blocked: why };
-    if (!ok && isFinal) return { verdict: base, blocked: `T2-F ${why} → Flat 확정` };
+    if (!ok && isFinal) return { verdict: base, blocked: `T2-F ${why} → 베팅 없음 확정(${Math.abs(gs.score) >= 0.5 ? "Lean" : "Flat"})` };
   }
 
   const abs = Math.abs(gs.score);
@@ -175,7 +175,7 @@ export function evaluateT2(
   let size: T2Verdict["size"] = "0";
   if (abs >= th.high && dcOk) { conf = "High"; size = "1/3"; }
   else if (abs >= th.low) { conf = "Low"; size = "1/6"; }
-  else return { verdict: base, blocked: isFinal ? `θ 미달(${abs.toFixed(1)}<${th.low}) → Flat 확정` : `θ 미달` };
+  else return { verdict: base, blocked: isFinal ? `θ 미달(${abs.toFixed(1)}<${th.low}) → 베팅 없음 확정(${abs >= 0.5 ? "Lean" : "Flat"})` : `θ 미달` };
 
   if (liq === "downgrade" && size === "1/3") { size = "1/6"; conf = "Low"; }        // §5.4
   if (otherSymbolTriggered && size === "1/3") { size = "1/6"; conf = "Low"; }        // §5.3 합산 상한

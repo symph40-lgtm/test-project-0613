@@ -283,6 +283,15 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   // 근거: ①실제 발생한 오차값만 보고(합성값 금지) ②짝수일 때 큰 쪽을 취해 성능을 후하게 보이지 않게(보수).
   // 예: [0.62, 1.00, 1.08, 2.75] → 보간 1.04가 아니라 1.08. D+15 게이트 판정도 이 규약.
   const med = allTe.length ? allTe[Math.floor(allTe.length / 2)] : null;
+  // TE 레짐 분리 (발주자 8/14 §8): 평상/이벤트 밤 분리 중앙값 — 동일 상위 중앙값 규약
+  const upperMed = (xs: number[]) => (xs.length ? xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null);
+  const teReg: Record<string, number[]> = { normal: [], event: [] };
+  for (const r of rows) {
+    const te = (r.labels as { te_r1_pct?: number | null } | null)?.te_r1_pct;
+    const reg = String((r.r1 as { regime?: string } | null)?.regime ?? "normal");
+    if (te != null) (teReg[reg === "event" ? "event" : "normal"] ??= []).push(Number(te));
+  }
+  const teByRegime = { normal: upperMed(teReg.normal), event: upperMed(teReg.event), n: { normal: teReg.normal.length, event: teReg.event.length } };
   const complete = per.filter((p) => p.r1ok === 2 && p.r2ok === 2).length;
   // D1 (발주자 8/12): G1A 보류 밤 집계 — θ 캘리브레이션의 공식 증거 + E2 T2+ 섀도 비교 + E1 개시일
   const ga = await admin.from("g1a_days").select("date,symbol,t2,labels").order("date", { ascending: true }).limit(120);
@@ -339,7 +348,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
-    te_r1_median_pct: med, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
+    te_r1_median_pct: med, te_r1_by_regime: teByRegime, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
