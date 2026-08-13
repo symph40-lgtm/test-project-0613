@@ -42,10 +42,10 @@ export const G1B_CONFIG = {
     r1RemainHigh: 0.8, r1Wrong: -0.5, r2NoSignal: 0.7, r2Fire: 1.2, layer2Conflict: 1.5,
   },
   // 절단 시각 (KST) — 라이브판 룩어헤드 방지 (§1: 절단 후 도착 = late_arrival, 당일 사용 금지)
-  cutoff: { r1: "07:15", r2: "08:45" },
+  cutoff: { r1: "07:15", r2: "08:52" },
   windows: {
     nightStart: "06:00", r1Publish: "07:20",
-    morningStart: "08:00", r2Publish: "08:55",
+    morningStart: "08:00", r2Publish: "08:56",
     labelStart: "09:35", labelEnd: "10:30",
   },
   // 바스켓 (시간외 — 스펙 §3.2 v2 항, 시간외 SPY 대비 초과)
