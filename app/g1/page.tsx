@@ -94,9 +94,12 @@ export default async function G1Page() {
   const eff = (m?.effective_start ?? {}) as Record<string, string | null>;
   const abstain = (m?.g1a_abstain ?? null) as Record<string, unknown> | null;
   const sigmaOf: Record<string, number> = {};
+  // 학습 상태 (사용자 논의 8/15 — 적응 η 도입 시점 판단 재료): CUSUM·bias·Hedge 가중 표시 (저장값만)
+  const learnOf: Record<string, { cusum: number; bias: number; hedge_w: Record<string, number>; nights: number }> = {};
   for (const s of bState.data ?? []) {
-    const se = (s.state as { sigma_ewma?: Record<string, number> })?.sigma_ewma;
-    if (se?.normal) sigmaOf[s.symbol] = Math.sqrt(se.normal);
+    const st = s.state as { sigma_ewma?: Record<string, number>; cusum?: number; bias?: number; hedge_w?: Record<string, number>; nights?: number };
+    if (st?.sigma_ewma?.normal) sigmaOf[s.symbol] = Math.sqrt(st.sigma_ewma.normal);
+    learnOf[s.symbol] = { cusum: st?.cusum ?? 0, bias: st?.bias ?? 0, hedge_w: st?.hedge_w ?? {}, nights: st?.nights ?? 0 };
   }
   aRows.sort(bySymOrder);
   rows.sort(bySymOrder);
@@ -284,6 +287,15 @@ export default async function G1Page() {
         <Row label="TE 레짐 분리 (평상 / 이벤트)" value={(() => { const t = (m?.te_r1_by_regime ?? null) as { normal?: number | null; event?: number | null; n?: { normal: number; event: number } } | null; return t ? `평상 ${t.normal ?? "—"}% (${t.n?.normal ?? 0}밤) · 이벤트 ${t.event ?? "—"}% (${t.n?.event ?? 0}밤)` : "집계 전"; })()} />
         <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
         <Row label="절단 위반 (late)" value={String(m?.late_arrival_total ?? "—")} />
+        <Row label="학습 상태 (CUSUM·bias·Hedge 가중)" value={<span className="text-[11px]">
+          {["005930", "000660"].filter((s) => learnOf[s]).map((s) => {
+            const l = learnOf[s];
+            const cus = l.cusum;
+            const flag = Math.abs(cus) >= 4 ? " ⚠뒤처짐" : "";
+            return `${NAME[s]} CUSUM ${cus >= 0 ? "+" : ""}${cus.toFixed(1)}${flag} · bias ${l.bias >= 0 ? "+" : ""}${l.bias.toFixed(2)}%p · ${Object.entries(l.hedge_w).map(([k, v]) => `${k} ${v}`).join("/")} (${l.nights}밤)`;
+          }).join("  |  ") || "상태 없음"}
+          <i> — |CUSUM|≥4 = 모형이 한 방향으로 계속 뒤처짐(η 상향 검토 신호)</i>
+        </span>} />
         <Row label="기능별 개시일" value={<span className="text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
         <Row label="nf 리더보드 (pack_v1.1c 섀도)" value={(() => {
           // 발주자 8/15 정확도연동 §4 — "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인
