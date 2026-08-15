@@ -142,16 +142,17 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       // [발주자 8/15 §4] 야간 급변 플래그 — 야간 세션 내재갭 |±2%| 이상 밤 (절단 통과분만)
       const nfPct0 = row.night.night_fut?.late_arrival ? null : row.night.night_fut?.v;
       const nightFlash = nfPct0 != null && Math.abs(nfPct0 * 100) >= 2;
-      // [발주자 8/15 정확도연동 §1] pack_v1.1c 챌린저 병행 (섀도·본판정 무접촉) — nf 5번째 전문가.
+      // [발주자 8/15 정확도연동 §1 + 판정 §1] pack_v1.1c 챌린저 병행 (섀도·본판정 무접촉) — nf 5번째 전문가.
+      // 이벤트 밤은 챔피언 유지 (판정 §1 승인안): 챌린저 결합은 normal 밤에만 갈라진다.
       // 공식 개시(nights 증가)는 첫 라벨 밤부터 — 그 전 R1은 참고 기록.
       const chSt = st.challenger_v11c ?? initChallenger(symbol, st.hedge_w);
-      const chC = combineW(chSt.hedge_w, st.bias, challengerExperts(ex));
+      const chC = regime === "event" ? { fair, wUsed } : combineW(chSt.hedge_w, st.bias, challengerExperts(ex));
       row.r1 = {
         fair_gap_pct: fair != null ? Math.round(fair * 100) / 100 : null,
         sigma_pct: sigma, q80_pct: q80, regime, w_used: wUsed,
         expected_open: expOpen, prev_close: kr.prevClose,
         experts: ex, virtual: true, night_flash: nightFlash,
-        challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true },
+        challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
         action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual } : null,
         report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
           act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
@@ -225,7 +226,43 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       outbox.subject = "[G1B R2] 잔차 판정 (가상·log-only)";
       outbox.texts.push(row.r2.report as string);
       notes.push(`${symbol} R2 발행 (${signal})`);
-    } else if (hhmm >= W.labelStart && hhmm <= W.labelEnd && row.r1 && !row.labels) {
+    }
+    // [발주자 판정 8/15 §2ⓒ] 라이브 vs KRX 정본(T+1) 일일 대사 상설 — 라벨 창에서 1회, 성공까지 재시도.
+    // 허용 오차 0.30%p: 라이브 스냅샷은 04:50(마감 06:00 전 70분) — 시점차 정상 변동을 오탐하지 않는 폭.
+    // 초과 불일치 = 소스 오염 신호 → 경보 (판정 §5: 정본 대사 없는 라이브 소스는 미검증 취급).
+    if (hhmm >= W.labelStart && hhmm <= "11:00" && row.night && !(row.night as Record<string, unknown>).nf_reconcile) {
+      const liveV = row.night.night_fut?.v;
+      const liveCorrected = (row.night.night_fut as unknown as { corrected?: boolean } | undefined)?.corrected === true;
+      try {
+        const { fetchKrxNightU1 } = await import("@/lib/market/krxNight");
+        const krx = process.env.KRX_ID && process.env.KRX_PW ? await fetchKrxNightU1(date) : undefined;
+        if (krx === undefined) {
+          (row.night as Record<string, unknown>).nf_reconcile = { verdict: "대사 불가 — KRX_ID/KRX_PW 미설정", ts: new Date().toISOString() };
+          await saveRow(row);
+          notes.push(`${symbol} 야간 대사 불가 — Vercel에 KRX_ID/KRX_PW 필요`);
+        } else if (krx === null) {
+          // 정본 미확보(로그인 실패·해당 라벨 야간 세션 없음 등) — 다음 틱 재시도 (기록하지 않음)
+          notes.push(`${symbol} 야간 대사 재시도 예정 (정본 미확보)`);
+        } else {
+          const livePct = liveV != null ? Math.round(liveV * 10000) / 100 : null;
+          const diff = livePct != null ? Math.round((livePct - krx.u1_pct) * 100) / 100 : null;
+          const verdict = livePct == null ? "라이브 결측 — 정본만 기록"
+            : Math.abs(diff!) <= 0.30 ? "일치(±0.30%p)"
+            : "불일치 — 소스 점검 필요";
+          (row.night as Record<string, unknown>).nf_reconcile = {
+            live_pct: livePct, krx_u1_pct: krx.u1_pct, diff_pp: diff, contract: krx.contract,
+            live_corrected: liveCorrected, verdict, ts: new Date().toISOString(),
+          };
+          notes.push(`${symbol} 야간 대사 ${verdict}${diff != null ? ` (라이브 ${livePct} vs 정본 ${krx.u1_pct})` : ""}`);
+          if (verdict.startsWith("불일치")) {
+            const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+            await sendG1Notify("[G1B 대사] 야간선물 정본 불일치", `[G1B 대사] ${date.slice(5)} 야간선물 라이브 ${livePct}% vs KRX 정본 ${krx.u1_pct}% (차 ${diff}%p) — 소스 점검 필요`);
+          }
+          await saveRow(row);
+        }
+      } catch { notes.push(`${symbol} 야간 대사 예외 — 다음 틱 재시도`); }
+    }
+    if (hhmm >= W.labelStart && hhmm <= W.labelEnd && row.r1 && !row.labels) {
       const kr = await krDaily(symbol);
       if (kr.todayOpen && kr.prevClose) {
         const actual = Math.round(((kr.todayOpen / kr.prevClose - 1) * 100) * 100) / 100;
@@ -239,16 +276,18 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const ex = (row.r1.experts ?? {}) as Experts;
         const regime = (row.r1.regime as string) ?? "normal";
         const st2 = dailyUpdate(symbol, st, ex, row.r1.fair_gap_pct as number | null, actual, regime, row.night ?? {});
-        // [발주자 8/15 정확도연동 §1] 챌린저 pack_v1.1c 일일 채점 — 챔피언과 동일 규칙, nf 포함. 섀도 밤수 +1.
+        // [발주자 8/15 정확도연동 §1 + 판정 §1] 챌린저 pack_v1.1c 일일 채점 — 챔피언과 동일 규칙, nf 포함.
+        // 이벤트 밤은 챔피언 유지이므로 갱신·밤수 카운트 모두 건너뛴다 (섀도 12거래밤 = 실제 갈라진 밤만).
         const regKey = regime === "bigmove" ? "event" : regime;
         const sigCh = Math.sqrt(st.sigma_ewma[regKey] ?? st.sigma_ewma.normal);
         const chEx = challengerExperts(ex);
-        st2.challenger_v11c = challengerUpdate(st.challenger_v11c ?? initChallenger(symbol, st.hedge_w), chEx, actual, sigCh);
+        const chPrev = st.challenger_v11c ?? initChallenger(symbol, st.hedge_w);
+        st2.challenger_v11c = regKey === "event" ? chPrev : challengerUpdate(chPrev, chEx, actual, sigCh);
         const chFair = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null;
         (row.labels as Record<string, unknown>).te_v11c_pct = chFair != null ? Math.round(Math.abs(actual - chFair) * 100) / 100 : null;
         row.learn = { hedge_w: st2.hedge_w, sigma_ewma: st2.sigma_ewma, bias: st2.bias, cusum: st2.cusum, pit_last: st2.pit_hist.at(-1), kalman_b1: st2.kalman.b1, clamp_hits: st2.kalman.clamp_hits,
-          challenger_v11c: { w_nf: st2.challenger_v11c.hedge_w.nf ?? null, nights: st2.challenger_v11c.nights,
-            loss_nf: chEx.nf != null ? Math.round((Math.abs(actual - (chEx.nf as number)) / Math.max(sigCh, 0.3)) * 1000) / 1000 : null } };
+          challenger_v11c: { w_nf: st2.challenger_v11c.hedge_w.nf ?? null, nights: st2.challenger_v11c.nights, event_skipped: regKey === "event",
+            loss_nf: regKey !== "event" && chEx.nf != null ? Math.round((Math.abs(actual - (chEx.nf as number)) / Math.max(sigCh, 0.3)) * 1000) / 1000 : null } };
         await saveState(symbol, st2);
         // 일 1회 상태 스냅샷 + 해시 (발주자 요건 §3 — 롤백이 상태까지 복원 가능하게)
         const { createHash } = await import("crypto");
@@ -288,8 +327,13 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     for (const d of [...byDate.keys()].sort()) if (byDate.get(d)!.some(pred)) return d;
     return null;
   };
+  // [발주자 판정 8/15 §2] night_fut 계열 effective_start 재기산: 소스 오염 구간(8/12~8/14, div=F)은
+  // 소급 정정(corrected=true)돼 데이터로는 유효하나 '라이브 소스 가동 시계'엔 불산입 —
+  // 정화 개시일(첫 CM 라이브 밤) 2026-08-18로 하한 고정. g1a_nf_evening 동일.
+  const NF_RESET = "2026-08-18";
+  const floorReset = (d: string | null) => (d != null && d < NF_RESET ? NF_RESET : d);
   const effectiveStart = {
-    night_fut: firstDate((r) => (r.night?.night_fut as Obs | undefined)?.v != null),
+    night_fut: floorReset(firstDate((r) => (r.night?.night_fut as Obs | undefined)?.v != null)),
     auction_est: firstDate((r) => (r.morning?.auction_est_px as Obs | undefined)?.v != null),
     r2_residual: firstDate((r) => (r.r2 as { residual_sigma?: number | null } | null)?.residual_sigma != null),
     ah_excess: firstDate((r) => (r.night?.ah_excess as Obs | undefined)?.v != null),
@@ -373,7 +417,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
                   갭상승: leanSplit("UP"), 갭하락: leanSplit("DOWN") },
     e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
-  const nfEveStart = gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null;
+  const nfEveStart = floorReset(gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null);
   const p1Start = gaRows.find((r) => ((r.t2 as { pieces?: Record<string, unknown> } | null)?.pieces)?.p1_eu_semi_avg != null)?.date ?? null;
   // [발주자 8/15 정확도연동 §4] nf 전문가 리더보드 — 일일 loss·발언권(w_nf) 추이 + 챌린저 vs 챔피언 TE.
   // "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인하는 판.
