@@ -157,6 +157,13 @@ export default async function G1Page() {
                 value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
             ) : null}
             <Row label="GapScore · 방향 판단(G1A) / 기준가" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}</>} />
+            {/* 트리거 조건 줄 (사용자 지적 8/15: DC-PM이 화면에 없어 DC-NF와 비대칭) — 저장값 표시만, 판정 무접촉 */}
+            {v ? (() => {
+              const vv = v as { dc_pm?: number | null; r_basket?: number | null; three_way_agree?: boolean | null; economics_pass?: boolean | null };
+              const dc = vv.dc_pm != null ? `${Math.round(vv.dc_pm * 100)}%${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}` : "—";
+              return <Row label="트리거 조건 (DC-PM ≥60% · |바스켓| ≥0.5% · 3자 일치 · 경제성)"
+                value={<span className="text-[12px]">DC-PM {dc} · 바스켓 {pp(vv.r_basket)} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
+            })() : null}
             {(() => {
               // §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) — 미래 예측 서술 금지, 현재 상태·일관성만
               const nf = (r.t2 as { nf?: { bars?: { t: string; pct: number }[]; level?: { pct: number } | null; dc_nf?: number | null } } | null)?.nf;
