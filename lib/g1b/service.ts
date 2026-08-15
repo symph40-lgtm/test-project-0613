@@ -9,7 +9,7 @@ import { FOMC_DECISION_DATES, CPI_RELEASE_DATES, ES_RELEASE_DATES } from "@/lib/
 import type { G1BSymbol } from "./config";
 import { G1B_CONFIG as C, G1B_SYMBOLS } from "./config";
 import { collectMorning, collectNight, krDaily, type Obs } from "./data";
-import { combine, dailyUpdate, expertsR1, initState, sigmaNight, type Experts, type LearnState } from "./engine";
+import { challengerExperts, challengerUpdate, combine, combineW, dailyUpdate, expertsR1, initChallenger, initState, sigmaNight, type Experts, type LearnState } from "./engine";
 import { buildR1, buildR2 } from "./report";
 
 type Row = {
@@ -139,13 +139,22 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null } : null,
         expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
       );
+      // [발주자 8/15 §4] 야간 급변 플래그 — 야간 세션 내재갭 |±2%| 이상 밤 (절단 통과분만)
+      const nfPct0 = row.night.night_fut?.late_arrival ? null : row.night.night_fut?.v;
+      const nightFlash = nfPct0 != null && Math.abs(nfPct0 * 100) >= 2;
+      // [발주자 8/15 정확도연동 §1] pack_v1.1c 챌린저 병행 (섀도·본판정 무접촉) — nf 5번째 전문가.
+      // 공식 개시(nights 증가)는 첫 라벨 밤부터 — 그 전 R1은 참고 기록.
+      const chSt = st.challenger_v11c ?? initChallenger(symbol, st.hedge_w);
+      const chC = combineW(chSt.hedge_w, st.bias, challengerExperts(ex));
       row.r1 = {
         fair_gap_pct: fair != null ? Math.round(fair * 100) / 100 : null,
         sigma_pct: sigma, q80_pct: q80, regime, w_used: wUsed,
         expected_open: expOpen, prev_close: kr.prevClose,
-        experts: ex, virtual: true,
+        experts: ex, virtual: true, night_flash: nightFlash,
+        challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true },
         action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual } : null,
-        report: act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
+        report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
+          act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
         sent_at: new Date().toISOString(),
       };
       await saveRow(row);
@@ -199,7 +208,19 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const { r2Action, phaseTag: pt2 } = await import("@/lib/g1/action");
       const expOpen2 = fair2 != null && prevClose ? Math.round(prevClose * (1 + fair2 / 100)) : null;
       const act2 = r2Action(resSigma, expOpen2, est == null, await pt2("r2"));
-      row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, action: act2, virtual: true, report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal), sent_at: new Date().toISOString() };
+      // [발주자 8/15 정확도연동 §3] 야간 마감(06:00) 내재갭×β_mkt vs 동시호가 예상체결 정합성 (섀도 기록).
+      // 동방향 → 잔차 신호 정상 / 역방향 → 사이징 1단계 강등(가상). 미세(양쪽 |0.3%| 미만)는 판정 보류 — 구현 재량.
+      const nfV2 = row.night?.night_fut?.late_arrival ? null : row.night?.night_fut?.v;
+      const nfGap2 = nfV2 != null ? Math.round(nfV2 * 100 * st.kalman.beta_mkt * 100) / 100 : null;
+      const aucGap2 = est && prevClose ? Math.round(((est / prevClose - 1) * 100) * 100) / 100 : null;
+      const nfCons = nfGap2 == null || aucGap2 == null ? "결측 — 검사 불가"
+        : Math.abs(nfGap2) < 0.3 || Math.abs(aucGap2) < 0.3 ? "판정 보류(미세)"
+        : Math.sign(nfGap2) === Math.sign(aucGap2) ? "동방향 — 잔차 신호 정상"
+        : "역방향 — 사이징 1단계 강등(가상)";
+      row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, action: act2, virtual: true,
+        nf_consistency: { nf_gap_x_beta: nfGap2, auction_gap_pct: aucGap2, verdict: nfCons },
+        report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal) + `\n야간 정합: ${nfCons}${nfGap2 != null && aucGap2 != null ? ` (야간환산 ${nfGap2 > 0 ? "+" : ""}${nfGap2}% vs 동시호가 ${aucGap2 > 0 ? "+" : ""}${aucGap2}%)` : ""}`,
+        sent_at: new Date().toISOString() };
       await saveRow(row);
       outbox.subject = "[G1B R2] 잔차 판정 (가상·log-only)";
       outbox.texts.push(row.r2.report as string);
@@ -218,7 +239,16 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const ex = (row.r1.experts ?? {}) as Experts;
         const regime = (row.r1.regime as string) ?? "normal";
         const st2 = dailyUpdate(symbol, st, ex, row.r1.fair_gap_pct as number | null, actual, regime, row.night ?? {});
-        row.learn = { hedge_w: st2.hedge_w, sigma_ewma: st2.sigma_ewma, bias: st2.bias, cusum: st2.cusum, pit_last: st2.pit_hist.at(-1), kalman_b1: st2.kalman.b1, clamp_hits: st2.kalman.clamp_hits };
+        // [발주자 8/15 정확도연동 §1] 챌린저 pack_v1.1c 일일 채점 — 챔피언과 동일 규칙, nf 포함. 섀도 밤수 +1.
+        const regKey = regime === "bigmove" ? "event" : regime;
+        const sigCh = Math.sqrt(st.sigma_ewma[regKey] ?? st.sigma_ewma.normal);
+        const chEx = challengerExperts(ex);
+        st2.challenger_v11c = challengerUpdate(st.challenger_v11c ?? initChallenger(symbol, st.hedge_w), chEx, actual, sigCh);
+        const chFair = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null;
+        (row.labels as Record<string, unknown>).te_v11c_pct = chFair != null ? Math.round(Math.abs(actual - chFair) * 100) / 100 : null;
+        row.learn = { hedge_w: st2.hedge_w, sigma_ewma: st2.sigma_ewma, bias: st2.bias, cusum: st2.cusum, pit_last: st2.pit_hist.at(-1), kalman_b1: st2.kalman.b1, clamp_hits: st2.kalman.clamp_hits,
+          challenger_v11c: { w_nf: st2.challenger_v11c.hedge_w.nf ?? null, nights: st2.challenger_v11c.nights,
+            loss_nf: chEx.nf != null ? Math.round((Math.abs(actual - (chEx.nf as number)) / Math.max(sigCh, 0.3)) * 1000) / 1000 : null } };
         await saveState(symbol, st2);
         // 일 1회 상태 스냅샷 + 해시 (발주자 요건 §3 — 롤백이 상태까지 복원 가능하게)
         const { createHash } = await import("crypto");
@@ -345,12 +375,26 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   };
   const nfEveStart = gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null;
   const p1Start = gaRows.find((r) => ((r.t2 as { pieces?: Record<string, unknown> } | null)?.pieces)?.p1_eu_semi_avg != null)?.date ?? null;
+  // [발주자 8/15 정확도연동 §4] nf 전문가 리더보드 — 일일 loss·발언권(w_nf) 추이 + 챌린저 vs 챔피언 TE.
+  // "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인하는 판.
+  const nfBoard: Record<string, { date: string; w_nf: number | null; loss_nf: number | null; te_v11c: number | null; te_champ: number | null }[]> = {};
+  let chNights = 0;
+  for (const r of [...rows].sort((a, b) => a.date.localeCompare(b.date))) {
+    const ch = (r.learn as { challenger_v11c?: { w_nf?: number | null; nights?: number; loss_nf?: number | null } } | null)?.challenger_v11c;
+    const lab = r.labels as { te_v11c_pct?: number | null; te_r1_pct?: number | null } | null;
+    if (!ch && lab?.te_v11c_pct == null) continue;
+    chNights = Math.max(chNights, ch?.nights ?? 0);
+    (nfBoard[r.symbol] ??= []).push({ date: r.date, w_nf: ch?.w_nf ?? null, loss_nf: ch?.loss_nf ?? null, te_v11c: lab?.te_v11c_pct ?? null, te_champ: lab?.te_r1_pct ?? null });
+  }
+  for (const s of Object.keys(nfBoard)) nfBoard[s] = nfBoard[s].slice(-10);
+  const nfLeaderboard = { shadow_nights: chNights, review_at_nights: 12, by_symbol: nfBoard };
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, te_r1_by_regime: teByRegime, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
+    nf_leaderboard: nfLeaderboard,
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };

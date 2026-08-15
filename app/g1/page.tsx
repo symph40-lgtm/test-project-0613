@@ -203,6 +203,16 @@ export default async function G1Page() {
         <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
         <Row label="절단 위반 (late)" value={String(m?.late_arrival_total ?? "—")} />
         <Row label="기능별 개시일" value={<span className="text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
+        <Row label="nf 리더보드 (pack_v1.1c 섀도)" value={(() => {
+          // 발주자 8/15 정확도연동 §4 — "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인
+          const lb = (m?.nf_leaderboard ?? null) as { shadow_nights?: number; review_at_nights?: number; by_symbol?: Record<string, { date: string; w_nf: number | null; loss_nf: number | null; te_v11c: number | null; te_champ: number | null }[]> } | null;
+          if (!lb || !lb.by_symbol || !Object.keys(lb.by_symbol).length) return <span className="text-[11px]">섀도 개시 전 — 첫 라벨 밤부터 (심사 12거래밤)</span>;
+          return <span className="text-[11px]">섀도 {lb.shadow_nights ?? 0}/{lb.review_at_nights ?? 12}밤 · {Object.entries(lb.by_symbol).map(([s, arr]) => {
+            const last = arr[arr.length - 1];
+            const first = arr[0];
+            return `${NAME[s] ?? s} w_nf ${first?.w_nf ?? "—"}→${last?.w_nf ?? "—"} (loss ${last?.loss_nf ?? "—"} · TE v1.1c ${last?.te_v11c ?? "—"}% vs 챔피언 ${last?.te_champ ?? "—"}%)`;
+          }).join(" / ")}</span>;
+        })()} />
         <Row label="Lean 채점 (θ 인하 심사 증거)" value={(() => {
           const t = (m?.t2plus_compare ?? null) as { lean_score?: { n: number; hits: number; rate: number | null }; base_bets?: number; shadow_bets?: number; mosaic_bets?: number; nights_tracked?: number } | null;
           if (!t) return "집계 전";

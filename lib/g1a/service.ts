@@ -97,6 +97,29 @@ async function sendSignal(subject: string, text: string, notes: string[]): Promi
   notes.push(`발송(${r.via}) ${r.sent}건${r.errors.length ? ` · 오류 ${r.errors.join("; ")}` : ""} — ${subject}`);
 }
 
+// [발주자 8/15 정확도연동 §2] T2+ 섀도의 w_nf 일일 갱신형 미니 Hedge — 상태 테이블 없이 결정적 재생.
+// 등록 상수(재등록 시점 고정): 초기 0.5 · η 0.10 · 상한 0.7 · 손실 = 방향 손실(적중 0/빗나감 1/무방향·플랫 0.5).
+// 두 "전문가" = 본체 GapScore vs NF-Level — 최근 60 라벨 밤 중 신체계(nf.level) 데이터가 있는 밤만 채점.
+// GapScore는 %단위가 아니라 방향 손실로 비교한다 (단위 이질 — 크기 손실은 G1B 챌린저 소관).
+async function miniHedgeWnf(symbol: G1ASymbol): Promise<number> {
+  try {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const q = await createAdminClient().from("g1a_days").select("date,t2,labels").eq("symbol", symbol)
+      .not("labels", "is", null).order("date", { ascending: true }).limit(60);
+    let wn = 0.5, wb = 0.5;
+    for (const r of (q.data ?? []) as { t2: Record<string, unknown> | null; labels: { L1?: number | null } | null }[]) {
+      const L1 = r.labels?.L1;
+      const nfl = (r.t2?.nf as { level?: { nf_level?: number } } | undefined)?.level?.nf_level;
+      const gs = (r.t2?.verdict as { gap_score?: number } | undefined)?.gap_score;
+      if (L1 == null || nfl == null || gs == null) continue;
+      const dirLoss = (pred: number) => (Math.abs(L1) < 0.3 || pred === 0 ? 0.5 : Math.sign(pred) === Math.sign(L1) ? 0 : 1);
+      wn *= Math.exp(-0.10 * dirLoss(nfl));
+      wb *= Math.exp(-0.10 * dirLoss(gs));
+    }
+    return Math.min(0.7, Math.round((wn / (wn + wb)) * 1000) / 1000);
+  } catch { return 0.5; }
+}
+
 // ── T2 사이클 (§5) ──
 async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string[]> {
   const notes: string[] = [];
@@ -114,6 +137,43 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
     const slot = hhmm.slice(0, 4) + String(Math.floor(parseInt(hhmm.slice(3, 5), 10) / W.slotMinutes) * W.slotMinutes).padStart(2, "0");
     const already = t2.evals.some((e) => e.time.startsWith(slot.slice(0, 3)) && e.time.slice(3, 5) >= slot.slice(4));
 
+    // [발주자 8/15 §1] DC-NF 체계 — 18:00~19:35 야간선물 10분봉 수집 (4점 스냅샷 지시의 상위 대체).
+    // 트리거 이후에도 계속 수집한다 (§3 역행 경보의 원천). 본판정 미반영 — 기록 + T2+ 섀도 재료.
+    //   NF-Level = 누적 변화율(KIS CM = 주간 종가 대비 내재갭) × β_mkt (원칙 §5: β_mkt 경유 환산만)
+    //   DC-NF    = 10분봉 동방향 지속률 (누적 방향과 같은 부호의 봉 비율, 봉 3개부터 산출)
+    if (hhmm >= "18:00" && hhmm <= "19:40") {
+      const t2u = t2 as Record<string, unknown>;
+      const nf0 = (t2u.nf ?? { bars: [] }) as { bars: { t: string; pct: number }[] } & Record<string, unknown>;
+      if (!nf0.bars.some((b) => b.t.slice(0, 4) === hhmm.slice(0, 4))) {
+        try {
+          const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
+          if (hasKisKeys()) {
+            const nfq = await fetchKisNightFutures();
+            const pct = (nfq as { changePercent?: number | null })?.changePercent;
+            if (typeof pct === "number") {
+              nf0.bars = [...nf0.bars, { t: hhmm, pct }];
+              // β_mkt: G1B 라이브 칼만 갱신치 우선 (R1 nf 전문가와 동일 β — 일관성), 결측 시 pack 초기값
+              let beta: number = (await import("@/lib/g1b/config")).G1B_CONFIG.init.betaMkt[symbol as "000660" | "005930"];
+              try {
+                const { createAdminClient } = await import("@/lib/supabase/admin");
+                const stq = await createAdminClient().from("g1b_state").select("state").eq("symbol", symbol).maybeSingle();
+                const b = (stq.data?.state as { kalman?: { beta_mkt?: number } } | undefined)?.kalman?.beta_mkt;
+                if (typeof b === "number" && b > 0) beta = b;
+              } catch { /* 폴백 유지 */ }
+              // 봉 수익률 = 누적의 차분 (첫 봉은 누적 자체 — 18:00 시가≈주간 종가 근사, 베이시스 오차 명기)
+              const deltas = nf0.bars.map((b, i) => (i === 0 ? b.pct : b.pct - nf0.bars[i - 1].pct)).filter((d) => d !== 0);
+              const cum = nf0.bars[nf0.bars.length - 1].pct;
+              const agree = deltas.filter((d) => Math.sign(d) === Math.sign(cum)).length;
+              nf0.level = { pct: cum, nf_level: Math.round(cum * beta * 100) / 100, beta_mkt: Math.round(beta * 1000) / 1000 };
+              nf0.dc_nf = cum !== 0 && deltas.length >= 3 ? Math.round((agree / deltas.length) * 100) / 100 : null;
+              t2u.nf = nf0;
+              if (!t2u.nf_evening) t2u.nf_evening = { t: hhmm, pct }; // 계기판 g1a_nf_evening 개시일 연속성
+            }
+          }
+        } catch { /* 결측 허용 */ }
+      }
+    }
+
     // 최종 확정 유예 (2026-08-10 실측 버그 수정): 종전 `hhmm <= W.t2Final`은 크론이 정확히 19:40에
     // 와야만 최종 분기가 열렸다 — 실제 크론은 19:35 → 19:45라 8/10 저녁 두 종목 모두 T2-F 확정·발송 누락.
     // t2End(19:55)까지 유예 — isFinal 판정은 그대로 19:40 기준.
@@ -125,59 +185,47 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const other = [...rows.values()].some((r) => r.symbol !== symbol && r.t2?.trigger_type && r.t2.verdict?.direction !== "NEUTRAL");
       const { verdict, blocked } = evaluateT2(symbol, f, ctx, hhmm, isFinal, other);
       t2.evals.push({ time: hhmm, gap_score: verdict.gap_score, blocked_by: blocked });
-      // E1 확장 (발주자 8/14 §2): 야간선물 저녁 스냅샷 4점 — 18:05/18:30/19:00/19:35(T2 직전).
-      // 목적: 조기 트리거 시각별 대응값 + 시점 선택 실증. 기록 전용 (본판정 미반영).
-      if (hhmm >= "18:00") {
-        const slot = hhmm >= "19:35" ? "1935" : hhmm >= "19:00" ? "1900" : hhmm >= "18:30" ? "1830" : "1805";
-        const snaps = ((t2 as Record<string, unknown>).nf_evening_snaps ?? {}) as Record<string, { t: string; pct: number }>;
-        if (!snaps[slot]) {
-          try {
-            const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
-            if (hasKisKeys()) {
-              const nf = await fetchKisNightFutures();
-              const pct = (nf as { changePercent?: number | null })?.changePercent;
-              if (typeof pct === "number") {
-                snaps[slot] = { t: hhmm, pct };
-                (t2 as Record<string, unknown>).nf_evening_snaps = snaps;
-                if (!(t2 as Record<string, unknown>).nf_evening) (t2 as Record<string, unknown>).nf_evening = { t: hhmm, pct };
-              }
-            }
-          } catch { /* 결측 허용 */ }
-        }
-      }
+      // (구 4점 스냅샷 블록은 DC-NF 10분봉 체계로 흡수 — 발주자 8/15 §1, 수집은 위 공통 블록)
       // 저녁 정보 조각 P1~P5 (발주자 8/12 §3 — 확보분 기록, 본 판정 미사용)
       try {
         const { fetchEveningPieces } = await import("./data");
         (t2 as Record<string, unknown>).pieces = await fetchEveningPieces(symbol);
       } catch { /* 결측 허용 */ }
-      // E2 (발주자 8/12): "T2+" 섀도(+야간선물) 및 "T2-모자이크"(+P 조각) — 본 판정 미반영.
-      // 사전 등록: challengers/t2plus_nightfut.md · challengers/t2mosaic.md (가중 등록 시점 고정)
+      // E2 (발주자 8/12) → 개정 (발주자 8/15 §2 + 정확도연동 §2): "T2+" 섀도 = {NF-Level 방향 재료
+      // + 확인 조건(DC-PM ≥60% 또는 DC-NF ≥60%)} + w_nf 일일 갱신형 미니 Hedge (초기 0.5·상한 0.7).
+      // 재등록: challengers/t2plus_nightfut.md (개정판 — 갱신형 기준). 모자이크는 동일 확인 조건 공유.
+      // 연속성: tanh(NF-Level/0.6) ≈ tanh(pct·β/0.6) — β≈1.5에서 종전 tanh(pct/0.4)와 내부값 동일,
+      // 바뀐 것은 진폭(1.0 고정 → w_nf 갱신형)과 확인 조건 추가다.
       const th = thetaAt(hhmm);
       {
-        const nfe = (t2 as Record<string, unknown>).nf_evening as { pct: number } | undefined;
-        const pieces = (t2 as Record<string, unknown>).pieces as Record<string, number | null> | undefined;
+        const t2u = t2 as Record<string, unknown>;
+        const nfo = t2u.nf as { level?: { nf_level: number }; dc_nf?: number | null } | undefined;
+        const pieces = t2u.pieces as Record<string, number | null> | undefined;
         // 섀도 등급 매핑 = 본판정과 동일 기준 (발주자 8/14 §3): 베팅 문턱 θ + Lean 문턱 0.5 + gradeLabel
         const { gradeLabel: gl } = await import("@/lib/g1/action");
         const isEvt = (verdict.abstain_reason ?? "").startsWith("보류1");
+        const dcConfirm = (f.F21_dcpm ?? 0) >= G1A_CONFIG.trigger.minDcPm || (nfo?.dc_nf ?? 0) >= 0.6;
         const shadowGrade = (score: number) => {
           const dir0 = score >= 0.5 ? "UP" as const : score <= -0.5 ? "DOWN" as const : null;
-          const bet = Math.abs(score) >= th.low && !verdict.abstain_reason;
+          const bet = Math.abs(score) >= th.low && !verdict.abstain_reason && dcConfirm;
           const g = bet ? (Math.abs(score) >= th.high ? "High" : "Low") : dir0 && !isEvt ? "Lean" : "Flat";
           return { dir: bet ? (score > 0 ? "UP" : "DOWN") : dir0, grade: g, label: gl(g, bet ? (score > 0 ? "UP" : "DOWN") : dir0, isEvt) };
         };
-        const sScore = nfe ? Math.round((verdict.gap_score + 1.0 * Math.tanh(nfe.pct / 0.4)) * 100) / 100 : verdict.gap_score;
-        const sh = (t2 as Record<string, unknown>).shadow as Record<string, unknown> | undefined ?? {};
+        const wNf = await miniHedgeWnf(symbol);
+        const nfTerm = nfo?.level ? wNf * Math.tanh(nfo.level.nf_level / 0.6) : 0;
+        const sScore = Math.round((verdict.gap_score + nfTerm) * 100) / 100;
+        const sh = t2u.shadow as Record<string, unknown> | undefined ?? {};
         const sg = shadowGrade(sScore);
         if (!sh.first_trigger && (sg.grade === "High" || sg.grade === "Low")) sh.first_trigger = { t: hhmm, dir: sg.dir, score: sScore };
-        sh.last = { t: hhmm, score: sScore, dir: sg.dir ?? "NEUTRAL", label: sg.label };
-        (t2 as Record<string, unknown>).shadow = sh;
+        sh.last = { t: hhmm, score: sScore, dir: sg.dir ?? "NEUTRAL", label: sg.label, w_nf: wNf, dc_nf: nfo?.dc_nf ?? null, dc_confirm: dcConfirm };
+        t2u.shadow = sh;
         const p1 = pieces?.p1_eu_semi_avg;
         const mScore = p1 != null ? Math.round((sScore + 0.75 * Math.tanh(p1 / 0.5)) * 100) / 100 : sScore;
-        const mo = (t2 as Record<string, unknown>).mosaic as Record<string, unknown> | undefined ?? {};
+        const mo = t2u.mosaic as Record<string, unknown> | undefined ?? {};
         const mg = shadowGrade(mScore);
         if (!mo.first_trigger && (mg.grade === "High" || mg.grade === "Low")) mo.first_trigger = { t: hhmm, dir: mg.dir, score: mScore };
         mo.last = { t: hhmm, score: mScore, dir: mg.dir ?? "NEUTRAL", label: mg.label };
-        (t2 as Record<string, unknown>).mosaic = mo;
+        t2u.mosaic = mo;
       }
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
       const { t2Grade } = await import("./score");
@@ -243,6 +291,24 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2.report_r1 = (t2.report_r1 ?? "") + "\n\n" + revReport;
         notes.push(`${symbol} 반전 감시 발동 — ${rev.why}`);
         await sendSignal(`[G1A 반전] 청산 기록 (가상·log-only)`, revReport, notes);
+      }
+      // [발주자 8/15 §3] 야간선물 역행 경보 (섀도 단계·가상 기록 — 본판정 반전과 별개):
+      // 트리거 시점의 야간선물 누적 대비 진입 방향 역행 -0.5% 이상이면 경보만 남긴다.
+      {
+        const t2u = t2 as Record<string, unknown>;
+        const nfo = t2u.nf as { bars?: { t: string; pct: number }[]; reversal_alert?: unknown } | undefined;
+        if (nfo?.bars?.length && !nfo.reversal_alert) {
+          const trigT = (t2.trigger_time ?? "").slice(0, 5);
+          const atTrig = nfo.bars.filter((b) => b.t <= trigT).pop() ?? nfo.bars[0];
+          const cur = nfo.bars[nfo.bars.length - 1];
+          const drift = Math.round((cur.pct - atTrig.pct) * 100) / 100;
+          const against = t2.verdict.direction === "UP" ? drift <= -0.5 : drift >= 0.5;
+          if (against) {
+            nfo.reversal_alert = { t: hhmm, drift_pct: drift, base_t: atTrig.t, note: "야간선물 진입 방향 역행 ≥0.5% — 경보(가상)" };
+            t2u.nf = nfo;
+            notes.push(`${symbol} 야간선물 역행 경보 ${drift}% (가상)`);
+          }
+        }
       }
     }
     row.t2 = t2;

@@ -14,7 +14,41 @@ export type LearnState = {
   pit_hist: number[];
   cusum: number;
   nights: number;
+  challenger_v11c?: ChallengerState;     // pack_v1.1c 섀도 (발주자 8/15) — 본판정 무접촉
 };
+
+// ── pack_v1.1c 챌린저 (발주자 지시 8/15 '정확도 연동' §1 — 섀도 전용) ──
+// nf(야간선물 내재갭 × β_mkt)를 5번째 전문가로 편입. 출발 가중 = 오프라인 역산치
+// (T7 재검증, g1br/reports/T7_U1_REPORT.md: 하닉 0.4 · 삼전 0.3 — normal 레짐 채택값).
+// 기존 전문가 가중은 (1−w_nf)로 비례 축소. 이후 일일 채점(챔피언과 동일 규칙·η·상한 0.7)이
+// 발언권을 자동 증감 — "정확도 연동"의 본체. 섀도 12거래밤 후 승격 심사 (G1-OPT §6.2).
+export type ChallengerState = { hedge_w: Record<string, number>; nights: number };
+
+export function initChallenger(symbol: G1BSymbol, incumbent: Record<string, number>): ChallengerState {
+  const w0 = symbol === "000660" ? 0.4 : 0.3;
+  const hedge_w: Record<string, number> = { nf: w0 };
+  const tot = Object.values(incumbent).reduce((a, b) => a + b, 0) || 1;
+  for (const [n, w] of Object.entries(incumbent)) hedge_w[n] = Math.round((w / tot) * (1 - w0) * 1000) / 1000;
+  return { hedge_w, nights: 0 };
+}
+
+// 챌린저 전문가 집합 = 챔피언 전문가 + nf (night_fut_ref 재사용 — β_mkt 경유 환산은 이미 적용돼 있음)
+export function challengerExperts(ex: Experts): Experts {
+  return { ...ex, nf: ex.night_fut_ref ?? null };
+}
+
+export function challengerUpdate(ch: ChallengerState, ex: Experts, actualGapPct: number, sig: number): ChallengerState {
+  const L = C.learn;
+  const w = { ...ch.hedge_w };
+  for (const n of Object.keys(w)) {
+    const p = ex[n];
+    if (p == null) continue;
+    w[n] *= Math.exp(-L.hedgeEta * (Math.abs(actualGapPct - p) / Math.max(sig, 0.3)));
+  }
+  const tot = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  for (const n of Object.keys(w)) w[n] = Math.round(Math.min(L.hedgeMaxW, w[n] / tot) * 1000) / 1000;
+  return { hedge_w: w, nights: ch.nights + 1 };
+}
 
 export function initState(symbol: G1BSymbol): LearnState {
   return {
@@ -60,7 +94,13 @@ export function expertsR1(symbol: G1BSymbol, night: Record<string, Obs>, st: Lea
 }
 
 export function combine(st: LearnState, ex: Experts): { fair: number | null; wUsed: Record<string, number> } {
-  const usable = Object.entries(st.hedge_w).filter(([n]) => ex[n] != null && st.hedge_w[n] > 0);
+  return combineW(st.hedge_w, st.bias, ex);
+}
+
+// 가중·bias를 외부에서 받는 결합 코어 — 챔피언(combine)과 챌린저(pack_v1.1c)가 공유.
+// 챌린저도 챔피언 bias를 쓴다: 측정 대상이 '전문가 구성 차이'뿐이도록 bias 축은 통제 (구현 재량 명기).
+export function combineW(weights: Record<string, number>, bias: number, ex: Experts): { fair: number | null; wUsed: Record<string, number> } {
+  const usable = Object.entries(weights).filter(([n]) => ex[n] != null && weights[n] > 0);
   const wsum = usable.reduce((a, [, w]) => a + w, 0);
   if (!wsum) return { fair: null, wUsed: {} };
   let fair = 0;
@@ -70,7 +110,7 @@ export function combine(st: LearnState, ex: Experts): { fair: number | null; wUs
     wUsed[n] = Math.round(wn * 100) / 100;
     fair += wn * (ex[n] as number);
   }
-  return { fair: fair - st.bias, wUsed };
+  return { fair: fair - bias, wUsed };
 }
 
 export function sigmaNight(symbol: G1BSymbol, st: LearnState, regime: string): { sigma: number; q80: number | null } {
