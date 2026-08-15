@@ -54,6 +54,19 @@ class Bld(KrxWebIo):
     def bld(self):
         return self._b
 
+    # pykrx Post.read는 timeout이 없어 서버가 응답을 끊지 않으면 무한 대기(8/15 실측 행업 15분+).
+    # 로그인 세션은 그대로 쓰되 30초 타임아웃을 강제한다. (730일 분할은 이 파일이 자체 분기 창으로 대체)
+    def read(self, **params):
+        from pykrx.website.comm.webio import get_session
+        params.update(bld=self.bld)
+        krxs = get_session()
+        headers = krxs.get_headers()
+        headers.update({"User-Agent": "Mozilla/5.0",
+                        "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd",
+                        "X-Requested-With": "XMLHttpRequest"})
+        resp = krxs.session.post(self.url, headers=headers, data=params, timeout=30)
+        return resp.json()
+
     def fetch(self, **p):
         return self.read(**p)
 
@@ -79,13 +92,15 @@ def _fetch_window(io, isu_cd, agg, strt, end):
 
 def fetch_series(io, isu_cd, agg, strt, end):
     # 실측(8/15): 연도 경계를 넘는 범위 요청이 두 차례 모두 같은 지점(202603, 20250601~20260319)에서
-    # 비JSON 응답으로 죽음 — 범위를 분기(3개월) 창으로 쪼개 연도 교차를 피한다. 창별 실패는 기록 후 계속.
+    # 비JSON 응답/행업으로 죽음 — 창을 분기(3개월)로 쪼개되 반드시 연말(12/31)에서 끊어 연도 교차를 없앤다.
+    # 창별 실패는 기록 후 계속 (부분 결손은 audit의 missing으로 드러난다).
     d1 = dt.date(int(strt[:4]), int(strt[4:6]), int(strt[6:]))
     d2 = dt.date(int(end[:4]), int(end[4:6]), int(end[6:]))
     j = {"output": []}
     cur = d1
     while cur <= d2:
-        nxt = min(dt.date(cur.year + (cur.month + 2) // 12, (cur.month + 2) % 12 + 1, 1) - dt.timedelta(days=1), d2)
+        q_end = dt.date(cur.year + (cur.month + 2) // 12, (cur.month + 2) % 12 + 1, 1) - dt.timedelta(days=1)
+        nxt = min(q_end, dt.date(cur.year, 12, 31), d2)  # 연도 경계 금지
         try:
             part = _fetch_window(io, isu_cd, agg, cur.isoformat().replace("-", ""), nxt.isoformat().replace("-", ""))
             j["output"].extend(part.get("output", []))
