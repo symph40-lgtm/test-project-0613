@@ -50,10 +50,12 @@ export function frontMonthNightFutCode(now = new Date()): string {
 export type KisFutures = { price: number; changePercent: number | null } | null;
 
 // 야간 코스피200 선물 현재가·전일대비율. 키 미설정/실패 시 null(호출부에서 네이버 폴백).
-// div: 시장구분 코드 (2026-08-11 진단 — 크론이 04:50에 정상 호출했는데도 빈 응답이었음이 확인됨.
-// 종목코드는 야간물(1A01…)인데 시장구분이 주간 "F"라 야간 세션 시간대엔 응답이 없을 가능성 —
-// KIS 문서에서 야간 구분 코드를 확정하지 못해 호출부(g1b)가 후보를 순차 시도하며 probe로 판별한다).
-export async function fetchKisNightFutures(div = "F"): Promise<KisFutures> {
+// div: 시장구분 코드 — "CM" = 야간 세션 확정 (2026-08-15 실측).
+//   "F"(주간)는 같은 종목코드에 값을 반환하지만 그 등락률은 '주간 세션 전일 대비'라 야간 정보가 아니다
+//   (8/13밤 04:50 +3.71 = 주간 8/13 등락률과 일치 — 상시 오염의 근본 원인).
+//   "CM"의 futs_sdpr(기준가) = 당일 주간 종가, futs_prdy_ctrt = 야간 현재가/주간 종가 - 1 (내재갭 정의).
+//   야간 세션(18:00~익일 06:00) 밖에서는 직전 야간 세션 마감 스냅샷이 반환된다.
+export async function fetchKisNightFutures(div = "CM"): Promise<KisFutures> {
   const appkey = process.env.KIS_APP_KEY;
   const appsecret = process.env.KIS_APP_SECRET;
   // 수동 지정(KIS_FUT_CODE)이 있으면 우선, 없으면 최근월물 자동 산출 (분기 만기 자동 교체)

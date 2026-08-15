@@ -98,17 +98,18 @@ export async function fetchNightFutSnapshot(): Promise<Obs> {
   const c = G1B_CONFIG.cutoff.r1;
   try {
     if (!hasKisKeys()) return mark(null, c, "KIS 키 없음");
-    // 시장구분 후보 순차 시도 (2026-08-11 — 크론은 04:50에 정상 호출됐는데 주간 코드 "F"가 빈 응답.
-    // 야간(CME 연계) 구분 코드가 문서로 확정되지 않아 후보를 돌며 응답하는 코드를 probe로 판별한다.
-    // 첫 성공 시 src에 코드가 남으므로, 확정되면 그 코드 하나로 고정할 것)
-    for (const div of ["F", "CM", "CF", "JF"]) {
-      const f = await fetchKisNightFutures(div);
-      const fx = f as { changePercent?: number | null } | null;
-      if (typeof fx?.changePercent === "number") {
-        return mark(fx.changePercent / 100, c, `KIS 야간선물 04:50(${div})`);
-      }
+    // 시장구분 "CM" 확정 (2026-08-15 실측 — 8/11 예정했던 '확정 후 단일 고정' 이행):
+    // 종전 후보 1순위 "F"(주간)가 값을 반환해 CM까지 못 갔고, 그 값은 전일 주간 세션 등락률이었다
+    // (8/13밤 +3.71 = 주간 1073.70/1035.30, 8/14저녁 4점 +2.35 = 주간 1098.90/1073.70 — 전점 일치).
+    // CM 검증: futs_sdpr(기준가) = 당일 주간 종가, futs_prdy_ctrt = 야간 현재가의 주간 종가 대비율
+    // = u1 내재갭 정의 그대로. KRX 12902 야간 종가와 수치 교차 일치(1002.50·1069.35·1095.40·1094.95).
+    // "F"는 의미상 오답이므로 폴백에서도 제외 — CM 빈 응답이면 결측(null)이 정답이다.
+    const f = await fetchKisNightFutures("CM");
+    const fx = f as { changePercent?: number | null } | null;
+    if (typeof fx?.changePercent === "number") {
+      return mark(fx.changePercent / 100, c, "KIS 야간선물 04:50(CM)");
     }
-    return mark(null, c, "KIS 야간선물 04:50 전코드 빈응답(F·CM·CF·JF)");
+    return mark(null, c, "KIS 야간선물 04:50 CM 빈응답");
   } catch { return mark(null, c, "KIS 야간선물 예외"); }
 }
 
