@@ -17,7 +17,7 @@ import { evaluateT2, gapScoreT1, isExpiryDay, reversalCheck, thetaAt, type Absta
 import { g1aTablesReady, loadDay, loadUnlabeled, upsertDay } from "./store";
 import type { G1ARow, G1ASymbol, T2Features, T2State } from "./types";
 
-const SYMBOLS: G1ASymbol[] = ["000660", "005930"];
+const SYMBOLS: G1ASymbol[] = ["005930", "000660"]; // 표시·처리 순서 삼성전자 → 하이닉스 (발주자 표기 지시 8/15 §1)
 const W = G1A_CONFIG.windows;
 
 function kst(): { date: string; hhmm: string; hhmmss: string; weekday: number } {

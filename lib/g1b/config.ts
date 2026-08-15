@@ -2,7 +2,8 @@
 // pack_v1.0 (g1br/param_pack_v1.json, 커밋 d5da542)의 라이브 탑재본. 수동 변경 금지 (운영 수칙 §6).
 
 export type G1BSymbol = "005930" | "000660";
-export const G1B_SYMBOLS: G1BSymbol[] = ["000660", "005930"];
+// 표시·처리 순서 삼성전자 → 하이닉스 통일 (발주자 표기 지시 8/15 §1) — 리포트·문자 순서의 원천
+export const G1B_SYMBOLS: G1BSymbol[] = ["005930", "000660"];
 
 export const G1B_CONFIG = {
   // A1-2 챔피언 구조: 지수 I0 / 고유 S1 / β_mkt Huber. 초기 계수 = 오프라인 최종 추정치

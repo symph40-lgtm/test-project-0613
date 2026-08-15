@@ -382,11 +382,28 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     if (l.includes("DC-PM")) return "DC-PM 미달";
     return "점수/θ 미달";
   };
+  // 표본 회계 통일 (발주자 8/15 저녁 §2, E-섀도 규약 준용): 동일 밤 2종목 = 독립 표본 1 —
+  // 밤(날짜) 단위 카운트, 같은 밤 종목 간 분류가 갈리면 각 1/행수 가중.
+  const nightW = (date: string, rows2: { date: string }[]) => 1 / Math.max(1, rows2.filter((x) => x.date === date).length);
   const byReason: Record<string, number> = {};
-  for (const r of abst) byReason[reasonOf(r.t2)] = (byReason[reasonOf(r.t2)] ?? 0) + 1;
+  for (const r of abst) {
+    const k = reasonOf(r.t2);
+    byReason[k] = Math.round(((byReason[k] ?? 0) + nightW(r.date, abst)) * 10) / 10;
+  }
+  // D1 방향 축 (발주자 8/15 저녁 §1): {방향 적중+문턱/규칙 차단} = θ·규칙 완화 심사 증거 /
+  // {방향 오판} = 방향 재료(nf 등) 개선 증거. 8/13 = 오판 확정(발주자), 8/14 = 적중_규칙(라벨 8/18 대기).
+  const { dirAxisOf } = await import("@/lib/g1/copy");
+  const dirAxis: Record<string, number> = {};
+  for (const r of abst) {
+    const v = r.t2?.verdict as { gap_score?: number; abstain_reason?: string | null } | undefined;
+    const k = dirAxisOf({ score: v?.gap_score ?? null, abstain: v?.abstain_reason ?? null, L1: r.labels?.L1 != null ? Number(r.labels.L1) : null });
+    dirAxis[k] = Math.round(((dirAxis[k] ?? 0) + nightW(r.date, abst)) * 10) / 10;
+  }
   const g1aAbstain = {
     by_reason: byReason,
-    nights: abst.length,
+    dir_axis: dirAxis,
+    nights: new Set(abst.map((r) => r.date)).size, // 밤 단위 (§2)
+    rows: abst.length,
     avg_abs_gap_pct: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length * 100) / 100 : null,
     max_abs_gap_pct: gaps.length ? Math.round(Math.max(...gaps) * 100) / 100 : null,
     missed_virtual_sum_pct: missed.length ? Math.round(missed.reduce((a, b) => a + Math.abs(b), 0) * 100) / 100 : null, // 가상 진입가→시가 |수익| 합
@@ -396,16 +413,19 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string } } | null)?.grade;
     return g?.grade === "Lean" && g.lean_dir && r.labels?.L1 != null;
   });
-  // 갭상승/갭하락 분리 집계 (발주자 8/13 §4 — 갭하락 판정 검증이 NXT ETF 재검토의 전제조건)
-  const leanSplit = (dir: "UP" | "DOWN") => {
-    const rows2 = leanRows.filter((r) => (r.t2 as { grade?: { lean_dir?: string } }).grade!.lean_dir === dir);
-    const hits = rows2.filter((r) => (dir === "UP") === (Number(r.labels!.L1) > 0)).length;
-    return { n: rows2.length, hits, rate: rows2.length ? Math.round((hits / rows2.length) * 100) / 100 : null };
+  // 갭상승/갭하락 분리 집계 (발주자 8/13 §4) — 표본 회계는 밤 단위 (발주자 8/15 저녁 §2)
+  const leanNight = (rows2: typeof leanRows) => {
+    const n = new Set(rows2.map((r) => r.date)).size;
+    let hits = 0;
+    for (const r of rows2) {
+      const g = (r.t2 as { grade?: { lean_dir?: string } }).grade!;
+      if ((g.lean_dir === "UP") === (Number(r.labels!.L1) > 0)) hits += nightW(r.date, rows2);
+    }
+    return { n, hits: Math.round(hits * 10) / 10, rate: n ? Math.round((hits / n) * 100) / 100 : null };
   };
-  const leanHits = leanRows.filter((r) => {
-    const g = (r.t2 as { grade?: { lean_dir?: string } }).grade!;
-    return (g.lean_dir === "UP") === (Number(r.labels!.L1) > 0);
-  }).length;
+  const leanSplit = (dir: "UP" | "DOWN") =>
+    leanNight(leanRows.filter((r) => (r.t2 as { grade?: { lean_dir?: string } }).grade!.lean_dir === dir));
+  const leanAll = leanNight(leanRows);
   const dirOf = (o: unknown) => String((o as { last?: { dir?: string } } | undefined)?.last?.dir ?? "");
   const t2plus = {
     // E2·모자이크 비교표: 베팅 가능 밤 비율이 승격 심사 명시 지표 (발주자 8/12 §5)
@@ -413,8 +433,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     base_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(String((r.t2?.verdict as { direction?: string })?.direction))).length,
     shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf(r.t2?.shadow))).length,
     mosaic_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf((r.t2 as { mosaic?: unknown } | null)?.mosaic))).length,
-    lean_score: { n: leanRows.length, hits: leanHits, rate: leanRows.length ? Math.round((leanHits / leanRows.length) * 100) / 100 : null,
-                  갭상승: leanSplit("UP"), 갭하락: leanSplit("DOWN") },
+    lean_score: { ...leanAll, 갭상승: leanSplit("UP"), 갭하락: leanSplit("DOWN") }, // 밤 단위 표본 (§2)
     e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
   const nfEveStart = floorReset(gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null);

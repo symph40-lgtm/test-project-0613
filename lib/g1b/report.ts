@@ -16,6 +16,9 @@ export function buildR1(symbol: G1BSymbol, date: string, fair: number | null, si
     `FairGap_R1 ${p1(fair)} ± ${sigma.toFixed(2)}% (1σ)${q80 != null ? ` · 꼬리80분위 ${q80.toFixed(2)}%` : ""} [레짐 ${regime}]`,
     expOpen ? `예상시가 ${expOpen.toLocaleString()}` : `예상시가 산출 불가(종가 결측)`,
     `가중 ${Object.entries(w).map(([k, v]) => `${k} ${v}`).join(" · ") || "결측"}`,
+    // 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재가 '누락'으로 오해되지 않게
+    ...(night.night_fut && !night.night_fut.late_arrival && night.night_fut.v != null
+      ? [`미편입: 야간선물 관측 ${raw(night.night_fut)} (검증 중 — 챌린저 v1.1c 병행)`] : []),
     `지시: 가상 — Phase 1(실사용 전환)은 D+15 게이트 통과 후 (A1-6)`,
   ].join("\n");
 }
