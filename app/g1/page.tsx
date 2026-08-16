@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell, Disclaimer } from "../_components/Shell";
 import { nfFlowLines, r1Footnote, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
+import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
+import type { MtDay } from "@/lib/mt/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,22 @@ function Footnote({ f }: { f: TwoLines }) {
     <div className="mt-2 rounded-[10px] bg-pearl/60 px-3 py-2 text-[12px] leading-relaxed">
       <p><span className="font-semibold text-ink-48">해석</span> <span className="text-ink-80">{f.해석}</span></p>
       <p><span className="font-semibold text-ink-48">할 일</span> <span className="text-ink-80">{f.할일}</span></p>
+    </div>
+  );
+}
+
+// MT 상시 줄 (스펙 SPEC_MT_v04.md §3.2) — 국면 확률·부품 충족도·톤·박스. 판정 무개입.
+function MtLine({ day }: { day: MtDay | undefined }) {
+  if (!day) return null;
+  const l = mtCardLines(day);
+  return (
+    <div className="border-b border-hairline/40 py-1.5 text-[12px]">
+      <p className="text-ink-80">{l.head}</p>
+      <p className="text-ink-48">{l.panel}</p>
+      <p className="text-ink-48">{l.tail}</p>
+      {l.flags.length ? <p className="mt-0.5 text-[11px] font-semibold text-amber-700">{l.flags.join(" · ")}</p> : null}
+      {/* 전환 선언 트랙 동결 (2026-08-16 발주자 판정 4 — 재채점 1회 미달·오탐률 86%): 화면 노출 없음, 로그만. 톤·패널·박스는 유지 */}
+      <p className="text-[11px] text-ink-48"><i>톤 트랙 검증 미달 꼬리표: 방향 적중 54% (기준선 대비 초과 ±2%p 이내) — 참고만, 판정 무개입</i></p>
     </div>
   );
 }
@@ -82,12 +100,16 @@ export default async function G1Page() {
   if (!user) redirect("/login");
   const admin = createAdminClient();
 
-  const [aDays, bDays, gate, bState] = await Promise.all([
+  const [aDays, bDays, gate, bState, mtDays] = await Promise.all([
     admin.from("g1a_days").select("*").order("date", { ascending: false }).limit(8),
     admin.from("g1b_days").select("date,symbol,night,r1,r2,labels").order("date", { ascending: false }).limit(12),
     admin.from("g1b_gate").select("date,metrics").order("date", { ascending: false }).limit(1),
     admin.from("g1b_state").select("symbol,state"),
+    admin.from("mt_days").select("*").order("date", { ascending: false }).limit(30),
   ]);
+  // MT 1단계 = 표시 전용 (판정 무개입). 마이그레이션 037 미적용이면 조용히 비활성.
+  const mtLatest = new Map<string, MtDay>();
+  for (const r of (mtDays.data ?? []) as MtDay[]) if (!mtLatest.has(r.symbol)) mtLatest.set(r.symbol, r);
   const aRows = (aDays.data ?? []) as G1ARow[];
   const rows = (bDays.data ?? []) as G1BRow[];
   const m = (gate.data?.[0]?.metrics ?? null) as Record<string, unknown> | null;
@@ -123,6 +145,14 @@ export default async function G1Page() {
       <p className="mb-4 rounded-[10px] bg-pearl/60 px-3 py-2 text-[12px] text-ink-48">
         운영 순서: <b>T2(저녁 결정) → R1(아침 재판·오판 시 프리장 청산) → R2(시가 확인)</b>
       </p>
+
+      {/* MT 시장 톤 (KOSPI200) — 1단계 표시 전용. 종목 톤은 각 카드 안에 상시 줄로 들어간다. */}
+      {mtLatest.has("KOSPI200") ? (
+        <Card title={`시장 톤·에너지 — ${mtLatest.get("KOSPI200")!.date}`} badge="MT 1단계">
+          <MtLine day={mtLatest.get("KOSPI200")} />
+          <p className="mt-2 text-[11px] text-ink-48">{MT_DISCLAIMER}</p>
+        </Card>
+      ) : null}
 
       {/* A1: G1A T2 — 맨 위 */}
       {aToday.map((r) => {
@@ -182,6 +212,7 @@ export default async function G1Page() {
               const nfe = r.t2?.nf_evening as { t: string; pct: number; corrected?: boolean } | null | undefined;
               return <Row label="야간선물 초반 (E1·기록만)" value={nfe ? `${nfe.t} ${pp(nfe.pct)}${nfe.corrected ? " (정정)" : ""}` : "18:00~ 대기"} />;
             })()}
+            <MtLine day={mtLatest.get(r.symbol)} />
             <Row label="T2+ 섀도 (E2·본판정 미반영)" value={r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"} />
             {(() => {
               const p = (r.t2 as { pieces?: Record<string, number | null> })?.pieces;
@@ -235,6 +266,7 @@ export default async function G1Page() {
           <ActionLine line={r.r2?.action?.line} />
           <Row label="R2 (08:55)" value={r.r2 ? <>{r.r2.signal}{r.r2.residual_sigma != null ? ` (${r.r2.residual_sigma}σ)` : ""}</> : "발행 전"} />
           {r.r2 ? <Footnote f={r2Footnote({ code: r2a?.code ?? "", residualSigma: r.r2.residual_sigma ?? null, expectedOpen: expOpen2, phase: r2a?.phase ?? "가상" })} /> : null}
+          <MtLine day={mtLatest.get(r.symbol)} />
           <Row label="야간선물 관측" value={nfObs?.v != null ? <>{pp(nfObs.v * 100)}{nfObs.corrected ? <span className="text-[11px] text-ink-48"> (정정 — KRX 정본 소급)</span> : null}</> : "결측"} />
           <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
           {r.r1?.report ? (

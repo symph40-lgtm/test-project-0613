@@ -248,11 +248,15 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
           miss: `악재 시 −${se.toFixed(1)}% 안팎 갭 예상`,
         };
         // 즉시 시행 c: E-등급 섀도 — E-Low 조건(IM<1.5x·High 문턱·포지셔닝 비극단) 중 검사 가능분만
+        // + MT 내성 조건 병기 (WORKORDER_MT_v04 §5 사다리 2단계 — 기록 전용, 판정 무개입)
+        const mtNote = await (await import("@/lib/mt/eshadow")).mtEShadowNote(
+          symbol, date, verdict.gap_score >= 0.5 ? "UP" : verdict.gap_score <= -0.5 ? "DOWN" : null);
         (t2 as Record<string, unknown>).e_shadow = {
           grade: Math.abs(verdict.gap_score) >= th.high
             ? "E-Low 후보 (1/12 가상 — IM·포지셔닝 미검, 헌법 발효 전 섀도)"
             : grade.lean_dir ? `E-Lean (${grade.lean_dir === "UP" ? "상방" : "하방"} 기울기)` : "E-Flat",
           score: verdict.gap_score, virtual_size: Math.abs(verdict.gap_score) >= th.high ? "1/12" : "0",
+          mt: mtNote,   // null = MT 미산출일 (마이그레이션 037 미적용 등)
         };
       }
       if (!blocked && verdict.direction !== "NEUTRAL") {
