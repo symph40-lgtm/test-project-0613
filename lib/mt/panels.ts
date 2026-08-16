@@ -26,6 +26,8 @@ export type PanelContext = {
    *   — 발주자 보충 §1.4-1b의 역할 분리를 코드 수준에서 지킨다.
    */
   weights?: Record<string, number>;
+  /** 부검·MT-CS 절제 전용: R4 배선 재료(C3/C5/C7)를 끄고 원 fill로 되돌린다 — 평시 미사용, 규칙 변경 아님 */
+  disableWire?: ("C3" | "C5" | "C7")[];
 };
 
 const part = (key: string, fill: number | null, detail: string): PartFill => ({
@@ -130,12 +132,15 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
 
   // ── R4 배선 재료 (2026-08-16 재설계 패키지 — 재료 보강, 부품 수 동결)
   const W = MT_CONFIG.wire;
-  const clv20 = clvAvg(bars, i, 20);                       // C3 종반 강도
+  const off = new Set(ctx.disableWire ?? []);
+  const clv20 = clvAvg(bars, i, 20);                       // C3 종반 강도 (common 기록용은 항상 산출)
+  const clv20w = off.has("C3") ? null : clv20;             // 배선 입력 — 절제 시 null → 원 fill 유지
   const high252v = maxHigh(bars, i, Math.min(252, i + 1));
   const high52 = high252v && high252v > 0 ? close / high252v : null;   // C7 52주 고점 근접도
-  const flowStreak = ctx.flow?.streak ?? null;             // C5 외인 연속 (부호 = 매수/매도, 절대값 = 일수)
+  const high52w = off.has("C7") ? null : high52;
+  const flowStreak = off.has("C5") ? null : (ctx.flow?.streak ?? null);   // C5 외인 연속 (부호 = 매수/매도, 절대값 = 일수)
   const c5Bonus = (dir: 1 | -1) => (flowStreak != null && Math.sign(flowStreak) === dir && Math.abs(flowStreak) >= W.C5.streakMin ? W.C5.bonus : 0);
-  const c7Mult = (at: number, mult: number) => (high52 != null && high52 >= at ? mult : 1);
+  const c7Mult = (at: number, mult: number) => (high52w != null && high52w >= at ? mult : 1);
   /** C3 합성: fill = (1−w)×기존 + w×CLV항 (CLV 결측이면 기존 그대로) */
   const withC3 = (fill: number | null, w: number, clvTerm: number | null) =>
     fill == null ? null : clvTerm == null ? fill : (1 - w) * fill + w * clvTerm;
@@ -155,7 +160,7 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
       const base = close > lv.high ? 1 : close > lv.high * 0.995 ? 0.6 : lv.high > lv.low ? ramp(close, lv.low, lv.high) * 0.5 : null;
       return base == null ? null : Math.min(1, base * c7Mult(W.C7.S1_4.at, W.C7.S1_4.mult));
     })(),
-      `종가 ${close.toLocaleString()} vs 상단 ${Math.round(lv.high).toLocaleString()} (${lv.via})${high52 != null && high52 >= W.C7.S1_4.at ? " · 52주 고점권" : ""}`),
+      `종가 ${close.toLocaleString()} vs 상단 ${Math.round(lv.high).toLocaleString()} (${lv.via})${high52w != null && high52w >= W.C7.S1_4.at ? " · 52주 고점권" : ""}`),
   ];
 
   // ── S2 상승 추세
@@ -171,7 +176,7 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
     part("S2_2", dnUp10 == null ? null : ramp(1.0 - dnUp10, 0, 0.3),
       dnUp10 == null ? "거래량 표본 없음" : `눌림 거래량비 ${dnUp10.toFixed(2)}`),
     (() => {
-      const clvUp = clv20 == null ? null : ramp(clv20, 0.45, 0.65);
+      const clvUp = clv20w == null ? null : ramp(clv20w, 0.45, 0.65);
       const baseFill = ctx.breadth != null ? ramp(ctx.breadth, P.breadthFloor, P.breadthFloor + P.breadthSpan)
         : rs == null ? null : ramp(rs, P.rsFloor, P.rsFloor + P.rsSpan);
       const baseTxt = ctx.breadth != null ? `등락종목수 비율 ${(ctx.breadth * 100).toFixed(0)}%` : rs == null ? "상대강도 미가용" : `상대강도 ${rs.toFixed(2)}%p (소급 대체)`;
@@ -206,8 +211,8 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
     part("S3_2", distr ? Math.min(1, distr.fill + c5Bonus(-1)) : null,
       distr ? `상승일 거래량 ×${distr.a.toFixed(2)} · 하락일 ×${distr.b.toFixed(2)}${c5Bonus(-1) ? ` · 외인 매도 연속 +${W.C5.bonus}` : ""}` : "거래량 표본 없음"),
     part("S3_3", Math.min(1, Math.min(1, utad / P.utad.target) * c7Mult(W.C7.S3_3.at, W.C7.S3_3.mult)),
-      `상방 돌파 후 복귀 ${utad}회 (최근 ${P.utad.window}일)${high52 != null && high52 >= W.C7.S3_3.at ? " · 52주 고점권" : ""}`),
-    part("S3_4", withC3(rs == null ? null : ramp(-rs, -1, 4), W.C3.S3_4, clv20 == null ? null : ramp(0.55 - clv20, 0, 0.2)),
+      `상방 돌파 후 복귀 ${utad}회 (최근 ${P.utad.window}일)${high52w != null && high52w >= W.C7.S3_3.at ? " · 52주 고점권" : ""}`),
+    part("S3_4", withC3(rs == null ? null : ramp(-rs, -1, 4), W.C3.S3_4, clv20w == null ? null : ramp(0.55 - clv20w, 0, 0.2)),
       rs == null ? "상대강도 미가용" : `상대강도 ${rs.toFixed(2)}%p${clv20 != null ? ` · CLV20 ${clv20.toFixed(2)}` : ""}`),
   ];
 

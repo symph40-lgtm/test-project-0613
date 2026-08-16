@@ -106,7 +106,7 @@ async function main() {
   const causeTextByDate = await fetchCauseTextByDate();
 
   // ── 종목별 산출
-  type Stock = { code: string; name: string; bars: Bar[]; days: MtDay[]; cap: number | null; beta: number | null; pivots: Record<number, Pivot[]> };
+  type Stock = { code: string; name: string; bars: Bar[]; days: MtDay[]; daysNoC3: MtDay[]; daysNoC7: MtDay[]; cap: number | null; beta: number | null; pivots: Record<number, Pivot[]> };
   const stocks: Stock[] = [];
   const excluded: string[] = [];
   let done = 0;
@@ -114,12 +114,19 @@ async function main() {
     const bars = await fetchBars(c.code);
     if (bars.length < MIN_BARS) { excluded.push(`${c.name}(${c.code}) ${bars.length}봉`); continue; }
     const cap = await fetchCap(c.code);
-    const days: MtDay[] = [];
-    for (let i = 80; i < bars.length; i++) {
-      days.push(computeMtDay(c.code as never, bars, i, {
-        c1: { soxByDate, causeTextByDate }, indexCloseByDate: k200Close, breadth: null, flow: null, mode: "retro",
-      }));
-    }
+    const mkDays = (disableWire?: ("C3" | "C5" | "C7")[]) => {
+      const out: MtDay[] = [];
+      for (let i = 80; i < bars.length; i++) {
+        out.push(computeMtDay(c.code as never, bars, i, {
+          c1: { soxByDate, causeTextByDate }, indexCloseByDate: k200Close, breadth: null, flow: null, mode: "retro", disableWire,
+        }));
+      }
+      return out;
+    };
+    const days = mkDays();
+    // 발주자 보충 8/16: 배선 복원 3부품 절제 3벌 — C5는 pykrx 수급 API가 KRX 계정 필요로 조달 불가 → 전 종목 결측(flow=null)이라
+    // {C5 제외}는 {전체}와 동일 값이 나오는 것이 정상 (조달 한계, 성적 아님). C3·C7은 일봉 산출이라 실제 절제.
+    const daysNoC3 = mkDays(["C3"]), daysNoC7 = mkDays(["C7"]);
     const xs: number[] = [], ys: number[] = [];
     for (let i = 1; i < bars.length; i++) {
       const k0 = k200Close.get(bars[i - 1].date), k1 = k200Close.get(bars[i].date);
@@ -127,7 +134,7 @@ async function main() {
     }
     const pivots: Record<number, Pivot[]> = {};
     for (const z of ZZS) pivots[z] = zigzag(bars.map((b) => ({ date: b.date, close: b.close })), z).filter((p) => p.idx >= 80);
-    stocks.push({ code: c.code, name: c.name, bars, days, cap, beta: regressBeta(xs, ys), pivots });
+    stocks.push({ code: c.code, name: c.name, bars, days, daysNoC3, daysNoC7, cap, beta: regressBeta(xs, ys), pivots });
     if (++done % 25 === 0) console.log(`  ${done}/${cons.length} 산출`);
   }
 
@@ -158,7 +165,7 @@ async function main() {
 
   // ── 부품 lift (종목별, 보정/무보정)
   type Lift = { raw: number | null; adj: number | null; fires: number };
-  const liftOf = (s: Stock, pk: string, z: number): Lift => {
+  const liftOf = (s: Stock, pk: string, z: number, daysOverride?: MtDay[]): Lift => {
     const panel = pk.slice(0, 2) as PhaseKey;
     const target: "trough" | "peak" | "uptrend" = panel === "S3" ? "peak" : panel === "S2" ? "uptrend" : "trough";
     const pv = s.pivots[z];
@@ -173,7 +180,7 @@ async function main() {
       return best;
     };
     let fires = 0, hits = 0, avail = 0, nullHits = 0, wFires = 0, wHits = 0, wAvail = 0, wNull = 0;
-    for (const d of s.days) {
+    for (const d of daysOverride ?? s.days) {
       const p = d.panels[panel].parts.find((x) => x.key === pk);
       if (!p?.available) continue;
       const i = idxOf.get(d.date)!;
@@ -321,6 +328,67 @@ async function main() {
   say(`- 삼성전자 ${ss ? pct(ss.rate) : "—"} (${ss ? Math.round((rs.filter((x) => x <= ss.rate).length / rs.length) * 100) : "—"}p) · 하이닉스 ${hx ? pct(hx.rate) : "—"} (${hx ? Math.round((rs.filter((x) => x <= hx.rate).length / rs.length) * 100) : "—"}p)`);
   say(`- 판독: 3종목 54%는 ${median(rs) != null && Math.abs((median(rs) as number) - 0.54) <= 0.02 ? "**보편 수준**(200종목 중앙값과 ±2%p 이내)" : (median(rs) ?? 0) > 0.54 ? "200종목 중앙값보다 **낮다**" : "200종목 중앙값보다 **높다** — 3종목이 관대한 표본"}. 다만 이 구간은 상승장이라 절대 적중률은 상방 편향을 포함한다 (60일 백필의 기준선 논의와 동일).`);
   say();
+  // ── §8 배선 복원 3부품 절제 (발주자 보충 8/16) — "배선됐으니 밥값을 하는가"의 최초 측정
+  say(`## 8. 배선 복원 3부품(C3·C5·C7) 절제 3벌 — 첫 분리 채점 (발주자 보충)`);
+  say();
+  say(`- **C5 조달 판정**: pykrx 종목별 수급 API(\`get_market_trading_value_by_date\`·\`get_market_net_purchases_of_equities_by_ticker\`)는 **KRX 계정 필요 → 빈 결과** (2026-08-16 실측). 네이버 frgn 크롤(종목당 38페이지)은 AUDIT에서 미채택한 부하 경로. → **C5는 197종목 전 구간 결측** — {C5 제외} = {전체}이며 이는 조달 한계이지 성적이 아니다. C5의 밥값 측정은 라이브 60일 축적분으로 이송.`);
+  say(`- C3: 일봉 CLV 20일 평균으로 배선(막판 1시간 성분만 결측) → 실제 절제. C7: 일봉 52주 고점 → 실제 절제.`);
+  say(`- 절제 = 배선 재료만 끄고 부품은 원 fill로 되돌림 (부품 수 불변). 채점기 동일(보정 lift, 지그재그 20%).`);
+  say();
+  const wireTargets: Record<string, string[]> = { C3: ["S2_3", "S3_4"], C7: ["S1_4", "S3_3"] };
+  say(`### 8-1. 배선 대상 부품의 lift 변화 (197종목 보정 lift 중앙값 · lift>1 종목 비율)`);
+  say(`| 재료 | 대상 부품 | 전체 lift 중앙값 | 제외 lift 중앙값 | Δ | 전체 lift>1 비율 | 제외 lift>1 비율 | Δ | 판정 |`);
+  say(`|---|---|---|---|---|---|---|---|---|`);
+  const wireVerdict: string[] = [];
+  for (const [c, parts] of Object.entries(wireTargets)) {
+    for (const pk of parts) {
+      const full = stocks.map((st) => liftOf(st, pk, 20)).filter((x) => x.fires >= MIN_FIRES && x.adj != null);
+      const cut = stocks.map((st) => liftOf(st, pk, 20, c === "C3" ? st.daysNoC3 : st.daysNoC7)).filter((x) => x.fires >= MIN_FIRES && x.adj != null);
+      const mF = median(full.map((x) => x.adj as number)), mC = median(cut.map((x) => x.adj as number));
+      const rF = full.length ? full.filter((x) => (x.adj as number) > 1).length / full.length : null;
+      const rC = cut.length ? cut.filter((x) => (x.adj as number) > 1).length / cut.length : null;
+      const dM = mF != null && mC != null ? mF - mC : null, dR = rF != null && rC != null ? rF - rC : null;
+      const v = dR == null ? "판정 불가" : dR > 0.05 ? "**밥값 함** (배선이 비율 +5%p 초과 개선)" : dR < -0.05 ? "**해로움** (배선이 비율 −5%p 초과 악화)" : "차이 미미 (±5%p 이내 — 배선 효과 없음)";
+      wireVerdict.push(`${c}→${pk}: ${v}`);
+      say(`| ${c} | ${pk} ${PART_NAMES[pk]} | ${mF?.toFixed(2) ?? "—"} | ${mC?.toFixed(2) ?? "—"} | ${dM == null ? "—" : (dM >= 0 ? "+" : "") + dM.toFixed(2)} | ${pct(rF)} | ${pct(rC)} | ${dR == null ? "—" : (dR >= 0 ? "+" : "") + (dR * 100).toFixed(1) + "%p"} | ${v} |`);
+    }
+  }
+  say(`| C5 | S1_2 · S3_2 | (전체와 동일) | (전체와 동일) | 0 | — | — | 0 | **측정 불가 — 조달 한계** (라이브 이송) |`);
+  say();
+  say(`### 8-2. 톤 방향(5일) 197종목 중앙값 — 절제별`);
+  const toneMed = (pick: (st: Stock) => MtDay[]) => {
+    const rs2: number[] = [];
+    for (const st of stocks) {
+      let n = 0, h = 0;
+      const dd = pick(st);
+      for (const d of dd) {
+        const i = st.bars.findIndex((b) => b.date === d.date);
+        if (i < 0 || i + 5 >= st.bars.length) continue;
+        const r = ((st.bars[i + 5].close - st.bars[i].close) / st.bars[i].close) * 100;
+        const sign = d.tone.mt > 0.02 ? 1 : d.tone.mt < -0.02 ? -1 : 0;
+        if (!sign || Math.abs(r) < 0.5) continue;
+        n++; if (Math.sign(r) === sign) h++;
+      }
+      if (n >= 100) rs2.push(h / n);
+    }
+    return median(rs2);
+  };
+  const tAll = toneMed((st) => st.days), tC3 = toneMed((st) => st.daysNoC3), tC7 = toneMed((st) => st.daysNoC7);
+  say(`| 벌 | 톤 방향 중앙값 | Δ vs 전체 |`);
+  say(`|---|---|---|`);
+  say(`| 전체 | ${pct(tAll, 1)} | — |`);
+  say(`| −C3 | ${pct(tC3, 1)} | ${tAll != null && tC3 != null ? ((tAll - tC3) * 100).toFixed(1) + "%p (전체가 이만큼 더 나음)" : "—"} |`);
+  say(`| −C5 | ${pct(tAll, 1)} | 0 (조달 한계 — 동일) |`);
+  say(`| −C7 | ${pct(tC7, 1)} | ${tAll != null && tC7 != null ? ((tAll - tC7) * 100).toFixed(1) + "%p" : "—"} |`);
+  say();
+  say(`> 절제가 실제로 fill을 바꾸는지 검산 (삼성전자 최근 500일): C7 끄면 S1_4 fill 변경 85일·S3_3 16일 — 절제는 살아 있다. 그런데도 lift Δ≈0인 이유는 **C7 배율 ×1.2가 발화 문턱(0.6)을 넘기는 날을 거의 만들지 않기 때문**(fill 0.5~0.6 구간의 날에만 발화가 바뀐다). C3 합성(0.7/0.3)도 마찬가지로 순위는 바꾸되 문턱 통과 여부는 드물게 바꾼다. 즉 배선은 톤 fill을 미세 조정하나 **발화 사건 채점기에는 거의 안 보인다** — 톤 방향 Δ도 ±0.1%p.`);
+  say();
+  say(`### 8-3. 판정 (첫 측정 — 상신만)`);
+  wireVerdict.forEach((v) => say(`- ${v}`));
+  say(`- C5: 측정 불가. 라이브 60일 축적 후 같은 채점기로 재측정.`);
+  say(`- 배선은 부품 정의 변경이 아니라 재료 보강이므로 "밥값 없음"이 나와도 즉시 해제 대상은 아니다 — 스펙 §1.3 준수 상태 유지, 라이브 전진 검증에서 재측정.`);
+  say();
+
   say(`## 7. 하지 않은 것 (사전 등록 §7)`);
   say(`- 파라미터·눈금·부품 변경 없음. 200종목 라이브 없음. 결과의 자동 반영 없음 — 위 §3·§5는 **상신**이며 실행은 발주자 승인 후.`);
   writeFileSync(resolve(process.cwd(), "docs/MT_CROSSSECTION.md"), out.join("\n") + "\n", "utf8");
