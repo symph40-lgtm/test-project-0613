@@ -14,7 +14,18 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parents[2]
 ENV_FILE = ROOT / ".env"
 CACHE_DIR = ROOT / ".cache"
-DATA_DIR = ROOT / "data"
+
+
+def _data_dir() -> Path:
+    """데이터 루트. 기본 ROOT/data. `MTPRO_DATA_DIR` (프로세스 환경 또는 mtpro/.env — env() 와 같은 규칙: MTPRO_ 접두만
+    프로세스 환경 허용) 가 있으면 그 경로. Gate R1 P4 절단 재산출(임시 디렉토리에 대해 전 파이프라인 재실행)용 — 기본 동작 불변."""
+    v = os.environ.get("MTPRO_DATA_DIR")
+    if not v and ENV_FILE.exists():
+        v = dotenv_values(ENV_FILE).get("MTPRO_DATA_DIR") or None
+    return Path(v).expanduser().resolve() if v else ROOT / "data"
+
+
+DATA_DIR = _data_dir()
 BRONZE = DATA_DIR / "bronze"
 SILVER = DATA_DIR / "silver"
 GOLD = DATA_DIR / "gold"
