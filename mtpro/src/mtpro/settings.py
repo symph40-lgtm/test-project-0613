@@ -40,6 +40,31 @@ def env() -> dict[str, str]:
     return vals
 
 
+KRX_ENV_FILE = ROOT.parent / ".env.local"   # 기존 저장소의 .env.local — KRX_ID/KRX_PW **만** 읽는다 (T3-A)
+KRX_KEYS = ("KRX_ID", "KRX_PW")
+
+
+def krx_env(path: Path | None = None) -> dict[str, str]:
+    """KRX 로그인 계정. 기존 저장소 `.env.local`에서 KRX_ID/KRX_PW 두 키만 읽는다 (그 외 키는 읽지 않는다).
+    프로세스 환경에 이미 있으면 그것을 우선한다(크론 주입). 둘 중 하나라도 없으면 loud-failure `PROCURE_FAIL:KRX_ENV`.
+    pykrx는 env 미설정 시 예외 없이 빈 DataFrame을 조용히 반환하므로(T1-1) 호출 전에 반드시 이 함수로 확인한다."""
+    p = path or KRX_ENV_FILE
+    vals: dict[str, str] = {k: os.environ[k] for k in KRX_KEYS if os.environ.get(k)}
+    if len(vals) < len(KRX_KEYS) and p.exists():
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            for k in KRX_KEYS:
+                if k in vals or not line.startswith(k + "="):
+                    continue
+                v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if v:
+                    vals[k] = v
+    missing = [k for k in KRX_KEYS if k not in vals]
+    if missing:
+        raise ConfigError(f"PROCURE_FAIL:KRX_ENV missing {missing} (expected in {p} or process env)")
+    return vals
+
+
 def require(keys: list[str]) -> dict[str, str]:
     e = env()
     missing = [k for k in keys if not e.get(k)]

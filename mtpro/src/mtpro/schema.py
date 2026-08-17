@@ -77,6 +77,17 @@ GOLD_COMMON_META = [("date", pa.date32()), ("scope", pa.string()), ("engine_ver"
                     ("missing", pa.list_(pa.string()))]   # 결측 컴포넌트 이름 목록 (None 유지 근거)
 
 
+GOLD_FLOW_PANEL = pa.schema([                       # 부품 4 Flow Impact (T3-A) — 결측은 None 유지
+    ("date", pa.date32()), ("scope", pa.string()),
+    ("foreign_norm", pa.float64()), ("institution_norm", pa.float64()),           # net / mean20(비수정 거래대금)
+    ("flow_beta_foreign", pa.float64()), ("flow_beta_inst", pa.float64()),          # 120일 OLS(과거만, t 포함), n<60 → None
+    ("expected_from_flow", pa.float64()), ("flow_impact_residual_z", pa.float64()),
+    ("flow_trend_z", pa.float64()),                                                 # 5일 foreign_norm 기울기의 과거 120일 대비 z
+    ("n_beta_obs", pa.int32()), ("beta_extreme_flag", pa.bool_()),                  # |β|>1 (T1 검증 항목)
+    ("engine_ver", pa.string()),
+])
+
+
 def assert_same_adjustment(*price_adjusted_flags: bool) -> None:
     """C-2: 서로 다른 수정 여부의 가격 컬럼을 한 식에 넣는 것을 금지."""
     if len(set(price_adjusted_flags)) > 1:

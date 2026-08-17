@@ -40,6 +40,14 @@ flow:                                          # 부품 4 (T1-1 승인 제안)
     window: [2023-01-03, 2026-06-30]
     metric: pearson_daily_net_purchase        # 외국인·기관 각각
     replace_if_below: 0.8
+  reconcile_result:                            # C-1 판정 기록 (T3 1회, 재론 금지)
+    corr_foreign: 0.9967
+    corr_institution: 0.9973
+    sign_agree_foreign: 0.9576
+    sign_agree_institution: 0.9659
+    n_days: 850
+    decision: KOSPI_MARKET
+    decided_on: 2026-08-17
   denominator: trading_value_mean20            # 비수정 OHLCV 거래대금 (price_adjusted=false)
   denominator_aux: market_cap
 
@@ -47,6 +55,18 @@ breadth:                                       # 부품 5 (T1-2 승인 제안)
   constituents_pit: monthly_first_trading_day  # asof 기록
   tiers: {large: [1, 50], mid: [51, 150], small: [151, 200]}   # KOSPI200 내 시총 순위
   lookback_start: 2022-01-03                   # 252일 신고저용 → 지표는 2023-01-03부터
+
+energy_lite:                                   # T3 사전 등록 — Gate R1(T4) 측정 전 확정, 측정 후 변경 금지
+  weights: {flow: 0.3333, breadth: 0.3333, gradec_err: 0.3334}   # 무정보 균등 사전 등록 (스펙 비례안 .27/.27/.46은 최약 재료에 과중 — 발주자 확인 요청)
+  min_components: 2                            # Lite는 3컴포넌트뿐 → 가용 2 이상이면 산출(A-6 규칙의 Lite 특례, 사전 등록)
+  z_window_days: 120                           # 컴포넌트 z 표준화 창(과거만)
+  scopes: [KOSPI200, "005930", "000660"]
+
+grade_c:                                       # 소급 트랙 등급C 재료 (T1-3: 전일밤 ^SOX 부호·크기)
+  proxy: SOX_prev_night_return
+  beta_window_days: 60                         # β_SOX 롤링 회귀 창, 절단 [0.3, 3.0]
+  min_justified_abs_pct: 0.3                   # |정당화 반응| < 0.3% 는 재료 없는 날 → 제외(None)
+  err_z_window_days: 120
 
 kis:
   minute_depth_days_measured: 365              # 8/17 실측: 2025-08-14 응답·2025-07-11 무응답 → ≈12개월

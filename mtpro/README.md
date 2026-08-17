@@ -5,4 +5,5 @@
 - 실행: `python -m venv .venv && .venv\Scripts\pip install -r requirements.txt` · 테스트 `.venv\Scripts\python -m pytest tests -q` · 컨센서스 CLI `.venv\Scripts\python -m mtpro.events.cli --help`
 - 비밀: `.env`(KIS 전용 실전 키, git 제외) · 토큰 캐시 `.cache/kis_token.json` · 알림 `logs/alerts.jsonl` · 데이터 `data/{bronze,silver,gold}` (전부 git 제외)
 - 프로브: `probes/` (T1·T2 실측 스크립트·출력). KRX 계정은 env `KRX_ID/KRX_PW`.
+- T3-A 잡(cwd=mtpro): `jobs\ingest_krx.py [--only flow,ohlcv_unadj,ohlcv_adj,pit,const_ohlcv,const_flow]` (KRX bronze, 증분·loud-failure, 요약 `docs/mtpro-t3a-ingest.md`) → `jobs\reconcile_flow.py` (C-1 대사 1회, `docs/mtpro-t3-flow-reconcile.md`) → `jobs\build_flow.py` (부품 4 → `data/gold/flow_panel.parquet`). KRX 계정은 `settings.krx_env()`가 기존 저장소 `../.env.local`의 KRX_ID/KRX_PW만 읽는다.
 - 접수 이력: `../docs/mt-pro-intake.md` · 실행은 `mtpro/` 안에서(경로는 settings.ROOT 기준 상대).
