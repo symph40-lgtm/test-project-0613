@@ -234,3 +234,31 @@ T7  Gate R2 판정 → 이후 연결 여부 별도 발주
 - **D-D** 부품 4·5·C 보조 상수 config 승격, 승격 시점 값 = 사전 등록값(`tests/test_config_constants_dd.py`로 일치 고정).
 - **D-E** 미국 휴장으로 같은 SOX 세션 재사용 → None 승인.
 - **T4 착수 승인**: 관문·baseline·IC 정의 사전 등록 문서 → 발주자 승인 → 측정. PASS 조건은 §3 Gate R1과 일치. β_SOX≈0을 이유로 한 완화 불가(조정은 amendment).
+
+---
+
+## 개념 고정 (2026-08-17 밤, 발주자 — T5 착수 일시 보류, 반영 계획서 승인 후 구현)
+
+**표기 규칙**: 관문은 **Gate R1 / Gate R2** 풀네임. 기존 시스템 모듈은 **T2/R1/R2**. **부록 A 정오표(A-1~A-6)** 와 **Amendment(A-1R·AM-*)** 는 별개 체계 — 시간축 amendment는 이후 **A-1R**로 표기(정오표 A-1과 혼동 방지).
+
+### AM-6 — Amendment A-1 → **A-1R**
+갭은 **사전 예측 입력 금지(유지)**. 단 **장 마감 후 MT 상태 산출**에서는 해당일 이미 실현된 최초 시장반응으로 사용. **부품 3G 신설**(Gap Reaction / Gap Hold / Close Acceptance 분리 기록). β_SOX 실측은 보조 진단값 — 개정 근거 아님.
+
+### AM-7 — 부품 9 Post-Shock Acceptance (PSA)
+변동성 조정 임계 초과 충격 후 3~7거래일의 가격대 유지율·저점 재붕괴·일중범위 정상화·거래량 안정화. 임계·관찰창 **측정 전 사전 등록**. **available_at 규칙**: PSA는 관찰창 완료 시점에만 확정·available. 관찰창 미완료 충격은 pending/None 유지, 당일 MT 계산 사용 금지. 부분 관찰값은 **Early-PSA challenger**로 사전 등록 시에만, champion 사용 불가.
+
+### AM-8 — 부품 10 Semi Transmission
+SOXX·NVDA·MU·TSM 충격의 삼전/하닉 전달 민감도를 **종목별 독립 추정**, 수준+변화율 출력. 부품 5 Semiconductor diffusion과 정의 구분(Transmission = 미국→개별 종목 / diffusion = 반도체 종목군 내 확산).
+
+### AM-9 — 검증 철학
+1차 검증 = **반응함수 재현성**. 수익률 IC는 2차 기록(판정 아님). **MT_t는 거래일 t 장 마감 시점까지 가용했던 자료로만 확정.** Good Acceptance_t / Bad Resilience_t의 1차 검증은 MT_t 확정 이후 **최초로 발생하는 독립 호재/악재 이벤트만** 사용, 동일 이벤트의 상태 산출·검증 동시 사용 금지. 이벤트 독립성은 날짜 간격이 아니라 **정보 중첩**으로 판정 — 스키마에 `independence_flag / overlap_group / contamination_reason` 추가, 중첩 창 내 이벤트(예: CPI 소화 중 FOMC)는 검증 표본 제외·사유 기록. 반응 성과의 종속값은 raw 수익률이 아니라 event_type·SurpriseZ·당시 변동성 등 사건 강도를 조건화한 Expected Reaction 대비 표준화 잔차(**ERR 또는 동등물**). **Gate R1 FAIL 기록 소급 변경 없음.** 본 기준은 T5.5·Gate R2에만 적용.
+
+### AM-10 — 중복정보 통제 (primitive / 상위 상태 2층)
+primitive 3-family — **Reaction**: ERR · GoodBeta/BadBeta · Semi Transmission / **Price Acceptance**: Shock Absorption · Gap Reaction/Hold · Close Acceptance · Post-Shock Acceptance / **Participation**: Flow Impact · Breadth · Semiconductor diffusion. **Energy는 primitive family에서만 산출.** Good Acceptance / Bad Resilience는 primitive 증거를 조합한 **상위 상태 출력**, Energy 독립 입력으로 재사용 금지. family champion은 반영 계획서에서 결합 방식·cap(또는 직교화/잔차화)·최소 available component 수·None 처리·재정규화·family confidence 감점까지 **측정 전 고정**. 나머지는 challenger 명명 등록·shadow 비교만 — 성과 확인 후 champion 교체 불가(신규 표본·신규 관문으로만).
+
+**정의 구분**: GoodBeta/BadBeta = 반응함수 기울기(Reaction family). Good Acceptance/Bad Resilience = 상위 상태 점수, Energy 입력 아님, 별도 필드 보존, 원재료 대체 금지.
+**종목 독립**: 라벨·계수·Beta·Expected Reaction 독립 추정. 공통 피처 정의·모델 구조 허용. 종목 간 pooling 기본 금지, hierarchical shrinkage는 challenger만.
+**출력**: Energy + ΔMT + Good Acceptance/Bad Resilience + Price–MT Divergence. ΔMT·Divergence 산식은 계획서에서 champion 고정(성과 확인 후 윈도·평활 변경 불가, 대안은 challenger). Divergence는 진단·출력 전용(Energy·Regime 입력 재투입 금지). Regime = 느린 확인 층 / Energy·ΔMT·Good/Bad = 빠른 층 — Regime 라벨이 빠른 층을 덮지 못함, **반대 신호 병기 의무**. 부품 5에 diffusion 축 추가.
+**판정 3분법**: PASS / FAIL / **INSUFFICIENT**. 항목별 `n_operational`(작동 확인)·`n_inference`(효과 판정) 사전 등록. n_inference 미만 = INSUFFICIENT(FAIL 아님, PASS 승격 불가).
+**상위 상태 출력 필드**: `state_confidence · evidence_n · available_evidence` — 산출 규칙은 family confidence에서 파생, 계획서에서 사전 고정.
+**T5 범위** = 전부 반영된 전진 트랙. **T5.5** 사전 등록 문서는 AM-9 기준, 12개월 소급분의 n_inference 미달 예상 항목은 사전 "서술 전용" 표기. **반영 계획서 필수 포함**: 설계 변경 목록·스키마·family champion 전체 사양·purge/독립성 판정 구체 예시(9월 CPI–FOMC 인접 케이스)·PSA pending 처리·ΔMT/Divergence champion 산식·상위 상태 confidence 규칙. 제출 → 승인 후 구현.
