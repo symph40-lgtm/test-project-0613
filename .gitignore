@@ -42,3 +42,10 @@ venv/
 # 대가 예측모델 분봉 캐시
 .predict-cache/
 .claude/
+
+# MT-PRO (AM-5 이관 2026-08-17) — 비밀·캐시·데이터 제외
+mtpro/.env
+mtpro/.cache/
+mtpro/logs/
+mtpro/data/
+mtpro/.venv/

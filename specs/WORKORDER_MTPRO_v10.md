@@ -1,6 +1,6 @@
 # WORKORDER_MTPRO_v10 — MT-PRO 연구 트랙 발주서
 
-> **⚠ v10.1로 대체 (2026-08-16 밤, 발주자)** — MT-PRO는 **독립 프로젝트**로 확정되어 이 저장소 밖 `D:\vivecoding\mtpro\`(별도 git)로 이관되었다. 정본 발주서는 그곳의 `WORKORDER_MTPRO_v10.1.md`(v0.4 병행 프레임·TS 이식 조건·부품 8·v0.4 비교 제거, 신규 저장소·Python 단독). 이 파일은 접수 이력 보존용이며 더 갱신하지 않는다. T1 조달 실측 보고: `mtpro/docs/mtpro-t1-procurement.md`.
+> **⚠ v10.1로 대체 (2026-08-16 밤, 발주자)** — MT-PRO는 **방법론 독립 프로젝트**로 확정. 정본 발주서는 **`mtpro/WORKORDER_MTPRO_v10.1.md`**(이 저장소 안 — AM-5로 8/17 `D:\vivecoding\mtpro` 별도 git에서 `mtpro/`로 이관·편입, Python 단독, v0.4 비교 없음). 이 파일은 접수 이력 보존용이며 더 갱신하지 않는다. 진행: `mtpro/README.md`.
 
 **발주자:** Chungpyo
 **수행자:** Claude Code (에이전트)

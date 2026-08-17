@@ -1,0 +1,127 @@
+D:\vivecoding\test project_0613\g1br\.venv\Lib\site-packages\pykrx\website\krx\market\wrap.py:249: FutureWarning: Downcasting behavior in `replace` is deprecated and will be removed in a future version. To retain the old behavior, explicitly call `result.infer_objects(copy=False)`. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  df = df.replace("", 0)
+Error occurred in get_stock_ticker_isin: 'NoneType' object is not subscriptable
+Error occurred in get_market_trading_value_and_volume_on_ticker_by_date: Length mismatch: Expected axis has 0 elements, new values have 6 elements
+{
+ "probe_ts": "2026-08-16T23:40:32",
+ "T1-2_constituents_pit": {
+  "20230103": {
+   "n": 200,
+   "head": [
+    "005930",
+    "373220",
+    "207940"
+   ]
+  },
+  "20240102": {
+   "n": 200,
+   "head": [
+    "005930",
+    "000660",
+    "373220"
+   ]
+  },
+  "20250102": {
+   "n": 200,
+   "head": [
+    "005930",
+    "000660",
+    "373220"
+   ]
+  },
+  "20260816": {
+   "n": 0,
+   "head": []
+  },
+  "turnover_2023_vs_now": {
+   "only_2023": 200,
+   "only_now": 0,
+   "common": 0
+  },
+  "sec": 1.1
+ },
+ "T1-2_mcap_005930_series": {
+  "rows": 1129,
+  "range": [
+   "2022-01-03",
+   "2026-08-14"
+  ],
+  "na_ratio": 0.0,
+  "sec": 6.6
+ },
+ "T1-2_mcap_cross_section": {
+  "rows": 942,
+  "cols": [
+   "종가",
+   "시가총액",
+   "거래량",
+   "거래대금",
+   "상장주식수"
+  ],
+  "sec": 0.2
+ },
+ "T1-2_mcap_cross_section_2023": {
+  "rows": 943,
+  "sec": 0.2
+ },
+ "T1-2_ohlcv_005930_2022": {
+  "rows": 1129,
+  "range": [
+   "2022-01-03",
+   "2026-08-14"
+  ],
+  "na_ratio": 0.0,
+  "cols": [
+   "시가",
+   "고가",
+   "저가",
+   "종가",
+   "거래량",
+   "등락률"
+  ],
+  "sec": 0.1
+ },
+ "T1-2_index_ohlcv_1028_2022": {
+  "rows": 1129,
+  "range": [
+   "2022-01-03",
+   "2026-08-14"
+  ],
+  "na_ratio": 0.0,
+  "sec": 7.3
+ },
+ "T1-1_futures_flow_attempt": {
+  "get_market_trading_value_by_date:KOSPI200": {
+   "rows": 0,
+   "range": null,
+   "na_ratio": null
+  },
+  "available_fns": [
+   "get_etf_trading_volume_and_value",
+   "get_exhaustion_rates_of_foreign_investment",
+   "get_exhaustion_rates_of_foreign_investment_by_date",
+   "get_exhaustion_rates_of_foreign_investment_by_ticker",
+   "get_market_trading_value_and_volume_by_ticker",
+   "get_market_trading_value_by_date",
+   "get_market_trading_value_by_investor",
+   "get_market_trading_volume_by_date",
+   "get_market_trading_volume_by_investor",
+   "get_shorting_investor_value_by_date",
+   "get_shorting_investor_volume_by_date"
+  ],
+  "sec": 0.0
+ },
+ "T1-1_constituent_sum_timing": {
+  "tickers": 5,
+  "rows_each": [
+   882,
+   882,
+   882,
+   882,
+   882
+  ],
+  "sec_5": 6.3,
+  "est_sec_197": 248,
+  "sec": 6.3
+ },
+}

@@ -1,0 +1,209 @@
+# MT-PRO 등급A 이벤트 캘린더 (WORKORDER v10.1 T1-3, 발주자 개정 D3 2026-08-17: 7종 확정, 금통위 제외)
+#
+# 규칙
+# - 이 파일이 "공식 일정" 등록부다. 자동 크롤하지 않는다(T1 보고 T1-3). 연 1회 갱신 + 변경 시 amendment.
+# - event_id = {event_type}_{YYYYMMDD} (현지 발표일 기준).
+# - status: confirmed = 공식 소스(또는 그 사본)에서 날짜를 읽어 확인 / unconfirmed = 미확인(과거 패턴 추정, 발표 전 반드시 확정 후 갱신).
+#   unconfirmed 이벤트는 스케줄러가 대상 선별은 하되 alert(kind=UNCONFIRMED_SCHEDULE) 를 남긴다.
+# - consensus_field: 미 매크로 4종은 config/mtpro.yaml consensus.fields(운영 결정 ②) 와 동일한 코드값을 쓴다 (test_calendar 로 고정).
+# - t0_mode: 국내 자산 이벤트 전부 A1_open (부록 C-3). release_time 은 장중 발표 이벤트 전용(현재 7종엔 없음).
+# - 시각은 현지 시간(local_time + tz). UTC 변환은 calendar.py 가 zoneinfo 로 수행(DST 자동).
+version: "2026-08-17"
+
+event_types:
+  FOMC:
+    label: "FOMC 성명(금리 결정)"
+    official_source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    release_rule: "회의 2일차 14:00 America/New_York (KST 익일 03:00/04:00) — KRX 휴장 시간"
+    tz: "America/New_York"
+    local_time: "14:00"
+    t0_mode: "A1_open"
+    asset_scope: ["KOSPI200", "005930", "000660"]
+    consensus_source: "us_macro"     # investing.com / ForexFactory (collectors/us_macro.py, 실측 결과는 보고서 참조)
+    consensus_field: "rate_upper_bound"   # ② 사전 등록(config/mtpro.yaml consensus.fields) — FF 제목 "Federal Funds Rate" (target upper bound)
+    consensus_unit: "%"
+  US_CPI:
+    label: "미 CPI"
+    official_source: "https://www.bls.gov/schedule/news_release/cpi.htm"
+    release_rule: "08:30 America/New_York (KST 21:30/22:30) — KRX 휴장 시간"
+    tz: "America/New_York"
+    local_time: "08:30"
+    t0_mode: "A1_open"
+    asset_scope: ["KOSPI200", "005930", "000660"]
+    consensus_source: "us_macro"
+    consensus_field: "headline_mom"       # ② 사전 등록 — FF 제목 "CPI m/m" (헤드라인 m/m)
+    consensus_unit: "%"
+  US_NFP:
+    label: "미 고용보고서(Employment Situation)"
+    official_source: "https://www.bls.gov/schedule/news_release/empsit.htm"
+    release_rule: "08:30 America/New_York (KST 21:30/22:30) — KRX 휴장 시간"
+    tz: "America/New_York"
+    local_time: "08:30"
+    t0_mode: "A1_open"
+    asset_scope: ["KOSPI200", "005930", "000660"]
+    consensus_source: "us_macro"
+    consensus_field: "headline_change"    # ② 사전 등록 — FF 제목 "Non-Farm Employment Change" (헤드라인 고용 증감)
+    consensus_unit: "K"
+  US_PCE:
+    label: "미 PCE(Personal Income and Outlays)"
+    official_source: "https://www.bea.gov/news/schedule"
+    release_rule: "08:30 America/New_York (KST 21:30/22:30) — KRX 휴장 시간"
+    tz: "America/New_York"
+    local_time: "08:30"
+    t0_mode: "A1_open"
+    asset_scope: ["KOSPI200", "005930", "000660"]
+    consensus_source: "us_macro"
+    consensus_field: "core_mom"           # ② 사전 등록 — FF 제목 "Core PCE Price Index m/m" (코어 m/m)
+    consensus_unit: "%"
+  SEC_PRELIM:
+    label: "삼성전자 잠정실적"
+    official_source: "https://www.samsung.com/sec/ir/financial-information/earnings-release/ (+ DART 공시)"
+    release_rule: "분기 익월 첫 주 ≈08:00 Asia/Seoul, 개장 전 — 정확한 날짜는 발표 수일 전 확정(수동 갱신)"
+    tz: "Asia/Seoul"
+    local_time: "08:00"
+    t0_mode: "A1_open"
+    asset_scope: ["005930", "KOSPI200"]
+    consensus_source: "kr_earnings"   # 네이버금융(FnGuide 컨센서스) collectors/kr_earnings.py
+    consensus_field: "분기 영업이익 컨센서스"
+    consensus_unit: "억원"
+    ticker: "005930"
+  HYNIX_EARN:
+    label: "SK하이닉스 실적"
+    official_source: "https://www.skhynix.com/ir/ (+ DART 공시)"
+    release_rule: "≈06:00~08:00 Asia/Seoul 공시, 컨콜 09:00, 개장 전 — 정확한 날짜는 발표 1~2주 전 확정(수동 갱신)"
+    tz: "Asia/Seoul"
+    local_time: "07:00"
+    t0_mode: "A1_open"
+    asset_scope: ["000660", "KOSPI200"]
+    consensus_source: "kr_earnings"
+    consensus_field: "분기 영업이익 컨센서스"
+    consensus_unit: "억원"
+    ticker: "000660"
+  NVDA_EARN:
+    label: "엔비디아 실적"
+    official_source: "https://investor.nvidia.com/events-and-presentations/"
+    release_rule: "≈13:20 America/Los_Angeles = 16:20 ET (KST 익일 05:20/06:20), 개장 전"
+    tz: "America/New_York"
+    local_time: "16:20"
+    t0_mode: "A1_open"
+    asset_scope: ["KOSPI200", "005930", "000660"]
+    consensus_source: "nvda"          # yfinance Ticker.calendar / earnings_dates
+    consensus_field: "EPS estimate (quarter)"
+    consensus_unit: "USD"
+    ticker: "NVDA"
+
+# 2026년 하반기 실제 일정 (조사 2026-08-17)
+events:
+  # ---- FOMC: federalreserve.gov 캘린더 확인 (2026: 9/15-16, 10/27-28, 12/8-9; 성명은 2일차) ----
+  - event_id: FOMC_20260916
+    event_type: FOMC
+    local_date: "2026-09-16"
+    status: confirmed
+    evidence: "federalreserve.gov/monetarypolicy/fomccalendars.htm (2026-08-17 조회): September 15-16* — 발주 문구의 9/16-17은 오기"
+  - event_id: FOMC_20261028
+    event_type: FOMC
+    local_date: "2026-10-28"
+    status: confirmed
+    evidence: "federalreserve.gov (2026-08-17 조회): October 27-28"
+  - event_id: FOMC_20261209
+    event_type: FOMC
+    local_date: "2026-12-09"
+    status: confirmed
+    evidence: "federalreserve.gov (2026-08-17 조회): December 8-9*"
+
+  # ---- 미 CPI: bls.gov 직접 조회는 403 → OMB PFEI CY2026 일정표(whitehouse.gov pdf, 2025-09 발행)로 확인. 8/12·9/11 은 BLS 보도자료 검색과 일치 ----
+  - event_id: US_CPI_20260911
+    event_type: US_CPI
+    local_date: "2026-09-11"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Consumer Price Index: 13 11 11 10 12 10 14 12 11 14 10 10) + bls.gov 보도자료 검색 'to be released Sept 11, 2026 8:30 AM'"
+  - event_id: US_CPI_20261014
+    event_type: US_CPI
+    local_date: "2026-10-14"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Oct 14)"
+  - event_id: US_CPI_20261110
+    event_type: US_CPI
+    local_date: "2026-11-10"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Nov 10)"
+  - event_id: US_CPI_20261210
+    event_type: US_CPI
+    local_date: "2026-12-10"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Dec 10)"
+
+  # ---- 미 고용보고서: OMB PFEI CY2026 (Employment Situation: 9 6 6 3 8 5 2 7 4 2 6 4) ----
+  - event_id: US_NFP_20260904
+    event_type: US_NFP
+    local_date: "2026-09-04"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Sep 4) + bls.gov 보도자료 검색 'Friday, September 4, 2026, 8:30 a.m.'"
+  - event_id: US_NFP_20261002
+    event_type: US_NFP
+    local_date: "2026-10-02"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Oct 2)"
+  - event_id: US_NFP_20261106
+    event_type: US_NFP
+    local_date: "2026-11-06"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Nov 6)"
+  - event_id: US_NFP_20261204
+    event_type: US_NFP
+    local_date: "2026-12-04"
+    status: confirmed
+    evidence: "OMB PFEI CY2026 (Dec 4)"
+
+  # ---- 미 PCE: bea.gov/news/schedule 직접 확인 (2026-08-17 조회) ----
+  - event_id: US_PCE_20260826
+    event_type: US_PCE
+    local_date: "2026-08-26"
+    status: confirmed
+    evidence: "bea.gov/news/schedule: Personal Income and Outlays, July 2026 — August 26, 8:30 AM"
+  - event_id: US_PCE_20260930
+    event_type: US_PCE
+    local_date: "2026-09-30"
+    status: confirmed
+    evidence: "bea.gov/news/schedule: September 30, 8:30 AM"
+  - event_id: US_PCE_20261029
+    event_type: US_PCE
+    local_date: "2026-10-29"
+    status: confirmed
+    evidence: "bea.gov/news/schedule: October 29, 8:30 AM"
+  - event_id: US_PCE_20261125
+    event_type: US_PCE
+    local_date: "2026-11-25"
+    status: confirmed
+    evidence: "bea.gov/news/schedule: November 25, 8:30 AM"
+  - event_id: US_PCE_20261223
+    event_type: US_PCE
+    local_date: "2026-12-23"
+    status: confirmed
+    evidence: "bea.gov/news/schedule: December 23, 8:30 AM"
+
+  # ---- 삼성전자 잠정실적: 3Q26 잠정 — 공식 미공고 (미확인). 과거 패턴(분기 종료 후 5영업일 내, 2Q26은 7/7) 추정 ----
+  - event_id: SEC_PRELIM_20261008
+    event_type: SEC_PRELIM
+    local_date: "2026-10-08"
+    status: unconfirmed
+    evidence: "[추정] 삼성전자 IR 페이지에 3Q26 잠정실적 일정 미게시(2026-08-17 검색). 10월 첫 주(10/6~10/8) 유력 — 공고 확인 후 날짜 갱신 필수"
+
+  # ---- SK하이닉스 실적: 3Q26 — 공식 미공고 (미확인). 과거 패턴 10월 넷째 주 추정 ----
+  - event_id: HYNIX_EARN_20261022
+    event_type: HYNIX_EARN
+    local_date: "2026-10-22"
+    status: unconfirmed
+    evidence: "[추정] skhynix.com IR 일정 미확인. 과거 패턴(10월 넷째 주 목요일) — 공고 확인 후 갱신 필수"
+
+  # ---- 엔비디아 실적: 2Q FY27 = 8/26 확정(NVIDIA Newsroom 2026-07-30). 3Q FY27 미공고 ----
+  - event_id: NVDA_EARN_20260826
+    event_type: NVDA_EARN
+    local_date: "2026-08-26"
+    status: confirmed
+    evidence: "nvidianews.nvidia.com 'NVIDIA Sets Conference Call for Second-Quarter Financial Results' — Aug 26, results ≈1:20 p.m. PT, call 2 p.m. PT"
+  - event_id: NVDA_EARN_20261118
+    event_type: NVDA_EARN
+    local_date: "2026-11-18"
+    status: unconfirmed
+    evidence: "[추정] 3Q FY27 — 과거 패턴(11월 셋째 주 수요일). investor.nvidia.com 공고 후 갱신 필수"

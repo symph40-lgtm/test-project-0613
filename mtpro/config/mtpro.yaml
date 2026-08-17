@@ -1,0 +1,53 @@
+# MT-PRO 상수 (사전 등록 — 측정 후 변경 금지, 변경은 amendment로만). WORKORDER_MTPRO_v10.1 + T1 부록 C + 발주자 8/17.
+version: t2-2026-08-17
+
+scopes: [KOSPI200, "005930", "000660"]        # SOXX는 원형(release_time) 경로 이벤트 전용
+
+grade_a_events:                                # 7종 확정 (금통위 제외), 전부 자동 수집
+  - FOMC
+  - US_CPI
+  - US_NFP
+  - US_PCE
+  - SEC_PRELIM
+  - HYNIX_EARN
+  - NVDA_EARN
+
+t0:
+  domestic_mode: A1_open                       # 국내 자산 부품 3 = A-1 단일 (t0=09:00 시가, 갭 제외, t6 없음)
+  soxx_mode: release_time                      # 원형 경로는 SOXX 이벤트에서만
+  a1_timepoints: {t1: "09:05", t3: "09:30", t4: "14:30", t5: close}   # t2 = peak adverse(시가 대비)
+
+consensus:
+  collect_days_before: [3, 1]                  # D-3, D-1 2회 수집
+  freeze_at_days_before: 1                     # D-1 값 자동 동결
+  single_fetch_allowed: true                   # ① FF 1주 한계 → D-1 단독 허용, single_fetch=true 기록
+  manual_override_wins: true                   # AM-4 역방향: 수동 입력이 자동을 이김(자동 D-1은 기록만)
+  unconfirmed_recheck_days_before: 7           # ⑤ 미확인 일정 D-7 재확인 알림
+  on_collect_fail: loud_failure_then_manual    # 실패 → 알림 → 수동 1건 or 등급C 격하
+  frozen_update: reject                        # hard assert
+  fields:                                      # ② 사전 등록
+    US_CPI: headline_mom
+    US_PCE: core_mom
+    FOMC: rate_upper_bound
+    US_NFP: headline_change
+  alerts: [alerts_jsonl, stderr]               # ④ 문자 연동은 T6 직전 재결정
+
+flow:                                          # 부품 4 (T1-1 승인 제안)
+  index_unit: KOSPI_MARKET                     # 시장 전체 투자자별 순매수
+  reconcile:                                   # C-1: 교체 대상·시점 고정, 재론 금지
+    alternative: PIT_CONSTITUENT_SUM
+    when: T3_once
+    window: [2023-01-03, 2026-06-30]
+    metric: pearson_daily_net_purchase        # 외국인·기관 각각
+    replace_if_below: 0.8
+  denominator: trading_value_mean20            # 비수정 OHLCV 거래대금 (price_adjusted=false)
+  denominator_aux: market_cap
+
+breadth:                                       # 부품 5 (T1-2 승인 제안)
+  constituents_pit: monthly_first_trading_day  # asof 기록
+  tiers: {large: [1, 50], mid: [51, 150], small: [151, 200]}   # KOSPI200 내 시총 순위
+  lookback_start: 2022-01-03                   # 252일 신고저용 → 지표는 2023-01-03부터
+
+kis:
+  minute_depth_days_measured: 365              # 8/17 실측: 2025-08-14 응답·2025-07-11 무응답 → ≈12개월
+  token_cache: .cache/kis_token.json           # mtpro 내부 전용

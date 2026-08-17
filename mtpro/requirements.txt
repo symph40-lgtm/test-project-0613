@@ -1,0 +1,10 @@
+pandas
+pyarrow
+pykrx
+requests
+pyyaml
+pytest
+python-dotenv
+yfinance
+beautifulsoup4
+lxml

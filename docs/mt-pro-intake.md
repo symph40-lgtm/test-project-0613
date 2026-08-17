@@ -82,7 +82,7 @@
 
 ---
 
-> **v10.1 개정 (2026-08-16 밤, 발주자)** — "기존 MT와 MT-PRO는 별개 프로젝트, 기존 틀에 넣지 말고 독립 작업". MT-PRO는 **`D:\vivecoding\mtpro\`(별도 git 저장소)**로 이관, Python 단독, 부품 8·v0.4 비교·TS 이식 제거. 이 저장소의 MT-PRO 관련 파일은 접수 이력으로만 남는다. 진행 상황은 `mtpro/README.md`.
+> **v10.1 개정 (2026-08-16 밤, 발주자)** — "기존 MT와 MT-PRO는 별개 프로젝트, 기존 틀에 넣지 말고 독립 작업". Python 단독, 부품 8·v0.4 비교·TS 이식 제거. **AM-5 (8/17)**: 저장소는 이 저장소 안 **`mtpro/`**로 이관·편입(별도 git 제거, 이전 이력 `mtpro/docs/mtpro-git-history-pre-merge.txt`) — "독립"은 코드 격리가 아니라 **방법론 독립**. 부품 8은 "제외"가 아니라 Gate R2 통과 후 예정 단계. 진행 상황은 `mtpro/README.md`·`mtpro/docs/`.
 >
 > **결정 확정 (2026-08-16, 발주자)** — D1~D8 아래 권고대로 **확정**. 발주서 `specs/WORKORDER_MTPRO_v10.md`(D1 병행 연구 트랙, 6주 시계 폐기, 첫 태스크 T1 조달 실측·발주자 승인 게이트, Amendment A-1, 부록 A 정오표 6건 test-first). D8 정정 반영: `docs/MT_CROSSSECTION.md` §8·`specs/SPEC_MT_v04.md` §1.3 C5·`g1br/backlog.md`. 기존 패키지 문서 4건은 의도 전달용 참고로 강등(발주서 머리말).
 
