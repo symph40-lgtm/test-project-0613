@@ -170,14 +170,15 @@ IND-C1·IND-C2 / E-ORTH·E-EQ·E-NOCAP / PSA-EARLY·PSA-K2·PSA-W7 / DMT-C1·DMT
 
 ### 12.1 `n_inference = 40`의 통계 조건·다중검정 규칙
 - **Good/Bad 재현성 (주 endpoint)**: H1 방향 사전 등록(Good Acceptance_t ↑ → good e* ERR_z ↑ / Bad Resilience_t ↑ → bad e* "버팀" ERR_z ↑), **one-sided α=.05, power=.80, target ρ=.40, Spearman → Fisher-z 근사 n≈38 → n_inference=40**. (검산: n = ((z_α+z_β)/atanh ρ)²+3 = ((1.645+0.842)/0.4236)²+3 = 37.5; 양측 .05·단측 .025면 46.8 → 47.)
-- **다중검정 champion**: 주 endpoint = 2(Good·Bad) × 스코프 3 = 6검정. **스코프 내 Holm 보정(m=2)**, Gate 판정은 **3스코프 모두 두 endpoint 유의**(Gate R1의 "3스코프 모두" 규칙 준용). 나머지 항목(PSA·Transmission·Regime·IC 등)은 **secondary — 기록만, 판정 아님**. 기록 사실: Holm 하에서 작은 p 쪽 문턱 .025 → n=40의 검정력 ≈ **.73**(계산: z_β = √37·0.4236 − 1.96 = 0.62 → Φ = .73). n_inference는 판정 자격 문턱(INSUFFICIENT 경계)이며, 검정력 .80 확보 표본(47)은 보고서에 병기.
+- **다중검정 champion(발주자 확정)**: **주 endpoint 2개(Good Acceptance 재현성·Bad Resilience 재현성)만 Gate 판정**, 나머지 inference 항목(PSA·Transmission·Regime·IC 등)은 **secondary — 기록·서술만**. 스코프 3개는 각 endpoint를 스코프별 one-sided α=.05로 판정하고 Gate PASS = 3스코프 모두 두 endpoint 유의(Gate R1 "3스코프 모두" 준용). 추가 보정(Holm/FDR)은 **채택하지 않음**(검토 기록: Holm m=2 적용 시 n=40 검정력 ≈.73 — 지시에 없어 미채택, 사실만 병기).
 - 검정 통계 = Spearman + 정상 블록 부트스트랩(Gate R1 동일, 시드 사전 등록). p값은 부트스트랩 단측.
 
 ### 12.2 family contribution cap 0.6 — 정확한 알고리즘
 1. family score `s_f` = 가용 컴포넌트 클립 z(±3)의 단순 평균 → **범위 [−3, 3]**.
 2. 가용 family 집합 A(|A| ≥ 2)에 대해 가중 재정규화 `w'_f = w_f / Σ_{g∈A} w_g` (원 가중 R .40 / PA .35 / P .25).
 3. 기여 `c_f = w'_f · s_f`, **절대 기여 share** `share_f = |c_f| / Σ_{g∈A} |c_g|`.
-4. `max share_f > 0.6`이면 (2 family면 항상 큰 쪽 검사): `c_f ← sign(c_f) · 1.5 · Σ_{g≠f}|c_g|` (share를 정확히 0.6으로 만드는 값), **초과분 `excess = |c_f_원| − |c_f_cap|`은 나머지 family에 `|c_g|` 비례로 재배분** (`c_g ← c_g · (1 + excess/Σ_{g≠f}|c_g|)`, 부호 유지) → Σ|c| 보존, share_f < 0.6. 단일 패스(반복 없음).
+4. `max share_f > 0.6`이면 (2 family면 항상 큰 쪽 검사): `c_f ← sign(c_f) · 1.5 · Σ_{g≠f}|c_g|` (share를 정확히 0.6으로 만드는 값), **초과분 `excess = |c_f_원| − |c_f_cap|`은 나머지 available family에 `|c_g|` 가중비례로 재배분 1회** (`c_g ← c_g · (1 + excess/Σ_{g≠f}|c_g|)`, 부호 유지).
+4b. **재배분 후 재검사(1회)**: 어느 family든 share > 0.6이면 그 family를 `sign·1.5·Σ_{others}|c|`로 cap하고 **잔여분은 버림**(재배분 없음). 예: c=(0.99, 0.01, 0) → 1차 cap 후 2번 family가 0.985(share .98) → 4b에서 cap·잔여 폐기. 이후 반복 없음.
 5. `Σ_{g≠f}|c_g| < 1e-9`(다른 family 기여 0)이면 cap 미적용·`cap_undefined=True` 기록.
 6. `Energy = round(100·tanh(Σ_f c_f))`. 양·음 상쇄 시에도 share는 절대값 기준(위 3).
 - 출력 필드: `family_share_{R,PA,P}`, `cap_applied`, `cap_family`, `cap_undefined`.
@@ -187,7 +188,7 @@ IND-C1·IND-C2 / E-ORTH·E-EQ·E-NOCAP / PSA-EARLY·PSA-K2·PSA-W7 / DMT-C1·DMT
 - **1단계(직교화)**: j ∈ {NVDA, MU, TSM}: `resid_j(t) = z_j(t) − b_j·z_SOXX(t)`, b_j = 과거 120일 OLS(t−1까지, 표본<60 None).
 - **2단계(종목별 독립, close→close A-1R)**: `r_i ~ β_i,SOXX·z_SOXX + β_i,NVDA·resid_NVDA + β_i,MU·resid_MU + β_i,TSM·resid_TSM` **하나의 다변량 OLS**, 60일 창(과거 전용, 표본<40 None). raw 4변수 동시 투입 금지.
 - **비대칭**: SOXX 기준선만 부호 분할 — `β_up`(z_SOXX>0 일, 표본≥25)·`β_down`(z_SOXX<0) 각각 60일 창 단변량 OLS(잔차 항 포함 다변량의 SOXX 계수) → **`transmission_asym_i = β_up − β_down`** → z. 잔차 자산의 비대칭은 진단 출력만.
-- 출력: `beta_soxx, beta_resid_{nvda,mu,tsm}, beta_change20_z(각), beta_up, beta_down, transmission_asym_z`. 이전 문안의 가중 합성(.4/.2/.2/.2)은 폐기 → **challenger `TR-B`**(단변량 β 4개 + 사전 정의 combiner)로 등록.
+- 출력: `beta_soxx, beta_resid_{nvda,mu,tsm}, beta_change20_z(각), beta_up, beta_down, transmission_asym_z`. 이전 문안의 가중 합성(.4/.2/.2/.2)은 폐기 → **challenger `TR-B`**(단변량 β 4개 + 사전 정의 combiner)로 등록. **raw 4변수 동시 OLS는 champion·challenger 모두 불채택**(계수 불안정, 발주자 확정).
 
 ### 12.4 기준시점 잠금 — PSA σ·Divergence z
 - **PSA**: `σ20 = std(r_{t−20..t−1})` (충격일 t 제외, 과거 전용, 표본 20 미만 None) · `σ20_gap = std(gap_{t−20..t−1})` 동일. `range_norm/vol_norm` 분모도 t−20..t−1.
@@ -196,6 +197,6 @@ IND-C1·IND-C2 / E-ORTH·E-EQ·E-NOCAP / PSA-EARLY·PSA-K2·PSA-W7 / DMT-C1·DMT
 
 ### 12.5 이벤트 t0 동적 매핑 + 삼성 10/8 tentative
 - **t0_kr 계산 규칙(코드)**: `event_ts(UTC) → Asia/Seoul → 그 시각 이후 최초 XKRX 세션 개장(09:00)`. 거래일 캘린더 = `exchange_calendars` XKRX(휴장·대체공휴일 반영) champion, 폴백 = 관측 거래일(bronze ohlcv_adj 날짜) + 알림. 문서의 9월 날짜(§2.3)는 **2026-08-17 계산 예시값**이며 코드가 매 실행 시 재계산·불일치 시 loud-failure. 소화 창·PSA 창·검증 창의 "거래일" 세기도 같은 캘린더.
-- `SEC_PRELIM_20261008`은 **tentative/example**(삼성 IR 공식 일정은 2Q까지) — 공고 확인 전 verify_eligible=False, D-7 재확인 알림 대상. HYNIX·NVDA 11월도 동일.
+- 필드명 **`schedule_status ∈ {confirmed, unconfirmed, tentative}`**. `SEC_PRELIM_20261008`은 **tentative**(삼성 IR 공식 일정은 2Q까지) — 공식 공지 시 confirmed 전환, 그 전 verify_eligible=False, **D-7 재확인 체크 연동**(unconfirmed·tentative 모두). HYNIX·NVDA 11월도 동일.
 
 *12.1~12.5 반영으로 조건부 승인 조건 충족 → T5-1 구현 착수.*

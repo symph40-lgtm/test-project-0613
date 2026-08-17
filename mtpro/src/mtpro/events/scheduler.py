@@ -108,7 +108,7 @@ def _ensure_registered(registry: ConsensusRegistry, ev: CalendarEvent) -> dict[s
     if row is None:
         row = registry.register_event(
             ev.event_id, ev.event_type, ev.asset_scope, ev.scheduled_ts_utc, ev.t0_mode,
-            note=f"calendar:{ev.status}", exist_ok=True,
+            note=f"calendar:{ev.status}", exist_ok=True, status=ev.status,   # T5-1: status 전달
         )
     return row
 

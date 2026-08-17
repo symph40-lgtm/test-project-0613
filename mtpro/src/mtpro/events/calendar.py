@@ -3,6 +3,9 @@
 - 자동 크롤 없음(T1-3 결정). yaml이 공식 일정 등록부.
 - CalendarEvent.scheduled_ts_utc 는 (local_date + event_type.local_time, tz) → UTC (zoneinfo, DST 자동).
 - status=unconfirmed 이벤트는 그대로 노출하되 스케줄러가 alert 를 남긴다.
+- status=tentative (T5-1, 계획서 §12.5): 공식 일정 미게시·예시 날짜(삼전 잠정 10/8, 하닉·NVDA 11월). unconfirmed(과거 패턴 추정)와
+  구분한다. 스케줄러는 unconfirmed 와 동일하게 D-7 재확인·alert 처리, 독립성 모듈은 verify_eligible=False 로 강제.
+  status 는 CalendarEvent.status → 레지스트리 status 필드로 실려 간다.
 """
 from __future__ import annotations
 
@@ -15,10 +18,10 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from mtpro import settings
-from mtpro.events.registry import EVENT_TYPES, T0_MODES
+from mtpro.events.registry import EVENT_STATUSES, EVENT_TYPES, T0_MODES
 
 DEFAULT_CALENDAR = settings.CONFIG_DIR / "event_calendar.yaml"
-STATUSES = ("confirmed", "unconfirmed")
+STATUSES = EVENT_STATUSES   # ("confirmed", "unconfirmed", "tentative")
 
 
 class CalendarError(RuntimeError):
@@ -56,6 +59,10 @@ class CalendarEvent:
     @property
     def confirmed(self) -> bool:
         return self.status == "confirmed"
+
+    @property
+    def tentative(self) -> bool:
+        return self.status == "tentative"
 
     def as_dict(self) -> dict[str, Any]:
         return {

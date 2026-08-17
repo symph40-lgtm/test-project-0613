@@ -3,8 +3,9 @@
 # 규칙
 # - 이 파일이 "공식 일정" 등록부다. 자동 크롤하지 않는다(T1 보고 T1-3). 연 1회 갱신 + 변경 시 amendment.
 # - event_id = {event_type}_{YYYYMMDD} (현지 발표일 기준).
-# - status: confirmed = 공식 소스(또는 그 사본)에서 날짜를 읽어 확인 / unconfirmed = 미확인(과거 패턴 추정, 발표 전 반드시 확정 후 갱신).
-#   unconfirmed 이벤트는 스케줄러가 대상 선별은 하되 alert(kind=UNCONFIRMED_SCHEDULE) 를 남긴다.
+# - status: confirmed = 공식 소스(또는 그 사본)에서 날짜를 읽어 확인 / unconfirmed = 미확인(과거 패턴 추정, 발표 전 반드시 확정 후 갱신)
+#           / tentative = 공식 일정 자체가 미게시인 예시 날짜 (T5-1, 계획서 §12.5: 공고 확인 전 verify_eligible=False, D-7 재확인 알림 대상).
+#   unconfirmed·tentative 이벤트는 스케줄러가 대상 선별은 하되 alert(kind=UNCONFIRMED_SCHEDULE) 를 남긴다.
 # - consensus_field: 미 매크로 4종은 config/mtpro.yaml consensus.fields(운영 결정 ②) 와 동일한 코드값을 쓴다 (test_calendar 로 고정).
 # - t0_mode: 국내 자산 이벤트 전부 A1_open (부록 C-3). release_time 은 장중 발표 이벤트 전용(현재 7종엔 없음).
 # - 시각은 현지 시간(local_time + tz). UTC 변환은 calendar.py 가 zoneinfo 로 수행(DST 자동).
@@ -182,19 +183,19 @@ events:
     status: confirmed
     evidence: "bea.gov/news/schedule: December 23, 8:30 AM"
 
-  # ---- 삼성전자 잠정실적: 3Q26 잠정 — 공식 미공고 (미확인). 과거 패턴(분기 종료 후 5영업일 내, 2Q26은 7/7) 추정 ----
+  # ---- 삼성전자 잠정실적: 3Q26 잠정 — 공식 일정 미게시 (tentative/예시, 계획서 §12.5: 삼성 IR 공식 일정은 2Q까지). 과거 패턴(분기 종료 후 5영업일 내, 2Q26은 7/7) ----
   - event_id: SEC_PRELIM_20261008
     event_type: SEC_PRELIM
     local_date: "2026-10-08"
-    status: unconfirmed
-    evidence: "[추정] 삼성전자 IR 페이지에 3Q26 잠정실적 일정 미게시(2026-08-17 검색). 10월 첫 주(10/6~10/8) 유력 — 공고 확인 후 날짜 갱신 필수"
+    status: tentative
+    evidence: "[예시] 삼성전자 IR 페이지에 3Q26 잠정실적 일정 미게시(2026-08-17 검색). 10월 첫 주(10/6~10/8) 유력 — 공고 확인 후 날짜·status 갱신 필수 (확인 전 verify_eligible=False)"
 
-  # ---- SK하이닉스 실적: 3Q26 — 공식 미공고 (미확인). 과거 패턴 10월 넷째 주 추정 ----
+  # ---- SK하이닉스 실적: 3Q26 — 공식 일정 미게시 (tentative/예시). 과거 패턴 10월 넷째 주 ----
   - event_id: HYNIX_EARN_20261022
     event_type: HYNIX_EARN
     local_date: "2026-10-22"
-    status: unconfirmed
-    evidence: "[추정] skhynix.com IR 일정 미확인. 과거 패턴(10월 넷째 주 목요일) — 공고 확인 후 갱신 필수"
+    status: tentative
+    evidence: "[예시] skhynix.com IR 일정 미게시. 과거 패턴(10월 넷째 주 목요일) — 공고 확인 후 날짜·status 갱신 필수 (확인 전 verify_eligible=False)"
 
   # ---- 엔비디아 실적: 2Q FY27 = 8/26 확정(NVIDIA Newsroom 2026-07-30). 3Q FY27 미공고 ----
   - event_id: NVDA_EARN_20260826
@@ -205,5 +206,5 @@ events:
   - event_id: NVDA_EARN_20261118
     event_type: NVDA_EARN
     local_date: "2026-11-18"
-    status: unconfirmed
-    evidence: "[추정] 3Q FY27 — 과거 패턴(11월 셋째 주 수요일). investor.nvidia.com 공고 후 갱신 필수"
+    status: tentative
+    evidence: "[예시] 3Q FY27 공식 일정 미게시 — 과거 패턴(11월 셋째 주 수요일). investor.nvidia.com 공고 후 날짜·status 갱신 필수 (확인 전 verify_eligible=False)"

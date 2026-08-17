@@ -15,6 +15,11 @@ EVENT_TYPES = ("FOMC", "US_CPI", "US_NFP", "US_PCE", "SEC_PRELIM", "HYNIX_EARN",
 ASSET_SCOPES = ("KOSPI200", "005930", "000660", "SOXX")
 GRADES = ("A", "C")
 
+# T5-1 (계획서 §2.1·§12.5): 이벤트 일정 상태 — confirmed(공식 확인) | unconfirmed(미확인 추정) | tentative(공식 일정 미게시·예시)
+EVENT_STATUSES = ("confirmed", "unconfirmed", "tentative")
+# T5-1 (계획서 §2.1): 비독립 사유 enum. PSA_PENDING_SHOCK(T5-3)·DATA_GAP(T5-6)은 정의만 (T5-1 미적용).
+CONTAMINATION_REASONS = ("OVERLAP_DIGEST_WINDOW", "SAME_DAY_MULTI", "EARNINGS_CLUSTER", "PSA_PENDING_SHOCK", "DATA_GAP")
+
 # ---- bronze (원본 그대로 + 조달 메타) --------------------------------------
 BRONZE_INVESTOR_FLOW = pa.schema([
     ("date", pa.date32()), ("scope", pa.string()),            # 005930 | 000660 | KOSPI (시장 전체) | KOSDAQ
@@ -65,6 +70,27 @@ SILVER_CONSENSUS_REGISTRY = pa.schema([
     ("manual_override", pa.bool_()),                                              # AM-4: 수동 입력이 자동을 이김
     ("auto_shadow_value", pa.float64()), ("auto_shadow_vintage_ts", pa.timestamp("s", tz="UTC")),
     ("auto_shadow_source", pa.string()),                                          # AM-4: 자동값 기록만 보존
+    # ---- T5-1 이벤트 독립성·purge (AM-9, 계획서 §2.1) — 파생 필드, 동결 대상 아님 ----
+    ("status", pa.string()),                                                      # EVENT_STATUSES (캘린더 status 전달)
+    ("t0_kr", pa.date32()),                                                       # KR 거래일 09:00 (XKRX 동적 매핑 §12.5)
+    ("digest_window_end", pa.date32()),                                           # t0_kr + (W_digest−1) 세션
+    ("independence_flag", pa.bool_()),                                            # None = 미계산
+    ("overlap_group", pa.string()),                                               # 원인 이벤트 id(체인 상속) / 같은 날 id 결합
+    ("contamination_reason", pa.string()),                                        # CONTAMINATION_REASONS ';' 결합
+    ("verify_eligible", pa.bool_()),                                              # independence ∧ grade A ∧ 결측 없음 ∧ ≠tentative
+])
+
+# T5-1: silver/events_kr.parquet (jobs/build_events_kr.py) — 레지스트리 ∪ 캘린더 이벤트의 t0·독립성 파생 테이블
+SILVER_EVENTS_KR = pa.schema([
+    ("event_id", pa.string()), ("event_type", pa.string()),
+    ("scheduled_ts_utc", pa.timestamp("s", tz="UTC")), ("t0_mode", pa.string()),
+    ("status", pa.string()), ("grade", pa.string()),
+    ("t0_kr", pa.date32()), ("digest_window_end", pa.date32()),
+    ("independence_flag", pa.bool_()), ("overlap_group", pa.string()), ("contamination_reason", pa.string()),
+    ("verify_eligible", pa.bool_()),
+    ("row_source", pa.string()),                                                  # registry | calendar
+    ("calendar_source", pa.string()),                                             # exchange_calendars:XKRX | fallback:*
+    ("engine_ver", pa.string()),
 ])
 
 SILVER_CONSTITUENTS_MONTHLY = pa.schema([

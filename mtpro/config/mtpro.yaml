@@ -104,6 +104,17 @@ grade_c:                                       # 소급 트랙 등급C 재료 (T
     gb_beta_min_n: 3
     max_stale_calendar_days: 7
 
+events:                                        # T5-1 이벤트 독립성·purge (AM-9; 계획서 §2.2·§12.5 승인 사전 등록, 모듈 상수와 일치 테스트)
+  independence:
+    w_digest: 5                                # 소화 창 W_digest = 5 KR 거래일 (t0_kr 포함) → digest_window_end = t0_kr + 4 세션
+    earnings_cluster_sessions: 3               # 실적 3종(SEC_PRELIM·HYNIX_EARN·NVDA_EARN) 서로 [t0_kr ± 3 거래일] → EARNINGS_CLUSTER
+    earnings_types: [SEC_PRELIM, HYNIX_EARN, NVDA_EARN]
+    calendar: XKRX                             # exchange_calendars XKRX champion, 폴백 = bronze ohlcv_adj 관측 거래일 + notify(XKRX_FALLBACK)
+    boundary: "release < 09:00 KST → same session"   # t0_kr 경계 고정 (정확히 09:00 이후는 다음 세션)
+    surprise_z_good: 0.3                       # good e* = surprise_z > +0.3 / bad e* = surprise_z < −0.3 / 그 외 neutral(라벨 불가)
+    surprise_z_bad: -0.3
+    challengers: [IND-C1, IND-C2]              # W_digest=3 / 유형별 창(FOMC 7·CPI/NFP/PCE 3·실적 5) — shadow 전용, T5-1 미구현
+
 kis:
   minute_depth_days_measured: 365              # 8/17 실측: 2025-08-14 응답·2025-07-11 무응답 → ≈12개월
   token_cache: .cache/kis_token.json           # mtpro 내부 전용
