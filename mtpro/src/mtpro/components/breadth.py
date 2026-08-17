@@ -82,6 +82,11 @@ def _tier_of(rank: Optional[int], tiers: Mapping[str, tuple[int, int]]) -> Optio
     for name, (lo, hi) in tiers.items():
         if lo <= r <= hi:
             return name
+    # D-C (발주자 2026-08-17 승인): KRX PDF가 200을 초과해 반환한 기간(2024-10·11·12, 201종목)의 초과 순위는
+    # 순위 기준으로 마지막 분위(small = 151~끝)에 귀속. config breadth.tier_overflow 참조.
+    last_name, (last_lo, _) = max(tiers.items(), key=lambda kv: kv[1][1])
+    if r > last_lo:
+        return last_name
     return None
 
 

@@ -226,3 +226,11 @@ T7  Gate R2 판정 → 이후 연결 여부 별도 발주
 - ④ 문자 연동 지연 — T6 직전 재결정. `logs/alerts.jsonl` + stderr 유지.
 - ⑤ 미확인 일정 3건(삼전 잠정 10/8·하닉 10/22·NVDA 11/18) → **D-7 재확인 체크** (`UNCONFIRMED_SCHEDULE_D7` 알림).
 - T1-4 분봉 깊이 "120일" → **12개월 supersede** (T2 실측).
+
+### T3 결정 (2026-08-17, 발주자)
+- **D-A** 등급C 반응 기준 = **open→close 유지**(규칙 5). 조건: 소급 트랙 `gradec_err`가 β_SOX≈0으로 상수 모델 퇴화 → 사실상 **"이벤트일 표준화 수익률"** 임을 T4 사전 등록 문서에 명시. 등급A 전진 트랙에서 β 회복 여부 = **R2 관찰 항목** 등재.
+- **D-B** Energy-Lite: 균등 가중 .3333/.3333/.3334 · gradec_err = 가용한 것의 평균 · **min_components 2는 Lite 전용 예외** — 부록 A-6 각주: *완전판 Energy는 min 3 유지*.
+- **D-C** 2024-10~12 KRX 201종목 기간: 초과 순위는 **순위 기준 마지막 분위(small=151~끝)**. config `breadth.tier_overflow`.
+- **D-D** 부품 4·5·C 보조 상수 config 승격, 승격 시점 값 = 사전 등록값(`tests/test_config_constants_dd.py`로 일치 고정).
+- **D-E** 미국 휴장으로 같은 SOX 세션 재사용 → None 승인.
+- **T4 착수 승인**: 관문·baseline·IC 정의 사전 등록 문서 → 발주자 승인 → 측정. PASS 조건은 §3 Gate R1과 일치. β_SOX≈0을 이유로 한 완화 불가(조정은 amendment).
