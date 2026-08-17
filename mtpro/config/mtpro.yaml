@@ -115,6 +115,88 @@ events:                                        # T5-1 이벤트 독립성·purge
     surprise_z_bad: -0.3
     challengers: [IND-C1, IND-C2]              # W_digest=3 / 유형별 창(FOMC 7·CPI/NFP/PCE 3·실적 5) — shadow 전용, T5-1 미구현
 
+semi_diffusion:                                # T5-4 부품 5 diffusion 축 (계획서 §3.3 semi_diffusion_z · §12.4; AM-8 정의 구분 — diffusion = 반도체 종목군 내 확산)
+  source:                                      # 반도체 종목군 = KOSPI200 PIT 구성 ∩ KRX 지수 PDF(월초 asof, PIT). 목록 자체는 silver/semi_group_monthly.parquet(데이터)로 관리
+    method: pykrx_index_pdf_union              # 8/17 실측: pykrx KOSPI 업종지수(1001~1047)에 "반도체" 없음(전기전자 1013 뿐) → KRX 지수 2종 합집합
+    index_codes: ["5044", "5422"]              # 5044 KRX 반도체(삼성전자 2023-09 정기변경 전 미편입) ∪ 5422 KRX 반도체 Top 15(삼성전자 전 구간) — 합집합 ∩ K200 = 5422 ∩ K200 과 동일(실측)
+    survivorship_bias: false                   # 월초 asof PIT 조달 (현재 리스트 소급 아님)
+    fallback: naver_wics_current_list          # PDF 실패 시 네이버 WICS 반도체와반도체장비 현재 리스트(생존 편향 true 명시) — 8/17 미사용
+  leaders: ["005930", "000660"]                # 진단 leader_gap = mean(leaders above20) − rest_of_semi
+  constants:                                   # 모듈 상수와 일치 테스트 (tests/test_semi_diffusion.py)
+    spread_change_days: 5                      # diffusion_spread 5일 변화
+    z_window_days: 120                         # t−1 까지 직전 120 거래일 (당일 제외)
+    z_min_samples: 60                          # 표본 < 60 → None
+    impulse: breadth_same                      # semi_impulse = 부품 5 impulse 정의(최근 5 − 이전 15) 재사용
+
+us_assets:                                     # T5-2 부품 10 재료 (계획서 §3.4·§12.3): 미국 4자산 일봉 적재
+  tickers: [SOXX, NVDA, MU, TSM]
+  start: 2022-06-01                            # 2023-01 지표용 lookback (z 120 + 직교화 120)
+  source: yfinance_auto_adjust
+  path: data/bronze/us_daily.parquet
+  align: prev_us_session_strict                # 국내 t ← 세션 d ≤ t−1 엄격, 미국 휴장 재사용 → None (grade_c 정렬기 재사용)
+  sox_daily_unchanged: true                    # ^SOX(bronze/sox_daily) 등급C 재료는 그대로
+
+gap3g:                                         # T5-2 부품 3G — Gap Reaction / Gap Hold / Close Acceptance (계획서 §1 A-1R·§3.2·§7)
+  time_axis: A-1R                              # 마감 후 상태 산출에 갭 사용 허용. 사전 예측 입력 금지 유지. gradec_panel(A-1) 불변
+  t0_mode: A1_open                             # C-3 값 불변 (§7)
+  expected_gap_sources: [gradeC, gradeA]       # gradeA 는 T5-6 Expected Reaction 이 채우는 인터페이스
+  scopes: [KOSPI200, "005930", "000660"]
+  constants:                                   # 사전 등록값 = Gap3GParams (일치 테스트)
+    min_gap_abs_pct: 0.3                       # |gap| < 0.3% → gap_hold None
+    gap_hold_clip: [-1.0, 2.0]
+    z_window_days: 120                         # §12.4: t−1까지 120 국내 거래일, 표본<60 None, 클립 ±3
+    z_min_samples: 60
+    z_clip_abs: 3.0
+    beta_gap_window_days: 60                   # 등급C β 갭 기준 재추정 (grade_c 와 동일 상수)
+    beta_gap_min_samples: 40
+    beta_gap_clip: [0.3, 3.0]
+    min_expected_gap_abs_pct: 0.3              # |expected_gap| < 0.3% → 재료 없는 날 → ERR None
+    sigma_gap_window_days: 120                 # 잔차 rolling std (t−1까지, expected_std_rolling 재사용)
+    sigma_gap_min_samples: 60                  # 해석 기록: §12.4 표본 규칙을 σ_gap 에도 적용(가장 엄격)
+    sigma_gap_floor: 0.1                       # A-1 유일 상수 (%)
+    max_stale_calendar_days: 7
+
+transmission:                                  # T5-2 부품 10 Semi Transmission (계획서 §3.4 + §12.3 champion 방법 A)
+  method: A                                    # SOXX 기준선 + NVDA/MU/TSM 잔차 충격 **하나의** 다변량 OLS. raw 4변수 동시 OLS 금지
+  design_columns: [z_soxx, resid_nvda, resid_mu, resid_tsm]
+  reaction_basis: close_to_close               # A-1R
+  scopes_component: ["005930", "000660"]       # Reaction family 입력
+  scopes_diagnostic: [KOSPI200]                # 지수 수익률로 동일 산출(진단)
+  challengers: [TR-B]                          # 단변량 β 4개 + 사전 정의 combiner(.4/.2/.2/.2) — shadow 전용, 미구현
+  constants:                                   # 사전 등록값 = TransmissionParams (일치 테스트)
+    z_window_days: 120                         # z_j (t−1까지)
+    z_min_samples: 60
+    z_clip_abs: 3.0
+    orth_window_days: 120                      # 1단계 b_j OLS (t−1까지)
+    orth_min_samples: 60
+    beta_window_days: 60                       # 2단계 다변량 OLS 창 [t−59, t]
+    beta_min_samples: 40
+    asym_min_samples: 25                       # β_up/β_down 각 표본 하한
+    change_days: 20                            # β(t) − β(t−20)
+    change_z_window_days: 120                  # Δβ 분포 z (t−1까지)
+    change_z_min_samples: 60
+    max_stale_calendar_days: 7
+
 kis:
-  minute_depth_days_measured: 365              # 8/17 실측: 2025-08-14 응답·2025-07-11 무응답 → ≈12개월
+  minute_depth_days_measured: 365             # 8/17 실측: 2025-08-14 응답·2025-07-11 무응답 → ≈12개월
   token_cache: .cache/kis_token.json           # mtpro 내부 전용
+
+psa:                                           # T5-3 부품 9 PSA (AM-7; 계획서 §4·§12.4·§7 승인 사전 등록, 모듈 상수와 일치 테스트 tests/test_psa.py)
+  scopes: [KOSPI200, "005930", "000660"]
+  sessions: bronze_ohlcv_adj_order             # 관찰창·σ창의 "세션" = 스코프별 bronze 거래일 순서 (해석 기록: XKRX 래퍼 미사용, T5-3 보고서)
+  constants:                                   # = psa.py 모듈 상수 (측정 후 변경 금지, 변경은 amendment)
+    k_sigma: 2.5                               # |r_t| > 2.5·σ20
+    k_gap: 2.0                                 # |gap_t| > 2.0·σ20_gap
+    sigma_window_days: 20                      # σ20 = std(r_{t−20..t−1}) — 충격일 t 제외 (§12.4)
+    sigma_min_samples: 20                      # 유효 표본 < 20 → None
+    window_sessions: 5                         # 관찰창 t+1..t+5, available_at = t+5 마감
+    settle_sessions: 3                         # range_norm/vol_norm 분자 = t+3..t+5 (창의 마지막 3세션)
+    level_hold_clip: [-1.0, 1.5]
+    z_ref_window_days: 120                     # z 기준 = 같은 스코프 과거 final 충격(available_at ≤ t−1, shock_date ∈ 직전 120 세션)
+    z_ref_min_samples: 10                      # 표본 < 10 → None
+    z_clip: 3.0                                # §3 공통 규정
+    ewma_halflife_days: 10                     # psa_state_at EWMA 반감기(세션) + freshness = 0.5^(d/10)
+  challengers:                                 # shadow 전용 (gold/challengers/psa_*.parquet), champion 교체 불가
+    PSA-EARLY: {window_sessions: 3}            # t+3 부분 관찰 (정착 = t+1..t+3)
+    PSA-K2: {k_sigma: 2.0}
+    PSA-W7: {window_sessions: 7}
