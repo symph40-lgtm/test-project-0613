@@ -145,10 +145,10 @@
 ## 9. T5.5(12개월 소급) 사전 표기
 - 일봉만 쓰는 부품(3G·PSA·Transmission·diffusion·flow·breadth)은 **3년 소급 가능**, 장중 부품 3은 KIS 12개월. 등급A는 라이브 시작일부터 → 소급 구간의 Reaction family는 등급C(전일밤 SOX 갭 기준)뿐.
 - 예상 표본: 등급C "이벤트"는 매일이라 W_digest=5 purge 후 연 ≈45건/스코프, good/bad 분할 ≈22 → **n_inference 40 미달 → Good/Bad 재현성 항목은 "서술 전용"** 사전 표기. 작동 항목(Energy 가용률·PSA final 수·Transmission 표본)은 판정 가능.
-- T5.5 사전 등록 문서는 T5 구현 후 별도 제출(측정 전).
+- T5.5 사전 등록 문서는 T5 구현 후 별도 제출(측정 전). **AM-9 판정 수치 예시 수록 의무**(발주자 등재 ②): Bad Resilience_t=+70 → 이후 최초 독립 악재 Expected −3.5% vs Actual −1.2% = 지지 / Expected −2.0% vs Actual −5.0% = 기각.
 
 ## 10. challenger 등록부 (shadow 전용, champion 교체 불가)
-IND-C1·IND-C2 / E-ORTH·E-EQ·E-NOCAP / PSA-EARLY·PSA-K2·PSA-W7 / DMT-C1·DMT-C2 / DIV-C1·DIV-C2 / SHRINK-H(hierarchical shrinkage, 종목 pooling) / ERR-INTRADAY(장중 5점 ERR 라벨).
+IND-C1·IND-C2 / E-ORTH·E-EQ·E-NOCAP / PSA-EARLY·PSA-K2·PSA-W7 / DMT-C1·DMT-C2 / DIV-C1·DIV-C2·DIV-C3(60)·DIV-C4(252) / TR-B(단변량 β+combiner) / SHRINK-H(hierarchical shrinkage, 종목 pooling) / ERR-INTRADAY(장중 5점 ERR 라벨) / **flow_sign_regime_dependence**(발주자 등재 8/17: Flow Impact 부호의 레짐 의존성 — 라이브 신규 표본+사전 등록으로만, 소진 표본 인용 금지).
 
 ## 11. 구현 순서·소요 [추정]
 | 단계 | 내용 | 소요 |

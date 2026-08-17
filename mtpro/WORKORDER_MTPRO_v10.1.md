@@ -262,3 +262,19 @@ primitive 3-family — **Reaction**: ERR · GoodBeta/BadBeta · Semi Transmissio
 **판정 3분법**: PASS / FAIL / **INSUFFICIENT**. 항목별 `n_operational`(작동 확인)·`n_inference`(효과 판정) 사전 등록. n_inference 미만 = INSUFFICIENT(FAIL 아님, PASS 승격 불가).
 **상위 상태 출력 필드**: `state_confidence · evidence_n · available_evidence` — 산출 규칙은 family confidence에서 파생, 계획서에서 사전 고정.
 **T5 범위** = 전부 반영된 전진 트랙. **T5.5** 사전 등록 문서는 AM-9 기준, 12개월 소급분의 n_inference 미달 예상 항목은 사전 "서술 전용" 표기. **반영 계획서 필수 포함**: 설계 변경 목록·스키마·family champion 전체 사양·purge/독립성 판정 구체 예시(9월 CPI–FOMC 인접 케이스)·PSA pending 처리·ΔMT/Divergence champion 산식·상위 상태 confidence 규칙. 제출 → 승인 후 구현.
+
+### Gate R1 후속 결정 (2026-08-17 밤, 발주자)
+- **Gate R1 = FAIL 확정**(소급 변경 없음). **Energy-Lite 종결 — 미채택·log-only 지속**. 2023-01~2026-06 표본 **소진 선언**: 이후 어떤 채택 근거로도 재사용 불가(가중 재튜닝·부호 반전·지평 재탐색·amendment 재측정 전부 금지). 000660 flow 음의 IC는 기록만(역부호 신호화 금지). 원인 분석은 서술 전용 1회(`docs/mtpro-t4-postmortem-narrative.md`). 기록판 `docs/ENERGY_LITE_SPEC.md` 등재.
+- MT-PRO 본 가설(삼전·하닉 반응함수 상태 측정)은 반증되지 않음 — Gate R1은 그 질문을 시험하지 않았다. **T5(AM-6~AM-10 champion) 진행**, 심판은 T5/T5.5·Gate R2의 새 규칙·새 표본으로만.
+- **등재 ①** challenger 가설 `flow_sign_regime_dependence` — Flow Impact 부호의 레짐 의존성(근거 관찰: Gate R1 서술 기록의 연도별 부호 반전 2023~24 음 → 2025~26H1 양). 검증은 **라이브 신규 표본 + 사전 등록으로만**, 소진 표본 소급 인용 금지.
+- **등재 ②** T5.5 사전 등록 문서에 AM-9 판정 수치 예시 수록: Bad Resilience_t=+70 상태에서 이후 최초 독립 악재 — Expected −3.5% vs Actual −1.2% = 재현성 지지 / Expected −2.0% vs Actual −5.0% = 재현성 기각(예시는 해석 기준 명확화용, 판정 조건은 사전 등록 산식).
+- T5.5 12개월: n_inference 미달이면 PASS/FAIL 아닌 **INSUFFICIENT/서술 전용** — "방향이 좋아 보이니 통과" 금지.
+- 참고: 기록판이 인용하는 `WORKORDER_MTPRO_v10.2 §1`은 아직 미수령 — 수령 시 이 절과 대조.
+
+---
+
+## 전달 형식 규칙 (2026-08-17 밤, 발주자 — 이후 모든 발주에 적용)
+- **역할**: 발주자(Chungpyo, 결정·승인) / 기획자(산문·아이디어·검토) / 설계자(Claude, 사양 변환·발주서 작성) / 구현자(Claude Code, 구현·실측·보고). 기존 문서의 "수행자/에이전트" = 구현자, "분석자" = 설계자로 읽는다. 역할은 사람이 아니라 **문서에 붙는다**(검토 AI 산문·발주자 구상·설계자 제안 모두 PLAN에 들어가면 기획자 산출물).
+- **발주 = 2부**: ① 기획서 **PLAN-NNN**(산문 — 논의 경과·기각 대안·막으려는 실패 유형·경계 상황 추론 지침) ② 발주서 **WO-NNN**(확정 사양·산식·스키마·금지). 같은 번호 = 한 발주 단위. 위치 `mtpro/docs/plans/`, `mtpro/docs/orders/`.
+- **우선순위**: 충돌 시 **발주서가 이긴다**. 기획서는 해석 지침이지 발주서를 무시할 근거가 아니다. 기획서 취지상 발주서와 다르게 구현하고 싶으면 **구현하지 말고 질의 상신**.
+- 기존 WORKORDER_MTPRO_v10.1/v10.2 등 현행 문서는 개명 없이 유효. 다음 발주부터 신규 체계. 첫 적용 = 마감 5건 + 추가 등재 2건 → **WO-001**, 그 근거 검토 산문 2편 → **PLAN-001**.

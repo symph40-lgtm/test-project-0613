@@ -200,3 +200,157 @@ psa:                                           # T5-3 부품 9 PSA (AM-7; 계획
     PSA-EARLY: {window_sessions: 3}            # t+3 부분 관찰 (정착 = t+1..t+3)
     PSA-K2: {k_sigma: 2.0}
     PSA-W7: {window_sessions: 7}
+
+energy_family:                                 # T5-5 primitive 3-family 결합 Energy (계획서 §3.1~3.5 + §12.2 cap; 모듈 상수 = src/mtpro/state/{families,energy}.py, 일치 테스트 tests/test_state_lookahead.py::test_config_constants_match_modules)
+  weights: {R: 0.40, PA: 0.35, P: 0.25}        # 사전 등록(발주서 §0-3 "핵심 측정 = 반응"), 가용 family 로 재정규화
+  min_families: 2                              # 미달 → Energy None
+  cap_share: 0.6                               # 절대 기여 share 상한 (§12.2)
+  cap_factor: 1.5                              # cap 값 = sign·1.5·Σ_others|c| (share 정확히 0.6)
+  cap_eps: 1.0e-9                              # Σ_others|c| < eps → cap 미적용·cap_undefined
+  min_avail: {R: 1, PA: 2, P: 2}               # family 최소 가용 컴포넌트
+  components:
+    R: [err_signed_ewma, beta_asym_z, transmission_asym_z]
+    PA: [shock_absorption_z, gap_hold_z, close_acceptance_z, psa_z]   # shock_absorption_z = 부품 3 장중(T5-6) 예약·None
+    P: [flow_impact_residual_z, breadth_impulse_z, semi_diffusion_z]
+  transmission_component_scopes: ["005930", "000660"]   # = transmission.scopes_component (KOSPI200 은 진단 전용 → family 입력 아님)
+  constants:
+    z_clip_abs: 3.0                            # 컴포넌트 클립 ±3 (§3 공통)
+    z_window_days: 120                         # beta_asym z 창 (t−1까지)
+    z_min_samples: 60
+    ewma_halflife_sessions: 10                 # 이벤트 기반 값 EWMA 반감기(세션)
+    freshness_halflife_sessions: 10            # freshness = 0.5^(d/10)
+    obs_window_sessions: 120                   # EWMA 관측 창(세션) — 창 밖 가중 ≤ 0.5^12
+    beta_asym_window_sessions: 20              # GoodBeta/BadBeta 창 (= grade_c.asym_window_days), 갭 기준 재추정
+    beta_asym_min_n: 3                         # = grade_c.gb_beta_min_n
+    beta_asym_clip: [0.3, 2.0]                 # = grade_c.gb_beta_clip
+  err_sign_convention: return_space            # 해석 기록: gap3g err_z(수익률 공간 잔차) 그대로 = "양 = 우호"(호재 초과 상승·악재 버팀). 재료 방향 공간값은 err_surprise_space 열 병기
+  challengers: [E-ORTH, E-EQ, E-NOCAP]         # shadow 전용 gold/challengers/energy_*.parquet
+  orth_order: [R, P, PA]                       # E-ORTH Gram–Schmidt 순서
+
+upper_state:                                   # T5-5 상위 상태 Good Acceptance / Bad Resilience (계획서 §5, 출력 전용 — Energy 입력 아님; 모듈 = src/mtpro/state/upper_state.py)
+  n_evidence: 6
+  min_evidence: 2                              # 가용 < 2 → None + "insufficient" (state_confidence 는 산출)
+  good_evidence: [good_err, good_beta, good_shock, good_gap, good_psa, good_flow]
+  bad_evidence: [bad_err, bad_beta, bad_shock, bad_gap, bad_psa, bad_flow]
+  reserved_evidence: [good_shock, bad_shock]   # 부품 3 장중 shock_absorption (T5-6) 예약
+  beta_neutral: 1.0                            # z(GoodBeta − 1) = (β−1)/std_past120 (해석 기록: 표준 z 는 −1 소거 → 중립 1 중심)
+  ewma_halflife_sessions: 10
+  obs_window_sessions: 120                     # evidence_n 집계 창
+  confidence_formula: "round(100 * n_avail/6 * (0.5 + 0.5*agreement) * freshness)"
+
+outputs:                                       # T5-5 ΔMT · Divergence · Regime · 텍스트 (계획서 §6·§12.4; 모듈 = src/mtpro/state/outputs.py)
+  delta: {recent: 5, hist_window: 60, scale: 20.0, min_changes: 5}   # = errata.delta_from_history 기본값(AM-2)
+  delta_challengers: [DMT-C1, DMT-C2]          # EMA3−EMA10 / 3일 기울기
+  divergence:
+    slope_days: 20                             # z_slope20(Energy) − z_slope20(ln close)
+    z_window_days: 120                         # 자기 과거 기울기 분포 (t−1까지)
+    z_min_samples: 60
+    label_threshold: 1.0                       # div ≥ +1 ∧ 가격 z < 0 → positive / ≤ −1 ∧ 가격 z > 0 → negative
+    self_reference: forbidden                  # Regime·Energy 함수 시그니처에 div 인자 없음 (테스트)
+    challengers: [DIV-C1, DIV-C2, DIV-C3, DIV-C4]   # 10일 / 레벨 z(E20평균)−z(r20) / z 창 60 / z 창 252
+  regime:
+    ema_span: 20                               # EMA20(Energy), None 일 건너뜀
+    ema_min_obs: 20                            # 유효 관측 20 미만 None (Regime 시작 = EMA 정의 첫날)
+    margin: 0.15                               # A-3 전환 임계
+    required_days: 2                           # A-3 연속 일수
+    breadth_level_source: "breadth_panel.above_20d_ratio -> z(120, min 60, clip 3)"   # 해석 기록: 원값 [0,1] 은 A-2 `breadth>0` 판정 무의미 → z
+    inputs: [energy_ema20, delta_mt, bad_resilience, breadth_level_z]   # = errata.classify_regime 시그니처 (Good Acceptance·Divergence 없음)
+  text:
+    template: "{Regime} 유지 ({p:.0%})[ / 그러나 {근거들} — {해석}]"
+    delta_threshold: 15.0                      # ΔMT 반대 신호 임계 (A-2 thaw/cooling 규칙과 동일)
+    state_threshold: 50.0                      # Good/Bad 상태 반대 신호 임계 (§6 예시 "Bad Resilience ≥ +50")
+    regime_polarity: {winter: -1, cooling: -1, thaw: 1, spring: 1}
+
+expected_reaction:                             # T5-6 등급A Expected Reaction (계획서 §3.1 ERR_signed·§2.2 검증 라벨·§12.4; WORKORDER 종목 독립) — 모듈 상수와 일치 테스트 tests/test_expected_reaction.py
+  scopes: [KOSPI200, "005930", "000660"]
+  independence: per_scope                      # 스코프별 독립 추정, pooling 금지. hierarchical shrinkage 는 challenger SHRINK-H(등록만, 미구현)
+  reaction: gap_reaction                       # A-1R Gap Reaction = gold/gap3g_panel.gap_pct (t0_kr, scope). 장중 5점 ERR 은 challenger ERR-INTRADAY
+  features: [surprise_z, vix_z, sox_shift_z, rate_change_bp]
+  feature_sources: {vix: "yfinance:^VIX close", sox: "bronze/sox_daily ret_pct (gradec.align_prev_us_session, d ≤ t0_kr−1)", tnx: "yfinance:^TNX close ×100 bp"}
+  macro_path: data/bronze/macro_daily.parquet
+  available_at: t0_kr_close_1530_KST           # A-1R: 마감 후 상태 산출에만 사용
+  challengers: [SHRINK-H]
+  constants:                                   # = ExpectedReactionParams (측정 후 변경 금지, 변경은 amendment)
+    surprise_std_window: 20                    # 유형별 과거 서프라이즈 rolling std (정오표 A-1 expected_std_rolling 재사용, floor 0 → std 0 None)
+    surprise_std_min_samples: 3
+    implicit_max_delta_surprise_z: 0.8         # 동일 event_type · |Δsurprise_z| < 0.8
+    implicit_recent_n: 5                       # 최근 5건
+    implicit_halflife_days: 30.0               # EWMA 반감기 30 — 해석 기록: 달력일 age (이벤트 건수 아님)
+    implicit_min_samples: 3                    # 표본 < 3 → None
+    explicit_recent_n: 120                     # 최근 120건 OLS (gap ~ 1 + 4피처)
+    explicit_min_samples: 20                   # 표본 < 20 → None
+    explicit_r2_recent_n: 30                   # 최근 30건 R² (β_recent 모형 적용)
+    explicit_r2_threshold: 0.3
+    alpha_informative: 0.5                     # R² > 0.3 → α 0.5   (α = 전 이력 OLS 쪽 가중: β = (1−α)β_recent + α·β_full — 해석 기록)
+    alpha_default: 0.8
+    q_high: 0.85                               # q > 0.85 → 0.7E + 0.3I
+    q_mid: 0.7                                 # q > 0.7  → 0.5/0.5, 그 외 0.2E + 0.8I
+    weights_high: [0.7, 0.3]                   # (explicit, implicit)
+    weights_mid: [0.5, 0.5]
+    weights_low: [0.2, 0.8]
+    expected_std_window: 20                    # 정오표 A-1 유형별 rolling std (같은 scope 잔차)
+    expected_std_floor: 0.1                    # %
+    expected_std_min_samples: 3
+    feature_z_window_days: 120                 # §12.4 (세션 d−1 까지)
+    feature_z_min_samples: 60
+    feature_z_clip_abs: 3.0
+    rate_change_sessions: 5                    # ^TNX 5세션 변화
+    max_stale_calendar_days: 7
+
+intraday:                                      # T5-6 부품 3 장중 6점 (A-1 유지: t0=09:00 시가 앵커, t6 없음) + KIS 분봉 축적기
+  minute_store:
+    path: data/bronze/minute/{code}/{YYYY-MM-DD}.parquet   # schema.BRONZE_MINUTE (price_adjusted=False, market_div J)
+    codes: ["005930", "000660"]                # KOSPI200 지수 분봉은 TR 이 다름(FHKUP03500200 inquire-time-indexchartprice) → 이번 범위 제외·기록
+    excluded: {KOSPI200: "index minute TR differs (FHKUP03500200); out of T5-6 scope — 발주자 확인 사항"}
+    tr_id: FHKST03010230                       # kis/minute.py (60분 앵커 7호출/일, 호출 간 0.15초)
+    depth_days: 365                            # kis.minute_depth_days_measured (T2 실측 ≈12개월)
+    calendar: XKRX                             # 결측일 = XKRX 세션 − 적재일 → alerts.loud_failure(MINUTE_GAP)
+    complete_after_kst: "15:40"                # 당일은 이 시각 이후에만 완결 적재
+    min_bars_full_day: 300                     # 이 미만이면 partial 표기(정규장 381봉; 첫 거래일·수능일 10:00 개장 = 331)
+    empty_retry_max: 3                         # KIS 무응답 세션 재시도 상한(초과 시 gap 으로 확정 기록)
+    depth_stop_consecutive_empty: 3            # 소급 적재 시 연속 무응답 3세션 → 이력 창 경계로 판단·중단
+  absorption:                                  # components/absorption.py (AbsorptionParams 일치 테스트 tests/test_absorption.py)
+    scopes: ["005930", "000660"]
+    timepoints: {t0: "09:00 open", t1: "09:05", t2: "peak in material direction (호재 max high / 악재 min low, 시가 대비)", t3: "09:30", t4: "14:30", t5: close}
+    price_at_rule: close_of_last_bar_before    # HH:MM 시점 가격 = 시작시각 < HH:MM 인 마지막 완성봉 종가 (봉 시각 = 봉 시작)
+    direction_source: [gradeA_surprise_sign, gradeC_sox_sign]   # 등급A(expected_reaction_events direction) 우선, 없으면 gap3g sox_ret_prev 부호
+    absorption_ratio: {bad: "1 − |t5|/|t2|", good: "t5/t2", t2_zero: None}
+    half_life: minutes_from_peak_until_half_retrace           # 진단 전용(z 없음)
+    close_acceptance: not_here                 # 3G CLV 와 중복 → 산출 안 함
+    constants:
+      t1: "09:05"
+      t3: "09:30"
+      t4: "14:30"
+      z_window_days: 120                       # shock_absorption_z: t−1 까지 120 세션(스코프별), 표본<60 None, 클립 ±3
+      z_min_samples: 60
+      z_clip_abs: 3.0
+      min_bars: 300                            # 세션 봉 수 < 300 → 6점 산출 안 함(partial)
+      max_price_gap_minutes: 5                 # 시점 봉 결측 시 5분 이내 직전 봉 허용
+
+live:                                          # T5-6 홈PC 라이브 크론 (jobs/live_daily.py, docs/mtpro-live-ops.md)
+  schedule_kst: "16:10 weekdays"               # 평일 16:10 KST (KRX 마감 15:30 + pykrx 반영 여유)
+  log_path: logs/live_daily_{date}.log
+  steps:                                       # 순서 고정 — 실패 step 은 loud_failure(LIVE_STEP_FAIL) + 계속, 종료코드 ≠ 0
+    - consensus_scheduler                      # python -m mtpro.events.cli run
+    - build_events_kr
+    - ingest_krx                               # flow, ohlcv_unadj, ohlcv_adj, pit, const_ohlcv (const_flow 는 C-1 대사 캐시 — 일간 불필요)
+    - accumulate_minutes
+    - build_flow
+    - build_breadth
+    - build_semi_diffusion
+    - build_gap3g                              # ^SOX 증분 포함
+    - build_transmission                       # 미국 4자산 증분 포함
+    - build_psa
+    - build_expected_reaction                  # ^VIX·^TNX 증분 포함
+    - build_absorption
+    - build_mt_state                           # 있으면 실행(T5-5)
+  kis: {env: mtpro/.env, token_cache: mtpro/.cache/kis_token.json, other_system_env: forbidden}
+
+challenger_hypotheses:                         # 발주자 등재 (검증은 라이브 신규 표본 + 사전 등록으로만, 소진 표본 인용 금지)
+  - id: flow_sign_regime_dependence
+    registered: 2026-08-17
+    statement: "Flow Impact 잔차 z의 수익률 부호 관계는 레짐 의존적이다"
+    origin: gate_r1_descriptive_fold_table      # 2023~24 음 → 2025~26H1 양 (서술 기록, 채택 근거 아님)
+    status: registered_untested
+
+gate_r1_status: {result: FAIL, energy_lite: retired_log_only, sample_2023_01_to_2026_06: exhausted}   # 8/17 확정, 소급 변경 없음
