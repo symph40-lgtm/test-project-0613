@@ -2,10 +2,10 @@
 
 - 자동 크롤 없음(T1-3 결정). yaml이 공식 일정 등록부.
 - CalendarEvent.scheduled_ts_utc 는 (local_date + event_type.local_time, tz) → UTC (zoneinfo, DST 자동).
-- status=unconfirmed 이벤트는 그대로 노출하되 스케줄러가 alert 를 남긴다.
-- status=tentative (T5-1, 계획서 §12.5): 공식 일정 미게시·예시 날짜(삼전 잠정 10/8, 하닉·NVDA 11월). unconfirmed(과거 패턴 추정)와
-  구분한다. 스케줄러는 unconfirmed 와 동일하게 D-7 재확인·alert 처리, 독립성 모듈은 verify_eligible=False 로 강제.
-  status 는 CalendarEvent.status → 레지스트리 status 필드로 실려 간다.
+- schedule_status=unconfirmed 이벤트는 그대로 노출하되 스케줄러가 alert 를 남긴다.
+- schedule_status=tentative (T5-1, 계획서 §12.5): 공식 일정 미게시·예시 날짜(삼전 잠정 10/8, 하닉·NVDA 11월). unconfirmed(과거 패턴
+  추정)와 구분한다. 스케줄러는 unconfirmed 와 동일하게 D-7 재확인·alert 처리, 독립성 모듈은 verify_eligible=False 로 강제.
+  필드명은 발주자 확정(2026-08-17) `schedule_status` — yaml 키·CalendarEvent.schedule_status·레지스트리 schedule_status 컬럼 동일.
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from mtpro import settings
-from mtpro.events.registry import EVENT_STATUSES, EVENT_TYPES, T0_MODES
+from mtpro.events.registry import EVENT_TYPES, SCHEDULE_STATUSES, T0_MODES
 
 DEFAULT_CALENDAR = settings.CONFIG_DIR / "event_calendar.yaml"
-STATUSES = EVENT_STATUSES   # ("confirmed", "unconfirmed", "tentative")
+STATUSES = SCHEDULE_STATUSES   # ("confirmed", "unconfirmed", "tentative") — schedule_status 허용값
 
 
 class CalendarError(RuntimeError):
@@ -52,23 +52,23 @@ class CalendarEvent:
     scheduled_ts_utc: datetime
     t0_mode: str
     asset_scope: tuple[str, ...]
-    status: str
+    schedule_status: str
     evidence: str = ""
     spec: EventTypeSpec | None = field(default=None, compare=False, repr=False)
 
     @property
     def confirmed(self) -> bool:
-        return self.status == "confirmed"
+        return self.schedule_status == "confirmed"
 
     @property
     def tentative(self) -> bool:
-        return self.status == "tentative"
+        return self.schedule_status == "tentative"
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id, "event_type": self.event_type, "local_date": self.local_date.isoformat(),
             "scheduled_ts_utc": self.scheduled_ts_utc.isoformat(), "t0_mode": self.t0_mode,
-            "asset_scope": list(self.asset_scope), "status": self.status, "evidence": self.evidence,
+            "asset_scope": list(self.asset_scope), "schedule_status": self.schedule_status, "evidence": self.evidence,
         }
 
 
@@ -139,15 +139,16 @@ def load_calendar(path: Path | None = None) -> Calendar:
     events: list[CalendarEvent] = []
     seen: set[str] = set()
     for i, r in enumerate(raw.get("events") or []):
-        for k in ("event_id", "event_type", "local_date", "status"):
+        for k in ("event_id", "event_type", "local_date", "schedule_status"):
             if k not in r:
-                raise CalendarError(f"events[{i}]: missing {k}")
+                hint = " (구 키 'status' 는 schedule_status 로 개명 — 발주자 확정 2026-08-17)" if k == "schedule_status" and "status" in r else ""
+                raise CalendarError(f"events[{i}]: missing {k}{hint}")
         et = r["event_type"]
         if et not in types:
             raise CalendarError(f"events[{i}] {r['event_id']}: event_type {et!r} has no event_types spec")
         spec = types[et]
-        if r["status"] not in STATUSES:
-            raise CalendarError(f"{r['event_id']}: status {r['status']!r} not in {STATUSES}")
+        if r["schedule_status"] not in STATUSES:
+            raise CalendarError(f"{r['event_id']}: schedule_status {r['schedule_status']!r} not in {STATUSES}")
         if r["event_id"] in seen:
             raise CalendarError(f"duplicate event_id {r['event_id']}")
         seen.add(r["event_id"])
@@ -163,7 +164,7 @@ def load_calendar(path: Path | None = None) -> Calendar:
         events.append(CalendarEvent(
             event_id=r["event_id"], event_type=et, local_date=ld,
             scheduled_ts_utc=scheduled_utc(ld, spec, lt, r.get("tz")), t0_mode=t0_mode, asset_scope=scope,
-            status=r["status"], evidence=str(r.get("evidence", "")), spec=spec,
+            schedule_status=r["schedule_status"], evidence=str(r.get("evidence", "")), spec=spec,
         ))
     events.sort(key=lambda e: (e.scheduled_ts_utc, e.event_id))
     return Calendar(version=str(raw.get("version", "")), types=types, events=events)

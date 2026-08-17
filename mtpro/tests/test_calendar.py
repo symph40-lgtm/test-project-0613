@@ -22,7 +22,7 @@ def test_default_calendar_loads_and_matches_event_types():
     for e in cal.events:
         assert e.event_id == f"{e.event_type}_{e.local_date:%Y%m%d}"
         assert e.scheduled_ts_utc.tzinfo is not None
-        assert e.status in ("confirmed", "unconfirmed", "tentative")   # T5-1: tentative 추가
+        assert e.schedule_status in ("confirmed", "unconfirmed", "tentative")   # T5-1: tentative 추가 (필드명 schedule_status)
         assert e.spec is not None and e.spec.consensus_source in ("us_macro", "kr_earnings", "nvda")
 
 
@@ -45,9 +45,9 @@ def test_known_confirmed_and_unconfirmed():
     assert not cal.get("SEC_PRELIM_20261008").confirmed
     assert not cal.get("HYNIX_EARN_20261022").confirmed
     # T5-1 (계획서 §12.5): 공식 일정 미게시 3건은 tentative (unconfirmed 와 구분) — 확인 전 verify_eligible=False 근거
-    assert cal.get("SEC_PRELIM_20261008").tentative and cal.get("SEC_PRELIM_20261008").status == "tentative"
+    assert cal.get("SEC_PRELIM_20261008").tentative and cal.get("SEC_PRELIM_20261008").schedule_status == "tentative"
     assert cal.get("HYNIX_EARN_20261022").tentative and cal.get("NVDA_EARN_20261118").tentative
-    assert cal.get("SEC_PRELIM_20261008").as_dict()["status"] == "tentative"
+    assert cal.get("SEC_PRELIM_20261008").as_dict()["schedule_status"] == "tentative"
 
 
 def test_consensus_fields_match_preregistered_mtpro_yaml():
@@ -104,7 +104,7 @@ event_types:
 def test_rejects_bad_event_id_rule(tmp_path):
     p = _write(tmp_path, _TYPE + """
 events:
-  - {event_id: CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", status: confirmed}
+  - {event_id: CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", schedule_status: confirmed}
 """)
     with pytest.raises(CalendarError):
         load_calendar(p)
@@ -113,7 +113,7 @@ events:
 def test_rejects_unknown_type_and_status(tmp_path):
     p = _write(tmp_path, _TYPE + """
 events:
-  - {event_id: US_CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", status: maybe}
+  - {event_id: US_CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", schedule_status: maybe}
 """)
     with pytest.raises(CalendarError):
         load_calendar(p)
@@ -125,7 +125,7 @@ events:
 def test_row_level_override_of_time_and_t0_mode(tmp_path):
     p = _write(tmp_path, _TYPE + """
 events:
-  - {event_id: US_CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", status: confirmed,
+  - {event_id: US_CPI_20260911, event_type: US_CPI, local_date: "2026-09-11", schedule_status: confirmed,
      local_time: "20:00", tz: Asia/Seoul, t0_mode: release_time, asset_scope: ["005930"]}
 """)
     cal = load_calendar(p)

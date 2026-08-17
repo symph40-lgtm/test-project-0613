@@ -15,7 +15,7 @@ from mtpro.events import independence as I
 from mtpro.events import kr_calendar as KC
 from mtpro.events.calendar import load_calendar
 from mtpro.events.registry import ConsensusRegistry, INDEPENDENCE_COLUMNS, RegistryError
-from mtpro.schema import CONTAMINATION_REASONS, EVENT_STATUSES, SILVER_CONSENSUS_REGISTRY, SILVER_EVENTS_KR
+from mtpro.schema import CONTAMINATION_REASONS, SCHEDULE_STATUSES, SILVER_CONSENSUS_REGISTRY, SILVER_EVENTS_KR
 
 UTC = timezone.utc
 CFG = yaml.safe_load((pathlib.Path(__file__).resolve().parents[1] / "config" / "mtpro.yaml").read_text(encoding="utf-8"))
@@ -28,7 +28,7 @@ def cal() -> KC.KrCalendar:
 
 def _ev(eid: str, et: str, ts: datetime, *, grade="A", status="confirmed", cons=1.0, actual=1.1, surprise_z=None, **kw):
     d = {"event_id": eid, "event_type": et, "scheduled_ts_utc": ts, "t0_mode": "A1_open", "grade": grade,
-         "status": status, "consensus_value": cons, "actual_value": actual}
+         "schedule_status": status, "consensus_value": cons, "actual_value": actual}
     if surprise_z is not None:
         d["surprise_z"] = surprise_z
     d.update(kw)
@@ -54,8 +54,8 @@ def test_config_constants_match_module():
     # enum·스키마
     assert I.REASONS == CONTAMINATION_REASONS == (
         "OVERLAP_DIGEST_WINDOW", "SAME_DAY_MULTI", "EARNINGS_CLUSTER", "PSA_PENDING_SHOCK", "DATA_GAP")
-    assert EVENT_STATUSES == ("confirmed", "unconfirmed", "tentative")
-    for col in ("status", "t0_kr", "digest_window_end", "independence_flag", "overlap_group", "contamination_reason", "verify_eligible"):
+    assert SCHEDULE_STATUSES == ("confirmed", "unconfirmed", "tentative")
+    for col in ("schedule_status", "t0_kr", "digest_window_end", "independence_flag", "overlap_group", "contamination_reason", "verify_eligible"):
         assert col in SILVER_CONSENSUS_REGISTRY.names and col in SILVER_EVENTS_KR.names
     assert set(INDEPENDENCE_COLUMNS) <= set(SILVER_CONSENSUS_REGISTRY.names)
 
@@ -119,7 +119,7 @@ def test_september_independence_flags(cal):
     assert s["independence_flag"] is False and s["contamination_reason"] == "OVERLAP_DIGEST_WINDOW"
     assert s["overlap_group"] == "US_PCE_20260930"                       # 원인 체인 상속 (NFP 의 group = PCE)
     assert "EARNINGS_CLUSTER" not in s["contamination_reason"]           # NFP 는 매크로 — 실적 클러스터 아님
-    assert s["status"] == "tentative" and s["verify_eligible"] is False   # tentative → 검증 불가 (독립이었어도)
+    assert s["schedule_status"] == "tentative" and s["verify_eligible"] is False   # tentative → 검증 불가 (독립이었어도)
     # 8/26 PCE + NVDA → t0 8/27 → SAME_DAY_MULTI 둘 다 비독립, group = 정렬 결합
     for eid in ("US_PCE_20260826", "NVDA_EARN_20260826"):
         assert fl[eid]["independence_flag"] is False and fl[eid]["contamination_reason"] == "SAME_DAY_MULTI"
@@ -145,7 +145,7 @@ def test_september_verification_pairs_skip_fomc(cal):
     inf = [x for x in pairs if x["role"] == "inference"]
     assert len(inf) == 1 and inf[0]["mt_date"] == date(2026, 9, 30) and inf[0]["direction"] == "good" and inf[0]["label_ok"]
     assert all(x["role"] == "descriptive" for x in pairs if x["mt_date"] != date(2026, 9, 30))
-    assert p[date(2026, 9, 30)]["sessions_ahead"] == 1 and p[date(2026, 9, 16)]["sessions_ahead"] == 8   # 9/17·18·21·22·23·28·29·30·10/1
+    assert p[date(2026, 9, 30)]["sessions_ahead"] == 1 and p[date(2026, 9, 16)]["sessions_ahead"] == 9   # 9/17·18·21·22·23·28·29·30·10/1
     # e* 당 추론 1쌍: 9/7 직전 세션(9/4)에 상태가 있으면 NFP 9/4 → 9/7 도 1건 (CPI 9/14 는 9/11)
     pairs2 = I.verification_pairs(cal.sessions_between(date(2026, 9, 1), date(2026, 9, 30)), fl, cal)
     inf2 = [(x["mt_date"], x["event_id"]) for x in pairs2 if x["role"] == "inference"]
@@ -234,13 +234,13 @@ def test_verify_eligible_requires_grade_A_values_and_not_tentative(cal):
     assert I.flag_independence([dict(ok, grade=None)], cal)[0]["verify_eligible"] is False
     assert I.flag_independence([dict(ok, consensus_value=None)], cal)[0]["verify_eligible"] is False   # 결측 None
     assert I.flag_independence([dict(ok, actual_value=float("nan"))], cal)[0]["verify_eligible"] is False
-    assert I.flag_independence([dict(ok, status="tentative")], cal)[0]["verify_eligible"] is False
-    assert I.flag_independence([dict(ok, status="unconfirmed")], cal)[0]["verify_eligible"] is True   # unconfirmed ≠ tentative
-    assert I.flag_independence([dict(ok, status=None)], cal)[0]["verify_eligible"] is True
+    assert I.flag_independence([dict(ok, schedule_status="tentative")], cal)[0]["verify_eligible"] is False
+    assert I.flag_independence([dict(ok, schedule_status="unconfirmed")], cal)[0]["verify_eligible"] is True   # unconfirmed ≠ tentative
+    assert I.flag_independence([dict(ok, schedule_status=None)], cal)[0]["verify_eligible"] is True
     with pytest.raises(I.IndependenceError):
-        I.flag_independence([dict(ok, status="maybe")], cal)
+        I.flag_independence([dict(ok, schedule_status="maybe")], cal)
     # 독립성 필드는 tentative 여도 계산된다 (검증만 막음)
-    r = I.flag_independence([dict(ok, status="tentative")], cal)[0]
+    r = I.flag_independence([dict(ok, schedule_status="tentative")], cal)[0]
     assert r["independence_flag"] is True and r["t0_kr"] == date(2026, 9, 14)
 
 
@@ -291,17 +291,17 @@ def test_registry_status_and_independence_roundtrip(tmp_path, cal):
     p = tmp_path / "reg.parquet"
     reg = ConsensusRegistry(p)
     ts = datetime(2026, 9, 11, 12, 30, tzinfo=UTC)
-    row = reg.register_event("US_CPI_20260911", "US_CPI", ["KOSPI200"], ts, "A1_open", status="confirmed")
-    assert row["status"] == "confirmed" and row["independence_flag"] is None and row["verify_eligible"] is False
+    row = reg.register_event("US_CPI_20260911", "US_CPI", ["KOSPI200"], ts, "A1_open", schedule_status="confirmed")
+    assert row["schedule_status"] == "confirmed" and row["independence_flag"] is None and row["verify_eligible"] is False
     with pytest.raises(RegistryError):
-        reg.register_event("US_NFP_20260904", "US_NFP", ["KOSPI200"], ts, "A1_open", status="maybe")
+        reg.register_event("US_NFP_20260904", "US_NFP", ["KOSPI200"], ts, "A1_open", schedule_status="maybe")
     reg.register_event("SEC_PRELIM_20261008", "SEC_PRELIM", ["005930"], datetime(2026, 10, 7, 23, 0, tzinfo=UTC), "A1_open",
-                       status="tentative")
-    # exist_ok 재등록으로 status 갱신 (tentative → confirmed) 허용, 동결 대상 필드 아님
+                       schedule_status="tentative")
+    # exist_ok 재등록으로 schedule_status 갱신 (tentative → confirmed) 허용, 동결 대상 필드 아님
     reg.upsert_consensus("US_CPI_20260911", 0.3, "%", "ff", "auto:ff", datetime(2026, 9, 10, tzinfo=UTC))
     reg.freeze("US_CPI_20260911", datetime(2026, 9, 10, 12, tzinfo=UTC))
-    r2 = reg.register_event("US_CPI_20260911", "US_CPI", ["KOSPI200"], ts, "A1_open", exist_ok=True, status="unconfirmed")
-    assert r2["status"] == "unconfirmed" and r2["frozen"] is True
+    r2 = reg.register_event("US_CPI_20260911", "US_CPI", ["KOSPI200"], ts, "A1_open", exist_ok=True, schedule_status="unconfirmed")
+    assert r2["schedule_status"] == "unconfirmed" and r2["frozen"] is True
     # 동결된 행에도 파생 필드 기록 가능
     fl = I.flag_independence([reg.get("US_CPI_20260911") | {"grade": "A"}, reg.get("SEC_PRELIM_20261008")], cal)
     for e in fl:
@@ -317,7 +317,7 @@ def test_registry_status_and_independence_roundtrip(tmp_path, cal):
     assert c["independence_flag"] is True and c["overlap_group"] is None and c["contamination_reason"] is None
     assert c["consensus_value"] == 0.3 and c["frozen"] is True     # 동결값 불변
     s = reg2.get("SEC_PRELIM_20261008")
-    assert s["status"] == "tentative" and s["t0_kr"] == date(2026, 10, 8) and s["verify_eligible"] is False
+    assert s["schedule_status"] == "tentative" and s["t0_kr"] == date(2026, 10, 8) and s["verify_eligible"] is False
 
 
 def test_registry_old_file_without_new_columns_loads(tmp_path):
@@ -326,7 +326,7 @@ def test_registry_old_file_without_new_columns_loads(tmp_path):
     import pyarrow.parquet as pq
     from mtpro.events import registry as R
 
-    old_cols = [f for f in R.SCHEMA if f.name not in ("status", *R.INDEPENDENCE_COLUMNS)]
+    old_cols = [f for f in R.SCHEMA if f.name not in ("schedule_status", *R.INDEPENDENCE_COLUMNS)]
     old_schema = pa.schema(old_cols)
     row = {f.name: None for f in old_cols}
     row.update(event_id="US_CPI_20260911", event_type="US_CPI", asset_scope=["KOSPI200"],
@@ -336,13 +336,13 @@ def test_registry_old_file_without_new_columns_loads(tmp_path):
     pq.write_table(pa.Table.from_pylist([row], schema=old_schema), p)
     reg = ConsensusRegistry(p)
     r = reg.get("US_CPI_20260911")
-    assert r["status"] is None and r["t0_kr"] is None and r["independence_flag"] is None and r["overlap_group"] is None
+    assert r["schedule_status"] is None and r["t0_kr"] is None and r["independence_flag"] is None and r["overlap_group"] is None
     assert r["verify_eligible"] is False
     reg.save()
     assert set(pq.read_schema(p).names) == set(R.COLUMNS)
 
 
-def test_scheduler_registration_carries_status(tmp_path):
+def test_scheduler_registration_carries_schedule_status(tmp_path):
     from mtpro.events.calendar import CalendarEvent, EventTypeSpec
     from mtpro.events.scheduler import _ensure_registered
 
@@ -351,4 +351,4 @@ def test_scheduler_registration_carries_status(tmp_path):
                        ("005930",), "tentative", "e", spec)
     reg = ConsensusRegistry(tmp_path / "r.parquet")
     row = _ensure_registered(reg, ev)
-    assert row["status"] == "tentative" and reg.get("SEC_PRELIM_20261008")["status"] == "tentative"
+    assert row["schedule_status"] == "tentative" and reg.get("SEC_PRELIM_20261008")["schedule_status"] == "tentative"

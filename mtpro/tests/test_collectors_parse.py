@@ -21,7 +21,7 @@ def _spec(et, src, ticker=None):
 def _ev(et, d, src, ticker=None):
     s = _spec(et, src, ticker)
     return CalendarEvent(event_id=f"{et}_{d:%Y%m%d}", event_type=et, local_date=d, scheduled_ts_utc=scheduled_utc(d, s),
-                         t0_mode="A1_open", asset_scope=s.asset_scope, status="confirmed", spec=s)
+                         t0_mode="A1_open", asset_scope=s.asset_scope, schedule_status="confirmed", spec=s)
 
 
 # ---------------- us_macro (ForexFactory JSON) ----------------

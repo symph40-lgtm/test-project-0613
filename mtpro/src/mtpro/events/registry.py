@@ -20,7 +20,7 @@
   single_fetch(bool, 기본 False) manual_override(bool, 기본 False)
   auto_shadow_value(float|None) auto_shadow_vintage_ts(ts|None) auto_shadow_source(str|None)
   --- T5-1 (AM-9, 계획서 §2.1) 파생 필드 (동결 대상 아님, set_independence()로만 갱신) ---
-  status(confirmed|unconfirmed|tentative|None) t0_kr(date|None) digest_window_end(date|None)
+  schedule_status(confirmed|unconfirmed|tentative|None) t0_kr(date|None) digest_window_end(date|None)
   independence_flag(bool|None: None=미계산) overlap_group(str|None) contamination_reason(str|None)
   verify_eligible(bool, 기본 False)
 """
@@ -49,7 +49,7 @@ EVENT_TYPES: tuple[str, ...] = (
 )
 T0_MODES: tuple[str, ...] = ("A1_open", "release_time")
 GRADES: tuple[str, ...] = ("A", "C")
-EVENT_STATUSES: tuple[str, ...] = ("confirmed", "unconfirmed", "tentative")   # T5-1 (= schema.EVENT_STATUSES)
+SCHEDULE_STATUSES: tuple[str, ...] = ("confirmed", "unconfirmed", "tentative")   # T5-1 (= schema.SCHEDULE_STATUSES)
 
 INDEPENDENCE_COLUMNS: tuple[str, ...] = (                                # T5-1 파생 필드 (set_independence)
     "t0_kr", "digest_window_end", "independence_flag", "overlap_group", "contamination_reason", "verify_eligible",
@@ -61,7 +61,7 @@ COLUMNS: tuple[str, ...] = (
     "supersedes", "note",
     "single_fetch", "manual_override",                                   # 운영 결정 ① / AM-4
     "auto_shadow_value", "auto_shadow_vintage_ts", "auto_shadow_source",  # AM-4: 자동값 기록 보존
-    "status",                                                            # T5-1: 캘린더 status 전달
+    "schedule_status",                                                   # T5-1: 캘린더 schedule_status 전달
     *INDEPENDENCE_COLUMNS,                                               # T5-1: t0·독립성 파생 (구 파일 부재 → None/False)
 )
 BOOL_COLUMNS: tuple[str, ...] = ("frozen", "single_fetch", "manual_override", "verify_eligible")
@@ -93,7 +93,7 @@ SCHEMA = pa.schema([
     ("auto_shadow_value", pa.float64()),
     ("auto_shadow_vintage_ts", _TS),
     ("auto_shadow_source", pa.string()),
-    ("status", pa.string()),                       # T5-1
+    ("schedule_status", pa.string()),              # T5-1
     ("t0_kr", pa.date32()),
     ("digest_window_end", pa.date32()),
     ("independence_flag", pa.bool_()),
@@ -234,14 +234,14 @@ class ConsensusRegistry:
         note: str | None = None,
         supersedes: str | None = None,
         exist_ok: bool = False,
-        status: str | None = None,
+        schedule_status: str | None = None,
     ) -> dict[str, Any]:
         if event_type not in EVENT_TYPES:
             raise RegistryError(f"event_type {event_type!r} not in {EVENT_TYPES}")
         if t0_mode not in T0_MODES:
             raise RegistryError(f"t0_mode {t0_mode!r} not in {T0_MODES}")
-        if status is not None and status not in EVENT_STATUSES:
-            raise RegistryError(f"status {status!r} not in {EVENT_STATUSES}")
+        if schedule_status is not None and schedule_status not in SCHEDULE_STATUSES:
+            raise RegistryError(f"schedule_status {schedule_status!r} not in {SCHEDULE_STATUSES}")
         scope = [str(s) for s in asset_scope]
         if not scope:
             raise RegistryError("asset_scope must be non-empty")
@@ -255,8 +255,8 @@ class ConsensusRegistry:
                 and cur["t0_mode"] == t0_mode
             )
             if exist_ok and same:
-                if status is not None and cur.get("status") != status:
-                    cur["status"] = status          # 캘린더 status 갱신(unconfirmed → confirmed 등)은 동결 대상 아님
+                if schedule_status is not None and cur.get("schedule_status") != schedule_status:
+                    cur["schedule_status"] = schedule_status   # 캘린더 일정 상태 갱신(unconfirmed → confirmed 등)은 동결 대상 아님
                     self._commit()
                 return dict(cur)
             raise RegistryError(
@@ -269,7 +269,7 @@ class ConsensusRegistry:
         row.update(
             event_id=event_id, event_type=event_type, asset_scope=scope, scheduled_ts_utc=sched,
             t0_mode=t0_mode, frozen=False, supersedes=supersedes, note=note,
-            single_fetch=False, manual_override=False, status=status, verify_eligible=False,
+            single_fetch=False, manual_override=False, schedule_status=schedule_status, verify_eligible=False,
         )
         self._rows[event_id] = row
         self._commit()

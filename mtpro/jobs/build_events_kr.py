@@ -43,8 +43,8 @@ def collect_events(registry: ConsensusRegistry | None, calendar_path: Path | Non
     cal = load_calendar(calendar_path)
     for ev in cal.events:
         if ev.event_id in rows:
-            if rows[ev.event_id].get("status") is None:
-                rows[ev.event_id]["status"] = ev.status      # 구 레지스트리 파일(status 부재) 보완
+            if rows[ev.event_id].get("schedule_status") is None:
+                rows[ev.event_id]["schedule_status"] = ev.schedule_status      # 구 레지스트리 파일(컬럼 부재) 보완
             continue
         d = ev.as_dict()
         d.update(scheduled_ts_utc=ev.scheduled_ts_utc, grade=None, consensus_value=None, actual_value=None,
@@ -58,7 +58,7 @@ def to_table(flagged: list[dict[str, Any]]) -> pa.Table:
     for e in flagged:
         recs.append({
             "event_id": e["event_id"], "event_type": e.get("event_type"), "scheduled_ts_utc": e["scheduled_ts_utc"],
-            "t0_mode": e.get("t0_mode"), "status": e.get("status"), "grade": e.get("grade"),
+            "t0_mode": e.get("t0_mode"), "schedule_status": e.get("schedule_status"), "grade": e.get("grade"),
             "t0_kr": e["t0_kr"], "digest_window_end": e["digest_window_end"],
             "independence_flag": bool(e["independence_flag"]), "overlap_group": e.get("overlap_group"),
             "contamination_reason": e.get("contamination_reason"), "verify_eligible": bool(e["verify_eligible"]),
@@ -68,11 +68,11 @@ def to_table(flagged: list[dict[str, Any]]) -> pa.Table:
 
 
 def print_table(flagged: list[dict[str, Any]]) -> None:
-    hdr = f"{'event_id':<22} {'status':<11} {'grade':<5} {'t0_kr':<10} {'digest_end':<10} {'ind':<5} {'verify':<6} {'reason':<45} overlap_group"
+    hdr = f"{'event_id':<22} {'sched_stat':<11} {'grade':<5} {'t0_kr':<10} {'digest_end':<10} {'ind':<5} {'verify':<6} {'reason':<45} overlap_group"
     print(hdr)
     print("-" * len(hdr))
     for e in flagged:
-        print(f"{e['event_id']:<22} {str(e.get('status')):<11} {str(e.get('grade')):<5} {e['t0_kr']} {e['digest_window_end']} "
+        print(f"{e['event_id']:<22} {str(e.get('schedule_status')):<11} {str(e.get('grade')):<5} {e['t0_kr']} {e['digest_window_end']} "
               f"{str(e['independence_flag']):<5} {str(e['verify_eligible']):<6} {str(e.get('contamination_reason')):<45} "
               f"{e.get('overlap_group')}")
 

@@ -10,7 +10,7 @@
       overlap_group = 가장 이른 원인 이벤트의 group(체인 상속; 없으면 그 id). e1(먼저 온 정보)은 독립 유지.
 - (c) 실적 3종(SEC_PRELIM·HYNIX_EARN·NVDA_EARN) 서로 [t0_kr ± 3 세션] → 양쪽 EARNINGS_CLUSTER (이미 비독립이면 사유 추가).
 - contamination_reason = 사유 ';' 결합 문자열(순서: SAME_DAY_MULTI;OVERLAP_DIGEST_WINDOW;EARNINGS_CLUSTER), 독립이면 None.
-- (d) verify_eligible = independence_flag ∧ grade=="A" ∧ 필수값(consensus_value·actual_value) 결측 없음 ∧ status != tentative.
+- (d) verify_eligible = independence_flag ∧ grade=="A" ∧ 필수값(consensus_value·actual_value) 결측 없음 ∧ schedule_status != tentative.
 - PSA_PENDING_SHOCK(T5-3)·DATA_GAP(T5-6) 은 enum 만 (schema.CONTAMINATION_REASONS) — 여기서 적용하지 않는다.
 - 검증 쌍: 상태일 t 마다 e* = t 이후 최초 verify_eligible 이벤트(t0_kr > t). 추론 표본은 e* 당 1쌍(t = e*.t0_kr 직전 세션)
   role="inference", 나머지 매칭 role="descriptive". 방향 = surprise_z (> +0.3 good / < −0.3 bad / 그 외 neutral=라벨 불가 / None).
@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Iterable, Sequence
 
 from mtpro.events import kr_calendar as KC
-from mtpro.schema import CONTAMINATION_REASONS, EVENT_STATUSES
+from mtpro.schema import CONTAMINATION_REASONS, SCHEDULE_STATUSES
 
 ENGINE_VER = "independence-0.1"
 
@@ -130,28 +130,27 @@ def flag_independence(
     reasons: dict[str, list[str]] = {e["event_id"]: [] for e in evs}
     group: dict[str, str | None] = {e["event_id"]: None for e in evs}
 
-    # (b) 앞선 어떤 이벤트의 소화 창 안 — 순서대로 처리하면 원인의 group 은 이미 확정(체인 상속)
+    # (a) 같은 t0_kr 집합
+    by_t0: dict[date, list[str]] = {}
+    for e in evs:
+        by_t0.setdefault(e["t0_kr"], []).append(e["event_id"])
+
+    # (a)+(b) 를 t0 순 단일 패스로: 원인(앞선 이벤트)의 group 은 처리 시점에 이미 확정 → 체인 상속이 일관된다.
     for i, e in enumerate(evs):
+        eid = e["event_id"]
+        members = by_t0[e["t0_kr"]]
+        if len(members) > 1:
+            reasons[eid].append(SAME_DAY_MULTI)
         cause = None
         for p in evs[:i]:
             if p["t0_kr"] < e["t0_kr"] <= p["digest_window_end"]:
                 cause = p                       # evs 는 t0 순 → 처음 만나는 p 가 가장 이른 원인
                 break
         if cause is not None:
-            reasons[e["event_id"]].append(OVERLAP_DIGEST_WINDOW)
-            group[e["event_id"]] = group[cause["event_id"]] or cause["event_id"]
-
-    # (a) 같은 t0_kr
-    by_t0: dict[date, list[str]] = {}
-    for e in evs:
-        by_t0.setdefault(e["t0_kr"], []).append(e["event_id"])
-    for t0, members in by_t0.items():
-        if len(members) > 1:
-            joined = GROUP_SEP.join(sorted(members))
-            for eid in members:
-                reasons[eid].append(SAME_DAY_MULTI)
-                if group[eid] is None:
-                    group[eid] = joined
+            reasons[eid].append(OVERLAP_DIGEST_WINDOW)
+            group[eid] = group[cause["event_id"]] or cause["event_id"]     # 체인이면 원인의 group 상속
+        elif len(members) > 1:
+            group[eid] = GROUP_SEP.join(sorted(members))                   # 같은 날 id 정렬 결합
 
     # (c) 실적 클러스터 (서로 [t0_kr ± cluster_sessions] 세션)
     earn = [e for e in evs if e.get("event_type") in set(earnings_types)]
@@ -186,10 +185,10 @@ def flag_independence(
 
 
 def verify_eligible(e: dict[str, Any], required: Sequence[str] = REQUIRED_FIELDS) -> bool:
-    """(d) independence_flag ∧ grade=="A" ∧ 필수값 결측 없음 ∧ status != tentative."""
-    st = e.get("status")
-    if st is not None and st not in EVENT_STATUSES:
-        raise IndependenceError(f"{e.get('event_id')}: status {st!r} not in {EVENT_STATUSES}")
+    """(d) independence_flag ∧ grade=="A" ∧ 필수값 결측 없음 ∧ schedule_status != tentative."""
+    st = e.get("schedule_status")
+    if st is not None and st not in SCHEDULE_STATUSES:
+        raise IndependenceError(f"{e.get('event_id')}: schedule_status {st!r} not in {SCHEDULE_STATUSES}")
     return bool(
         e.get("independence_flag") is True
         and e.get("grade") == "A"
@@ -256,7 +255,7 @@ def summarize(flagged: Sequence[dict[str, Any]], pairs: Sequence[dict[str, Any]]
         "engine_ver": ENGINE_VER, "n_events": n,
         "n_independent": sum(1 for e in flagged if e.get("independence_flag") is True),
         "n_verify_eligible": sum(1 for e in flagged if e.get("verify_eligible") is True),
-        "n_tentative": sum(1 for e in flagged if e.get("status") == "tentative"),
+        "n_tentative": sum(1 for e in flagged if e.get("schedule_status") == "tentative"),
         "reasons": reasons, "w_digest": W_DIGEST, "earnings_cluster_sessions": EARNINGS_CLUSTER_SESSIONS,
         "calendar_source": (flagged[0].get("calendar_source") if flagged else None),
     }

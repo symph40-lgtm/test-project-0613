@@ -53,7 +53,7 @@ def cmd_add_manual(args) -> int:
     reg = _registry(args)
     if args.event_id not in reg:
         reg.register_event(ev.event_id, ev.event_type, ev.asset_scope, ev.scheduled_ts_utc, ev.t0_mode,
-                           note=f"calendar:{ev.status}")
+                           note=f"calendar:{ev.schedule_status}", schedule_status=ev.schedule_status)
     vintage = _parse_ts(args.vintage) or _now()
     row = reg.upsert_consensus(args.event_id, args.value, args.unit, source=args.source or "manual",
                                entered_by=f"manual:{args.by}", vintage_ts=vintage, note=args.note)
@@ -115,7 +115,7 @@ def cmd_calendar(args) -> int:
     evs = cal.upcoming(now, args.days) if args.days else cal.events
     print(f"calendar {cal.version}: {len(evs)} events")
     for e in evs:
-        print(f"{e.event_id:<24} {e.event_type:<11} {e.scheduled_ts_utc.isoformat()} {e.t0_mode:<12} {e.status:<11} {e.evidence[:70]}")
+        print(f"{e.event_id:<24} {e.event_type:<11} {e.scheduled_ts_utc.isoformat()} {e.t0_mode:<12} {e.schedule_status:<11} {e.evidence[:70]}")
     return 0
 
 

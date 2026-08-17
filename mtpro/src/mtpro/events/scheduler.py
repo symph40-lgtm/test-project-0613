@@ -2,8 +2,8 @@
 
 run_collection(now, calendar, registry, collectors, alert, notify):
   1. 캘린더에서 대상 선별 (select_targets): scheduled_ts_utc 기준 UTC 날짜 차이로
-       D-7 단계: status=unconfirmed 이벤트만, days_left ∈ D7_DAYS (기본 7; 캐치업 6) → notify(UNCONFIRMED_SCHEDULE_D7)
-                 (운영 결정 ⑤ 재확인 체크. 수집·등록 없음. 정보성 알림이라 loud_failure 아님)
+       D-7 단계: schedule_status ∈ D7_STATUSES(unconfirmed·tentative — 발주자 확정 2026-08-17) 이벤트만, days_left ∈ D7_DAYS
+                 (기본 7; 캐치업 6) → notify(UNCONFIRMED_SCHEDULE_D7) (운영 결정 ⑤ 재확인 체크. 수집·등록 없음. 정보성 알림이라 loud_failure 아님)
        D-3 단계: days_left ∈ D3_DAYS (기본 3; 놓친 경우 2도 D-3 취급, 값 없을 때만)
        D-1 단계: days_left ∈ D1_DAYS (기본 1; 놓친 경우 0(발표 전)도 D-1 취급)
        이미 동결된 이벤트는 제외. 발표 시각이 지났는데 미동결(미등록 포함)이면 "late" 단계 → 수집 없이 즉시 동결
@@ -29,6 +29,7 @@ from mtpro.events.collectors import CollectError, Collector, collector_for, defa
 from mtpro.events.registry import ConsensusRegistry, FrozenError, RegistryError, VintageError
 
 D7_DAYS: tuple[int, ...] = (7, 6)   # config/mtpro.yaml consensus.unconfirmed_recheck_days_before=7 (+캐치업 6)
+D7_STATUSES: tuple[str, ...] = ("unconfirmed", "tentative")   # D-7 재확인 알림 대상 schedule_status (T5-1: tentative 추가)
 D3_DAYS: tuple[int, ...] = (3, 2)
 D1_DAYS: tuple[int, ...] = (1, 0)
 
@@ -73,7 +74,8 @@ def select_targets(
     d7_days: tuple[int, ...] = D7_DAYS,
 ) -> list[tuple[CalendarEvent, str]]:
     """(event, stage) 목록. 동결된 이벤트 제외. 순수 함수(registry는 읽기만).
-    D-7 단계는 unconfirmed 이벤트에만 붙는다(운영 결정 ⑤ 재확인 체크; 상태 없는 순수 선별이라 D-7·D-6 실행마다 알림)."""
+    D-7 단계는 schedule_status ∈ D7_STATUSES(unconfirmed·tentative) 이벤트에만 붙는다(운영 결정 ⑤ 재확인 체크; 상태 없는 순수 선별이라
+    D-7·D-6 실행마다 알림)."""
     n = _utc(now)
     out: list[tuple[CalendarEvent, str]] = []
     for ev in events:
@@ -91,7 +93,7 @@ def select_targets(
             has_value = row is not None and row["consensus_value"] is not None
             if dl == max(d3_days) or not has_value:
                 out.append((ev, STAGE_D3))
-        elif dl in d7_days and not ev.confirmed:
+        elif dl in d7_days and ev.schedule_status in D7_STATUSES:
             out.append((ev, STAGE_D7))
     return out
 
@@ -108,7 +110,7 @@ def _ensure_registered(registry: ConsensusRegistry, ev: CalendarEvent) -> dict[s
     if row is None:
         row = registry.register_event(
             ev.event_id, ev.event_type, ev.asset_scope, ev.scheduled_ts_utc, ev.t0_mode,
-            note=f"calendar:{ev.status}", exist_ok=True, status=ev.status,   # T5-1: status 전달
+            note=f"calendar:{ev.schedule_status}", exist_ok=True, schedule_status=ev.schedule_status,   # T5-1: 일정 상태 전달
         )
     return row
 
@@ -130,8 +132,8 @@ def process_event(
         res.detail = f"{stage} unconfirmed schedule — 공식 소스에서 날짜 확인 후 캘린더 갱신 필요"
         res.alerts.append(notify(UNCONFIRMED_SCHEDULE_D7, {
             "event_id": ev.event_id, "stage": stage, "days_left": days_left(ev, n),
-            "scheduled_ts_utc": ev.scheduled_ts_utc.isoformat(), "status": ev.status, "evidence": ev.evidence,
-            "action": "공식 소스에서 날짜 확인 → config/event_calendar.yaml status/local_date 갱신"}, ts=n))
+            "scheduled_ts_utc": ev.scheduled_ts_utc.isoformat(), "schedule_status": ev.schedule_status, "evidence": ev.evidence,
+            "action": "공식 소스에서 날짜 확인 → config/event_calendar.yaml schedule_status/local_date 갱신"}, ts=n))
         return res
     row = _ensure_registered(registry, ev)
     if not ev.confirmed:

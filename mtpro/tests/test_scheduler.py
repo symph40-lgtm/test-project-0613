@@ -11,7 +11,7 @@ from mtpro.events.calendar import Calendar, CalendarEvent, EventTypeSpec, schedu
 from mtpro.events.collectors import CollectError
 from mtpro.events.registry import ConsensusRegistry, FrozenError
 from mtpro.events.scheduler import (
-    STAGE_D1, STAGE_D3, STAGE_D7, STAGE_LATE, UNCONFIRMED_SCHEDULE_D7, run_collection, select_targets,
+    D7_STATUSES, STAGE_D1, STAGE_D3, STAGE_D7, STAGE_LATE, UNCONFIRMED_SCHEDULE_D7, run_collection, select_targets,
 )
 
 UTC = timezone.utc
@@ -24,10 +24,10 @@ SPEC = EventTypeSpec(
 )
 
 
-def _event(eid="US_CPI_20260911", d=date(2026, 9, 11), status="confirmed", spec=SPEC):
+def _event(eid="US_CPI_20260911", d=date(2026, 9, 11), status="confirmed", spec=SPEC):   # status → schedule_status (T5-1 필드명)
     return CalendarEvent(
         event_id=eid, event_type=spec.event_type, local_date=d, scheduled_ts_utc=scheduled_utc(d, spec),
-        t0_mode=spec.t0_mode, asset_scope=spec.asset_scope, status=status, evidence="test", spec=spec,
+        t0_mode=spec.t0_mode, asset_scope=spec.asset_scope, schedule_status=status, evidence="test", spec=spec,
     )
 
 
@@ -260,6 +260,26 @@ def test_unconfirmed_d7_recheck_notifies_without_registration(env, notifier):
     run_collection(datetime(2026, 9, 8, tzinfo=UTC), cal, reg, {"fake": _ok_collector()}, alert, notify=notifier)
     kinds = [a["kind"] for a in read_alerts(alerts_path)]
     assert kinds == [UNCONFIRMED_SCHEDULE_D7, "UNCONFIRMED_SCHEDULE"]
+
+
+def test_tentative_schedule_also_gets_d7_recheck(env, notifier):
+    """발주자 확정 2026-08-17 (계획서 §12.5): D-7 재확인은 unconfirmed 뿐 아니라 tentative 에도 발동. schedule_status 가 그대로 알림에 실린다."""
+    assert D7_STATUSES == ("unconfirmed", "tentative")
+    reg, alerts_path, alert = env
+    ev = _event(status="tentative")
+    assert select_targets([ev], datetime(2026, 9, 4, tzinfo=UTC)) == [(ev, STAGE_D7)]
+    assert select_targets([ev], datetime(2026, 9, 5, tzinfo=UTC)) == [(ev, STAGE_D7)]   # 캐치업 D-6
+    cal = Calendar("t", {"US_CPI": SPEC}, [ev])
+    r = run_collection(datetime(2026, 9, 4, tzinfo=UTC), cal, reg, {"fake": _ok_collector()}, alert, notify=notifier)
+    assert [(x.stage, x.status) for x in r] == [(STAGE_D7, "recheck")]
+    assert "US_CPI_20260911" not in reg
+    al = read_alerts(alerts_path)
+    assert len(al) == 1 and al[0]["kind"] == UNCONFIRMED_SCHEDULE_D7 and al[0]["level"] == "info"
+    assert al[0]["detail"]["schedule_status"] == "tentative" and al[0]["detail"]["days_left"] == 7
+    # D-3 에서는 등록되며 레지스트리 행에 schedule_status=tentative 가 실린다 (+ 기존 UNCONFIRMED_SCHEDULE loud)
+    run_collection(datetime(2026, 9, 8, tzinfo=UTC), cal, reg, {"fake": _ok_collector()}, alert, notify=notifier)
+    assert reg.get("US_CPI_20260911")["schedule_status"] == "tentative"
+    assert [a["kind"] for a in read_alerts(alerts_path)] == [UNCONFIRMED_SCHEDULE_D7, "UNCONFIRMED_SCHEDULE"]
 
 
 def test_confirmed_event_has_no_d7_notice(env, notifier):
