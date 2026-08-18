@@ -9,6 +9,7 @@ export type ActionCode =
   // 방향-수단 매트릭스 (a) 확정 (발주자 8/13): 신규 숏 없음 — "매도 진입" 제거,
   // 갭하락 판정은 보유분 방어(T2_SELL_HOLDINGS) 또는 경계(T2_DOWN_ALERT)로만.
   | "T2_BUY" | "T2_SELL_HOLDINGS" | "T2_DOWN_ALERT" | "T2_LEAN" | "T2_FLAT"
+  | "T2_GRADE_NOBET"   // 등급 High/Low 구간인데 트리거 조건에 막혀 베팅 없음 (등급-행동 분리, 발주자 8/18)
   | "R1_KEEP" | "R1_HALF" | "R1_EXIT_PREOPEN" | "R1_NOPOS_WATCH"
   | "R2_OPEN_BUY" | "R2_FADE_CANDIDATE" | "R2_NO_SIGNAL";
 
@@ -53,6 +54,10 @@ export function t2Action(
   }
   // 4등급제: 베팅 없는 밤에도 판단은 항상 (베팅 문턱·사이징 불변)
   const why = v.abstain_reason ?? blocked ?? "θ 미달";
+  // 등급-행동 축 분리 (발주자 확정 8/18): 점수가 High/Low 구간인데 트리거 조건(DC-PM·경제성·3자)에 막힌 밤은
+  // 등급을 강등하지 않고 행동만 "베팅 없음 (사유)"로 적는다. 8/18 삼전 -4.35 = "▼ 갭하락 Low · 베팅 없음 (DC-PM 미달)".
+  if ((grade?.grade === "High" || grade?.grade === "Low") && grade.lean_dir)
+    return { ...fmt("T2_GRADE_NOBET", `베팅 없음 — ${grade.lean_dir === "UP" ? "갭상승" : "갭하락"} ${grade.grade} (score ${grade.lean_score >= 0 ? "+" : ""}${grade.lean_score}·${why})`, phase), dir: grade.lean_dir };
   if (grade?.grade === "Lean" && grade.lean_dir)
     return { ...fmt("T2_LEAN", `베팅 없음 — ${grade.lean_dir === "UP" ? "갭상승" : "갭하락"} Lean 발표 (score ${grade.lean_score >= 0 ? "+" : ""}${grade.lean_score}·${why})`, phase), dir: grade.lean_dir };
   return { ...fmt("T2_FLAT", `베팅 없음 — ${grade?.lean_dir ? (grade.lean_dir === "UP" ? "갭상승 Lean·" : "갭하락 Lean·") : "무방향·"}${why}`, phase), dir: grade?.lean_dir ?? null };

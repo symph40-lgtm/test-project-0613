@@ -219,3 +219,26 @@ export async function krDaily(symbol: G1BSymbol): Promise<{ prevClose: number | 
       : { prevClose: last.c, todayOpen: null, dates: [last.d] };
   } catch { return { prevClose: null, todayOpen: null, dates: [] }; }
 }
+
+// ── 연휴 밤 커버리지 (발주자 8/18 §3) ──
+// 야간선물 1회 세션은 "직전 KRX 거래일 저녁 → 라벨일 새벽"만 덮는다. 그 사이 미국 세션이 2개 이상이면(한국 연휴가
+// 미국 거래일과 겹칠 때) 야간선물은 첫 세션만 보고 마감되어 **커버리지 부분**이다. u1 채점에서 분리 집계한다.
+//   us_sessions = 직전 KRX 거래일 P < d ≤ 라벨일 D−1 인 미국 거래일(평일·미 휴장 제외) 수
+//   normal = 1 · partial = ≥2 · none = 0 (미 휴장 밤 — 야간선물이 무엇도 덮지 않음)
+export function nightCoverage(labelDate: string, prevKrxDate: string, usHolidays: readonly string[]): { us_sessions: number; kind: "normal" | "partial" | "none"; days: string[] } {
+  const days: string[] = [];
+  const d = new Date(prevKrxDate + "T00:00:00Z");
+  const end = new Date(labelDate + "T00:00:00Z");
+  end.setUTCDate(end.getUTCDate() - 1);
+  for (d.setUTCDate(d.getUTCDate() + 1); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    const wd = d.getUTCDay();
+    if (wd === 0 || wd === 6 || usHolidays.includes(iso)) continue;
+    days.push(iso);
+  }
+  // 직전 KRX 거래일 자신의 미국 세션(P 저녁 = P 미국 세션)이 야간선물이 덮는 첫 세션 — 위 구간에 P는 포함되지 않으므로 +1 보정
+  const wdP = new Date(prevKrxDate + "T00:00:00Z").getUTCDay();
+  const pIsUs = wdP !== 0 && wdP !== 6 && !usHolidays.includes(prevKrxDate);
+  const n = days.length + (pIsUs ? 1 : 0);
+  return { us_sessions: n, kind: n === 0 ? "none" : n === 1 ? "normal" : "partial", days: pIsUs ? [prevKrxDate, ...days] : days };
+}

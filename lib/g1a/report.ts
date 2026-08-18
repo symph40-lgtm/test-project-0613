@@ -23,7 +23,7 @@ export function buildT2Report(
     `[G1A/T2-${kind}] ${md} ${time} | ${NAME[symbol]}`,
     `판정: ${v.direction}·${v.confidence} → NXT ${v.size} 진입 (log-only 가상)`,
     `GapScore ${s1(v.gap_score)} (θ ${v.theta_applied} 통과) | DC-PM ${f.F21_dcpm == null ? "—" : Math.round(f.F21_dcpm * 100) + "%"} | ${v.three_way_agree ? "3자 일치" : "3자 불일치"}`,
-    `예상잔여갭 ${s1(v.expected_residual_gap)}% (바스켓 ${s1(v.r_basket)}% · NXT 기반영 ${s1(v.r_nxt_pre_entry)}%)`,
+    `예상잔여갭 ${s1(v.expected_residual_gap)}% (바스켓 |수익률| |${s1(v.r_basket)}%| ${v.r_basket != null && Math.abs(v.r_basket) >= 0.5 ? "≥0.5% 통과" : "<0.5% 미달"} · NXT 기반영 ${s1(v.r_nxt_pre_entry)}%)`,
     `게이트: 스프레드 ${f.spread_pct == null ? "미측정" : f.spread_pct.toFixed(2) + "%"} (${v.liquidity}) | BiasGate ${v.bias_gate}`,
     `감시: 19:55까지 DC-PM 40% 붕괴·부호 반전 시 청산 기록`,
   ].join("\n");

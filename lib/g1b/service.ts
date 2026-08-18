@@ -115,6 +115,16 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
     if (hhmm >= W.nightStart && hhmm < C.cutoff.r1 && coreMissing(row.night)) {
       const fresh = await collectNight(symbol);
       row.night = row.night ? { ...fresh, ...Object.fromEntries(Object.entries(row.night).filter(([, o]) => o.v != null)) } : fresh;
+      // [발주자 8/18 §3] 연휴 밤 커버리지 플래그 — 마감 후 미국 세션 수 (직전 KRX 거래일은 fchart 6봉의 마지막 확정일)
+      try {
+        const kr0 = await krDaily(symbol);
+        const prevKrx = kr0.dates.length ? kr0.dates[0].replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3") : null;
+        if (prevKrx && prevKrx < date) {
+          const { G1A_CONFIG } = await import("@/lib/g1a/config");
+          const { nightCoverage } = await import("./data");
+          (row.night as Record<string, unknown>).nf_coverage = nightCoverage(date, prevKrx, G1A_CONFIG.abstain.usHolidays);
+        }
+      } catch { /* 커버리지 결측 허용 */ }
       await saveRow(row);
       notes.push(`${symbol} 야간 수집${row.night.r_spx?.v == null ? " (핵심 결측 — 재시도 예정)" : ""}`);
     } else if (hhmm >= W.r1Publish && hhmm < W.morningStart && !row.r1) {
@@ -134,7 +144,9 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const { r1Action, phaseTag } = await import("@/lib/g1/action");
       const g1aRef = await admin.from("g1a_days").select("date,t2").eq("symbol", symbol)
         .lt("date", date).order("date", { ascending: false }).limit(1).maybeSingle();
-      const refT2 = (g1aRef.data?.t2 ?? null) as { verdict?: { direction?: string }; entry_px_virtual?: number | null } | null;
+      const refT2 = (g1aRef.data?.t2 ?? null) as { verdict?: { direction?: string; gap_score?: number }; entry_px_virtual?: number | null; nf?: { level?: { pct?: number; cut_t?: string; nf_level?: number } } } | null;
+      // [발주자 검수 8/18 §2·§3] 저녁 19:35 절단 야간선물 = G1A 저장값을 그대로 인용 (재조회 금지 — 판정=화면=로그)
+      const nfCut = refT2?.nf?.level?.pct ?? null;
       const act = r1Action(
         refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null } : null,
         expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
@@ -153,7 +165,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         expected_open: expOpen, prev_close: kr.prevClose,
         experts: ex, virtual: true, night_flash: nightFlash,
         challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
-        action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual } : null,
+        action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null } : null,
         report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
           act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
         sent_at: new Date().toISOString(),
@@ -249,9 +261,11 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
           const verdict = livePct == null ? "라이브 결측 — 정본만 기록"
             : Math.abs(diff!) <= 0.30 ? "일치(±0.30%p)"
             : "불일치 — 소스 점검 필요";
+          const cov = (row.night as Record<string, unknown>).nf_coverage as { kind?: string; us_sessions?: number } | undefined;
           (row.night as Record<string, unknown>).nf_reconcile = {
             live_pct: livePct, krx_u1_pct: krx.u1_pct, diff_pp: diff, contract: krx.contract,
             live_corrected: liveCorrected, verdict, ts: new Date().toISOString(),
+            coverage: cov?.kind ?? "unknown", us_sessions: cov?.us_sessions ?? null,   // 커버리지 부분 밤은 u1 채점 분리 집계 (8/18)
           };
           notes.push(`${symbol} 야간 대사 ${verdict}${diff != null ? ` (라이브 ${livePct} vs 정본 ${krx.u1_pct})` : ""}`);
           if (verdict.startsWith("불일치")) {
@@ -268,10 +282,24 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const actual = Math.round(((kr.todayOpen / kr.prevClose - 1) * 100) * 100) / 100;
         const f1 = row.r1.fair_gap_pct as number | null;
         const f2 = row.r2?.fair_gap_r2_pct as number | null | undefined;
+        // [발주자 검수 8/18 §3] 4자 대조 — 룰(G1A GapScore) vs 야간선물(19:35 절단) vs 번역(R1 FairGap) vs 실측. 신호 대결 표본으로 명시.
+        const gref = (row.r1.g1a_ref ?? null) as { rule_score?: number | null; nf_cut1935_pct?: number | null } | null;
+        const sgnOf = (x: number | null | undefined, band: number) => (x == null ? null : Math.abs(x) < band ? 0 : Math.sign(x));
+        const fourWay = {
+          rule_score: gref?.rule_score ?? null, nf_cut1935_pct: gref?.nf_cut1935_pct ?? null, fair_r1_pct: f1, actual_gap_pct: actual,
+          // 방향 일치: 룰 |score|≥0.5 · 야간선물 |%|≥0.3 · 번역 |%|≥0.3 · 실측 |%|≥0.3 (플랫 밴드)
+          hit: {
+            rule: sgnOf(gref?.rule_score, 0.5) && sgnOf(actual, 0.3) ? sgnOf(gref?.rule_score, 0.5) === sgnOf(actual, 0.3) : null,
+            nf: sgnOf(gref?.nf_cut1935_pct, 0.3) && sgnOf(actual, 0.3) ? sgnOf(gref?.nf_cut1935_pct, 0.3) === sgnOf(actual, 0.3) : null,
+            fair: sgnOf(f1, 0.3) && sgnOf(actual, 0.3) ? sgnOf(f1, 0.3) === sgnOf(actual, 0.3) : null,
+          },
+          note: "신호 대결 표본 (발주자 8/18) — 룰·야간선물·번역 세 신호의 방향 vs 실측 갭",
+        };
         row.labels = {
           actual_open: kr.todayOpen, actual_gap_pct: actual,
           te_r1_pct: f1 != null ? Math.round(Math.abs(actual - f1) * 100) / 100 : null,
           te_r2_pct: f2 != null ? Math.round(Math.abs(actual - (f2 as number)) * 100) / 100 : null,
+          four_way: fourWay,
         };
         const ex = (row.r1.experts ?? {}) as Experts;
         const regime = (row.r1.regime as string) ?? "normal";
@@ -426,6 +454,15 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const leanSplit = (dir: "UP" | "DOWN") =>
     leanNight(leanRows.filter((r) => (r.t2 as { grade?: { lean_dir?: string } }).grade!.lean_dir === dir));
   const leanAll = leanNight(leanRows);
+  // 등급-행동 분리 (발주자 8/18): 등급 High/Low 구간인데 트리거 조건에 막혀 베팅 없던 밤 — Lean과 분리해 Low/High로 계수
+  // (8/18 삼전 -4.35 = ▼갭하락 Low·베팅 없음(DC-PM 미달)이 첫 표본). 갭상승/갭하락 분리 집계.
+  const gradeNoBetRows = gaRows.filter((r) => {
+    const g = (r.t2 as { grade?: { grade?: string; lean_dir?: string } } | null)?.grade;
+    const dir = (r.t2?.verdict as { direction?: string } | undefined)?.direction;
+    return (g?.grade === "High" || g?.grade === "Low") && dir === "NEUTRAL" && g.lean_dir && r.labels?.L1 != null;
+  });
+  const gradeNoBetSplit = (dir: "UP" | "DOWN") =>
+    leanNight(gradeNoBetRows.filter((r) => (r.t2 as { grade?: { lean_dir?: string } }).grade!.lean_dir === dir));
   const dirOf = (o: unknown) => String((o as { last?: { dir?: string } } | undefined)?.last?.dir ?? "");
   const t2plus = {
     // E2·모자이크 비교표: 베팅 가능 밤 비율이 승격 심사 명시 지표 (발주자 8/12 §5)
@@ -434,6 +471,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     shadow_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf(r.t2?.shadow))).length,
     mosaic_bets: gaRows.filter((r) => ["UP", "DOWN"].includes(dirOf((r.t2 as { mosaic?: unknown } | null)?.mosaic))).length,
     lean_score: { ...leanAll, 갭상승: leanSplit("UP"), 갭하락: leanSplit("DOWN") }, // 밤 단위 표본 (§2)
+    grade_nobet_score: { ...leanNight(gradeNoBetRows), 갭상승: gradeNoBetSplit("UP"), 갭하락: gradeNoBetSplit("DOWN") }, // High/Low 등급·베팅 없음 밤 (8/18 분리)
     e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
   const nfEveStart = floorReset(gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null);
@@ -458,6 +496,21 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     nf_leaderboard: nfLeaderboard,
+    // [발주자 8/18 §3] u1 대사 커버리지 분리 집계 — 커버리지 부분(연휴 밤·미국 세션 ≥2)은 정상 밤과 섞지 않는다
+    nf_reconcile_by_coverage: (() => {
+      const acc: Record<string, { n: number; match: number; mismatch: number; missing: number }> = {};
+      for (const r of rows) {
+        const rc = (r.night as Record<string, unknown> | null)?.nf_reconcile as { verdict?: string; coverage?: string } | undefined;
+        if (!rc) continue;
+        const k = rc.coverage ?? "unknown";
+        acc[k] ??= { n: 0, match: 0, mismatch: 0, missing: 0 };
+        acc[k].n++;
+        if (rc.verdict?.startsWith("일치")) acc[k].match++;
+        else if (rc.verdict?.startsWith("불일치")) acc[k].mismatch++;
+        else acc[k].missing++;
+      }
+      return acc;
+    })(),
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };

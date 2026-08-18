@@ -190,12 +190,19 @@ export function evaluateT2(
 // High/Low = 기존 진입 등급 (문턱·사이징 불변 — 검증 오염 없음)
 // Lean = 베팅 없음 + 방향 기울기 발표 (|score| ≥ leanMin·비무방향) / Flat = 무방향 또는 이벤트 밤
 export const LEAN_MIN = 0.5; // 초기값 — Lean 채점(계기판)으로 재조정
-export function t2Grade(v: { direction: string; confidence: string | null; gap_score: number; abstain_reason: string | null }):
+// 등급 = **점수 구간** (발주자 확정 2026-08-18): |score| ≥ θ_high → High / ≥ θ_low → Low / ≥ LEAN_MIN → Lean / 그 외 Flat.
+// 베팅 여부(트리거 조건·보류·경제성)는 등급이 아니라 **행동**(t2Action)이 정한다.
+// 종전 구현은 direction=NEUTRAL이면 점수 크기와 무관하게 Lean으로 떨어뜨려, 8/18 삼전 -4.35(θ_low 3.0 초과)가
+// DC-PM 미달·경제성 미달로 NEUTRAL이 되자 "▽ 갭하락 Lean"으로 표기됐다 — 등급과 행동을 섞은 매핑 버그.
+// θ는 트리거 시각의 값(theta_applied) — 없으면(보류·미트리거) 최종 시각 θ(19:40 = 가장 낮은 문턱)를 쓴다.
+export function t2Grade(v: { direction: string; confidence: string | null; gap_score: number; abstain_reason: string | null; theta_applied?: number | null }, thetaOverride?: { high: number; low: number }):
   { grade: "High" | "Low" | "Lean" | "Flat"; lean_dir: "UP" | "DOWN" | null; lean_score: number } {
-  if (v.direction === "UP" || v.direction === "DOWN")
-    return { grade: v.confidence === "High" ? "High" : "Low", lean_dir: v.direction, lean_score: v.gap_score };
+  const th = thetaOverride ?? thetaAt(C.windows.t2Final);
+  const abs = Math.abs(v.gap_score);
   const dir = v.gap_score >= LEAN_MIN ? "UP" : v.gap_score <= -LEAN_MIN ? "DOWN" : null;
   const isEvent = (v.abstain_reason ?? "").startsWith("보류1") || (v.abstain_reason ?? "").includes("이벤트");
+  if (dir && abs >= th.high) return { grade: "High", lean_dir: dir, lean_score: v.gap_score };
+  if (dir && abs >= th.low) return { grade: "Low", lean_dir: dir, lean_score: v.gap_score };
   return { grade: dir && !isEvent ? "Lean" : "Flat", lean_dir: dir, lean_score: v.gap_score };
 }
 

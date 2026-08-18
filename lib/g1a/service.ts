@@ -127,6 +127,27 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
   for (const symbol of SYMBOLS) {
     rows.set(symbol, (await loadDay(date, symbol)) ?? { date, symbol, t1_snapshot: null, t2: null, labels: null, outcome: null });
   }
+  // [발주자 검수 8/18 §2] 절단 시각 공통 스냅샷 — 야간선물·P1은 **크론 호출당 1회** 조회해 두 종목 행이 같은 값을 쓴다.
+  // 카드별·종목별 개별 조회 금지: 판정에 쓰인 값 = 화면 값 = 로그 값. 19:35 절단 이후의 봉은 수집은 하되 level/dc_nf 산출에서 제외(동결).
+  const CUT = "19:35";
+  const snap: { t: string; nf_pct: number | null; pieces: Record<string, Record<string, number | null>> } = { t: hhmm, nf_pct: null, pieces: {} };
+  if (hhmm >= "18:00" && hhmm <= "19:40") {
+    try {
+      const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
+      if (hasKisKeys()) {
+        const nfq = await fetchKisNightFutures();   // CM 기본 (kis.ts) — 8/15 정화 이후 단일 시장구분
+        const pct = (nfq as { changePercent?: number | null })?.changePercent;
+        if (typeof pct === "number") snap.nf_pct = pct;
+      }
+    } catch { /* 결측 허용 */ }
+  }
+  if (hhmm >= W.t2Start && hhmm <= W.t2End) {
+    try {
+      const { fetchEveningPieces } = await import("./data");
+      for (const symbol of SYMBOLS) snap.pieces[symbol] = await fetchEveningPieces(symbol);   // P3만 종목 의존, P1(유럽 반도체)은 공통
+    } catch { /* 결측 허용 */ }
+  }
+
   for (const symbol of SYMBOLS) {
     const row = rows.get(symbol)!;
     const t2: T2State = row.t2 ?? {
@@ -146,10 +167,8 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const nf0 = (t2u.nf ?? { bars: [] }) as { bars: { t: string; pct: number }[] } & Record<string, unknown>;
       if (!nf0.bars.some((b) => b.t.slice(0, 4) === hhmm.slice(0, 4))) {
         try {
-          const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
-          if (hasKisKeys()) {
-            const nfq = await fetchKisNightFutures();
-            const pct = (nfq as { changePercent?: number | null })?.changePercent;
+          {
+            const pct = snap.nf_pct;   // 공통 스냅샷 (호출당 1회 조회 — 두 종목 동일 값)
             if (typeof pct === "number") {
               nf0.bars = [...nf0.bars, { t: hhmm, pct }];
               // β_mkt: G1B 라이브 칼만 갱신치 우선 (R1 nf 전문가와 동일 β — 일관성), 결측 시 pack 초기값
@@ -161,10 +180,13 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
                 if (typeof b === "number" && b > 0) beta = b;
               } catch { /* 폴백 유지 */ }
               // 봉 수익률 = 누적의 차분 (첫 봉은 누적 자체 — 18:00 시가≈주간 종가 근사, 베이시스 오차 명기)
-              const deltas = nf0.bars.map((b, i) => (i === 0 ? b.pct : b.pct - nf0.bars[i - 1].pct)).filter((d) => d !== 0);
-              const cum = nf0.bars[nf0.bars.length - 1].pct;
+              // 19:35 절단: level/dc_nf는 **≤19:35 봉만**으로 산출·동결. 이후 봉은 수집(역행 경보 원천)만.
+              const cutBars = nf0.bars.filter((b) => b.t <= CUT);
+              const src = cutBars.length ? cutBars : nf0.bars;
+              const deltas = src.map((b, i) => (i === 0 ? b.pct : b.pct - src[i - 1].pct)).filter((d) => d !== 0);
+              const cum = src[src.length - 1].pct;
               const agree = deltas.filter((d) => Math.sign(d) === Math.sign(cum)).length;
-              nf0.level = { pct: cum, nf_level: Math.round(cum * beta * 100) / 100, beta_mkt: Math.round(beta * 1000) / 1000 };
+              nf0.level = { pct: cum, nf_level: Math.round(cum * beta * 100) / 100, beta_mkt: Math.round(beta * 1000) / 1000, cut: CUT, cut_t: src[src.length - 1].t };
               nf0.dc_nf = cum !== 0 && deltas.length >= 3 ? Math.round((agree / deltas.length) * 100) / 100 : null;
               t2u.nf = nf0;
               if (!t2u.nf_evening) t2u.nf_evening = { t: hhmm, pct }; // 계기판 g1a_nf_evening 개시일 연속성
@@ -187,10 +209,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       t2.evals.push({ time: hhmm, gap_score: verdict.gap_score, blocked_by: blocked });
       // (구 4점 스냅샷 블록은 DC-NF 10분봉 체계로 흡수 — 발주자 8/15 §1, 수집은 위 공통 블록)
       // 저녁 정보 조각 P1~P5 (발주자 8/12 §3 — 확보분 기록, 본 판정 미사용)
-      try {
-        const { fetchEveningPieces } = await import("./data");
-        (t2 as Record<string, unknown>).pieces = await fetchEveningPieces(symbol);
-      } catch { /* 결측 허용 */ }
+      if (snap.pieces[symbol]) (t2 as Record<string, unknown>).pieces = { ...snap.pieces[symbol], snap_t: hhmm };   // 공통 스냅샷 (호출당 1회)
       // E2 (발주자 8/12) → 개정 (발주자 8/15 §2 + 정확도연동 §2): "T2+" 섀도 = {NF-Level 방향 재료
       // + 확인 조건(DC-PM ≥60% 또는 DC-NF ≥60%)} + w_nf 일일 갱신형 미니 Hedge (초기 0.5·상한 0.7).
       // 재등록: challengers/t2plus_nightfut.md (개정판 — 갱신형 기준). 모자이크는 동일 확인 조건 공유.
@@ -230,7 +249,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
       const { t2Grade } = await import("./score");
       const phase = await phaseTag("t2");
-      const grade0 = t2Grade(verdict);
+      const grade0 = t2Grade(verdict, th);   // 등급 = 점수 구간 (트리거 시각 θ 기준) — 행동과 분리 (발주자 확정 8/18)
       const isEventN = (verdict.abstain_reason ?? "").startsWith("보류1");
       const grade = { ...grade0, label: gradeLabel(grade0.grade, grade0.lean_dir, isEventN) }; // 용어 확정판 8/13 — 3곳 동일 규격
       (t2 as Record<string, unknown>).grade = grade;   // 4등급 + Lean 채점 원천 (발주자 8/12 §1·2)

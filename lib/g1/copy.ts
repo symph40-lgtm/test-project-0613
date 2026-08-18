@@ -15,12 +15,20 @@ const sgn = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
 export function t2Footnote(a: {
   grade: string; dir: "UP" | "DOWN" | null; size: string; entryPx: number | null;
   score: number; abstain: string | null; phase: string;
+  blockedNoBet?: string | null;   // 등급 High/Low인데 베팅 없는 밤의 차단 사유 (DC-PM 미달 등)
 }): TwoLines {
   const dirWord = a.dir === "UP" ? "갭상승" : "갭하락";
+  // 등급-행동 분리 (발주자 8/18): 등급은 High/Low인데 트리거 조건(DC-PM·경제성)에 막힌 밤 — 각주도 등급 템플릿을 따르되 할 일은 "베팅 없음"
+  if ((a.grade === "High" || a.grade === "Low") && a.blockedNoBet) {
+    return {
+      해석: `점수 ${sgn(a.score).replace("%", "")}로 ${dirWord} ${a.grade} 구간이지만, 트리거 조건 미달(${a.blockedNoBet})로 베팅하지 않음 — 등급은 점수대로, 행동만 보류`,
+      할일: withTail(`지금: 없음 — ${dirWord} 경계. 내일 시가로 ${a.grade} 등급 판단이 맞았는지 채점됨`, a.phase),
+    };
+  }
   if (a.grade === "High" || a.grade === "Low") {
     if (a.dir === "UP") return {
       해석: `오늘 밤 갭상승 확률이 높다고 판단 — 확신 ${a.grade}`,
-      할일: withTail(`저녁 지정가 ${a.entryPx ? a.entryPx.toLocaleString() : "—"} 이하로 ${a.size} 매수. 내일 아침 07:20 R1이 유지/청산을 알려줌`, a.phase),
+      할일: withTail(`저녁 지정가 ${a.entryPx ? a.entryPx.toLocaleString() + "원" : "—"}(기준가·19:40 NXT 주가) 이하로 ${a.size} 매수. 내일 아침 07:20 R1이 유지/청산을 알려줌`, a.phase),
     };
     // 갭하락 베팅 — 템플릿 공백 ①: 행동어 개정(신규 숏 없음) 잠정 준용
     return {
@@ -143,6 +151,7 @@ export function nfFlowLines(nf: {
     : cons >= 60
       ? `흐름이 한 방향 유지 중 — 이런 흐름은 개장까지 이어지는 경향을 확인 중(검증 단계)`
       : `방향이 오락가락 — 밤 방향 판단 재료로 부족`;
-  const line3 = `지수 ${sgn(cum)} ≈ 삼전 ${sgn(cum * betaSs)}·하닉 ${sgn(cum * betaHx)} 상당 (β 환산)`;
+  // β값 병기 (발주자 8/18): 배율의 출처가 보이게 — "≈ 삼전 -1.62%(β1.3)·하닉 -1.87%(β1.5)"
+  const line3 = `지수 ${sgn(cum)} ≈ 삼전 ${sgn(cum * betaSs)}(β${betaSs.toFixed(1)})·하닉 ${sgn(cum * betaHx)}(β${betaHx.toFixed(1)}) 상당 (β 환산)`;
   return [line1, line2, line3];
 }

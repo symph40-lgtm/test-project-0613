@@ -176,7 +176,7 @@ export default async function G1Page() {
                   <span className={color}>{label}</span>
                   <span className="text-ink-80"> {v.direction !== "NEUTRAL"
                     ? <>· {v.direction === "UP" ? `매수 권장 ${SIZE_KO[v.size ?? "0"]}` : "보유분 방어 전용 (신규 숏 없음)"}</>
-                    : <>· 베팅 없음{g?.lean_score != null ? ` (score ${g.lean_score})` : ""}</>}</span>
+                    : <>· 베팅 없음{g?.lean_score != null ? ` (score ${g.lean_score}` : ""}{(g?.grade === "High" || g?.grade === "Low") ? " · 트리거 조건 미달 — 등급은 점수대로" : ""}{g?.lean_score != null ? ")" : ""}</>}</span>
                   {v.abstain_reason ? <span className="font-normal text-[12px] text-ink-48"> ({v.abstain_reason})</span> : null}
                 </>);
               })() : "저녁 감시 대기"}
@@ -189,13 +189,17 @@ export default async function G1Page() {
               <Row label={`예상잔여갭 · 번역 추정(G1B)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
                 value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
             ) : null}
-            <Row label="GapScore · 방향 판단(G1A) / 기준가" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}</>} />
+            {/* 기준가 라벨 명시 (발주자 8/18): 주식수 오독 방지 — "기준가(19:40 NXT 주가)" */}
+            <Row label="GapScore · 방향 판단(G1A) / 기준가(19:40 NXT 주가)" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}{r.t2?.entry_px_virtual ? "원" : ""}</>} />
             {/* 트리거 조건 줄 (사용자 지적 8/15: DC-PM이 화면에 없어 DC-NF와 비대칭) — 저장값 표시만, 판정 무접촉 */}
             {v ? (() => {
               const vv = v as { dc_pm?: number | null; r_basket?: number | null; three_way_agree?: boolean | null; economics_pass?: boolean | null };
               const dc = vv.dc_pm != null ? `${Math.round(vv.dc_pm * 100)}%${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}` : "—";
-              return <Row label="트리거 조건 (DC-PM ≥60% · |바스켓| ≥0.5% · 3자 일치 · 경제성)"
-                value={<span className="text-[12px]">DC-PM {dc} · 바스켓 {pp(vv.r_basket)} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
+              // 용어 (발주자 8/18): 바스켓은 |수익률| 절대값 조건 — "|-1.28%| ≥ 0.5% 통과" 형식으로 표기
+              const rb = vv.r_basket;
+              const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
+              return <Row label="트리거 조건 (DC-PM ≥60% · 바스켓 |수익률|(미 반도체 프리장 평균, 크기 기준) ≥0.5% · 3자 일치 · 경제성)"
+                value={<span className="text-[12px]">DC-PM {dc} · 바스켓 {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
             })() : null}
             {(() => {
               // §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) — 미래 예측 서술 금지, 현재 상태·일관성만
@@ -234,6 +238,9 @@ export default async function G1Page() {
                 size: SIZE_KO[v.size ?? "0"] ?? v.size ?? "—", entryPx: r.t2?.entry_px_virtual ?? null,
                 score: v.gap_score ?? 0, abstain: v.abstain_reason ?? null,
                 phase: (r.t2?.action as { phase?: string } | null)?.phase ?? "가상",
+                // 등급-행동 분리 (8/18): 등급 High/Low인데 direction NEUTRAL = 트리거 차단 밤 → 각주 사유 = 행동 라인의 괄호 사유
+                blockedNoBet: (g.grade?.grade === "High" || g.grade?.grade === "Low") && v.direction === "NEUTRAL"
+                  ? ((r.t2?.action as { line?: string } | null)?.line?.match(/·([^)]+)\)/)?.[1] ?? "트리거 조건 미달") : null,
               })} />;
             })()}
             {r.t2?.report_r1 ? (
@@ -267,7 +274,21 @@ export default async function G1Page() {
           <Row label="R2 (08:55)" value={r.r2 ? <>{r.r2.signal}{r.r2.residual_sigma != null ? ` (${r.r2.residual_sigma}σ)` : ""}</> : "발행 전"} />
           {r.r2 ? <Footnote f={r2Footnote({ code: r2a?.code ?? "", residualSigma: r.r2.residual_sigma ?? null, expectedOpen: expOpen2, phase: r2a?.phase ?? "가상" })} /> : null}
           <MtLine day={mtLatest.get(r.symbol)} />
-          <Row label="야간선물 관측" value={nfObs?.v != null ? <>{pp(nfObs.v * 100)}{nfObs.corrected ? <span className="text-[11px] text-ink-48"> (정정 — KRX 정본 소급)</span> : null}</> : "결측"} />
+          {/* 절단 시각 공통 스냅샷 (발주자 검수 8/18 §2): 저녁 19:35 절단값은 G1A 저장값 인용 — 재조회 없음, T2 카드와 동일 값 */}
+          {(() => {
+            const gr = (r.r1 as { g1a_ref?: { nf_cut1935_pct?: number | null; nf_cut_t?: string | null; rule_score?: number | null } | null } | null)?.g1a_ref;
+            const cov = (r.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string; us_sessions?: number } | undefined;
+            const covTxt = cov ? (cov.kind === "partial" ? ` ⚠커버리지 부분(미 세션 ${cov.us_sessions})` : cov.kind === "none" ? " (미 휴장 밤)" : "") : "";
+            return <Row label={`야간선물 — 저녁 19:35 절단 / 아침 04:50 관측${covTxt}`}
+              value={<>{gr?.nf_cut1935_pct != null ? `${pp(gr.nf_cut1935_pct)} (${gr.nf_cut_t ?? "19:35"} 절단·T2 공유값)` : "저녁 결측"} / {nfObs?.v != null ? <>{pp(nfObs.v * 100)}{nfObs.corrected ? <span className="text-[11px] text-ink-48"> (정정 — KRX 정본 소급)</span> : null}</> : "결측"}</>} />;
+          })()}
+          {(() => {
+            // 4자 대조 (발주자 검수 8/18 §3): 룰 vs 야간선물 vs 번역 vs 실측 — 신호 대결 표본
+            const fw = (r.labels as { four_way?: { rule_score?: number | null; nf_cut1935_pct?: number | null; fair_r1_pct?: number | null; actual_gap_pct?: number; hit?: { rule?: boolean | null; nf?: boolean | null; fair?: boolean | null } } } | null)?.four_way;
+            if (!fw) return null;
+            const mk = (h: boolean | null | undefined) => (h == null ? "" : h ? " ✓" : " ✗");
+            return <Row label="4자 대조 (신호 대결 표본)" value={<span className="text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 번역 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />;
+          })()}
           <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
           {r.r1?.report ? (
             <details className="mt-2 text-[12px] text-ink-48"><summary>리포트 전문</summary>
@@ -293,7 +314,7 @@ export default async function G1Page() {
         ))}
         {!aRows.some((r) => ["UP", "DOWN"].includes(String(r.t2?.verdict?.direction)) && r.labels)
           ? <p className="text-[13px] text-ink-48">베팅한 밤 없음 (전부 보류) — 아래 보류 기회비용 참조</p> : null}
-        <p className="mt-3 mb-1 text-[12px] font-semibold text-ink-48">보류 밤 기회비용 (가상 기준가 19:40 NXT → 시가)</p>
+        <p className="mt-3 mb-1 text-[12px] font-semibold text-ink-48">보류 밤 기회비용 (가상 기준가(19:40 NXT 주가) → 시가)</p>
         {aRows.filter((r) => r.t2?.verdict?.direction === "NEUTRAL" && r.labels?.L1p != null).slice(0, 6).map((r) => (
           <p key={`ab-${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[12px] leading-relaxed text-ink-80">
             {r.date.slice(5)} {verdictSentence({
@@ -328,6 +349,12 @@ export default async function G1Page() {
           }).join("  |  ") || "상태 없음"}
           <i> — |CUSUM|≥4 = 모형이 한 방향으로 계속 뒤처짐(η 상향 검토 신호)</i>
         </span>} />
+        <Row label="야간 대사 — 커버리지 분리 (일치/불일치/결측)" value={(() => {
+          const c = (m?.nf_reconcile_by_coverage ?? null) as Record<string, { n: number; match: number; mismatch: number; missing: number }> | null;
+          if (!c || !Object.keys(c).length) return "집계 전";
+          const nm: Record<string, string> = { normal: "정상 밤", partial: "커버리지 부분(연휴)", none: "미 휴장", unknown: "미분류" };
+          return <span className="text-[11px]">{Object.entries(c).map(([k, v]) => `${nm[k] ?? k} ${v.match}/${v.mismatch}/${v.missing} (n=${v.n})`).join(" · ")}</span>;
+        })()} />
         <Row label="기능별 개시일" value={<span className="text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
         <Row label="nf 리더보드 (pack_v1.1c 섀도)" value={(() => {
           // 발주자 8/15 정확도연동 §4 — "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인
