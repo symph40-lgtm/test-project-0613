@@ -60,12 +60,48 @@ function regimeToday(date: string): string {
 export async function runG1BService(): Promise<{ ok: boolean; window: string; notes: string[] }> {
   const { date, hhmm, wd } = kst();
   const notes: string[] = [];
-  if (wd === 0 || wd === 6) return { ok: true, window: "weekend", notes };
   const admin = createAdminClient();
   const probe = await admin.from("g1b_days").select("date").limit(1);
   if (probe.error) return { ok: false, window: "none", notes: ["마이그레이션 035 미적용"] };
 
   const W = C.windows;
+  // 주말 차단은 야간 창 뒤에 — 토요일 03:00(금요일 밤 세션 = 월요일 라벨)은 허용, 일·토 23:40은 세션 없음(nf 결측 기록)
+  const isWeekend = wd === 0 || wd === 6;
+  const nightWin = (hhmm >= "23:30" && hhmm <= "23:59") || (hhmm >= "02:50" && hhmm <= "03:20");
+  if (isWeekend && !(nightWin && wd === 6 && hhmm < "04:00")) return { ok: true, window: "weekend", notes };
+  // [발주자 8/20] 야간 감시 창 — 23:30~23:59(체크포인트 23:40) · 02:50~03:20(03:00). 판정 무개입, 기록·알림 전용.
+  // 라벨 = 다음 거래일 (자정 전이면 내일, 자정 후면 오늘) — R1 행과 같은 행에 night.watch로 적재.
+  if ((hhmm >= "23:30" && hhmm <= "23:59") || (hhmm >= "02:50" && hhmm <= "03:20")) {
+    const slot = hhmm >= "23:30" ? "2340" : "0300";
+    const labelDate = hhmm >= "23:30" ? (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() + 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })() : date;
+    const { takeCheckpoint, reverseCheck } = await import("./nightwatch");
+    const cp = await takeCheckpoint(hhmm);
+    for (const symbol of G1B_SYMBOLS) {
+      const row = await loadRow(labelDate, symbol);
+      const night = (row.night ?? {}) as Record<string, unknown>;
+      const watch = (night.watch ?? { cp: {}, alert: null }) as { cp: Record<string, unknown>; alert: Record<string, unknown> | null };
+      if (watch.cp[slot]) continue; // 슬롯당 1회
+      watch.cp[slot] = cp;
+      // §2 역행 경보 — 전일 저녁 T2 판정 방향 대조 (가상 포지션 = T2_BUY/T2_SELL_HOLDINGS, 방향 판정은 전부 대조)
+      const sessionNight = hhmm >= "23:30" ? date : (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+      const g1a = await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle();
+      const t2 = g1a.data?.t2 as { verdict?: { direction?: string }; grade?: { lean_dir?: string | null; grade?: string } } | null;
+      const dir = t2?.verdict?.direction && t2.verdict.direction !== "NEUTRAL" ? t2.verdict.direction : (t2?.grade?.grade === "High" || t2?.grade?.grade === "Low" ? t2.grade.lean_dir ?? null : null);
+      const rc = reverseCheck(dir ?? null, cp.nf_pct);
+      if (rc.fired && !watch.alert) {
+        watch.alert = { t: hhmm, why: rc.why, nf_pct: cp.nf_pct, t2_dir: dir };
+        const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+        const nm = symbol === "005930" ? "삼전" : "하닉";
+        const hr = await sendG1Notify("[G1 야간 역행] 저녁 판단 뒤집히는 중 (가상)", `[G1 야간 역행·${hhmm}] ${nm} ${rc.why} (가상 — 따라 하지 않기)`);
+        notes.push(`${symbol} 야간 역행 경보 발송(${hr.via}) ${hr.sent}건`);
+      }
+      night.watch = watch;
+      row.night = night as Record<string, Obs>;
+      await saveRow(row);
+      notes.push(`${symbol} 야간 CP ${slot} nf ${cp.nf_pct ?? "—"} nq ${cp.nq_fut_pct ?? "—"} soxx ${cp.soxx_pct ?? "—"}`);
+    }
+    return { ok: true, window: `night-${slot}`, notes };
+  }
   // 신호 알림 발송 (사용자 지시 2026-08-09: G1A·G1B 개발 문자는 발송 — 전역 정지의 발주자 승인 예외).
   // 회차당 두 종목 통합 1건 (LMS). 00~07시 금지 규칙과 무충돌 (R1 07:20·R2 08:55).
   const outbox: { subject: string; texts: string[] } = { subject: "", texts: [] };
@@ -170,6 +206,23 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const refCv = (g1aRef.data?.t2 as { conflict_v2?: { openExp_resid?: number | null } } | null)?.conflict_v2;
       const residOpenExp = refCv?.openExp_resid ?? (refV?.expected_residual_gap != null && refV?.r_nxt_pre_entry != null
         ? Math.round(((1 + refV.r_nxt_pre_entry / 100) * (1 + refV.expected_residual_gap / 100) - 1) * 10000) / 100 : null);
+      // [발주자 8/20 §3] 밤의 궤적 — 저녁 NXT 마감(애프터 최종가, 정규 종가 대비) → 23:40 → 03:00 → 06:00 야간선물 마감
+      let nxtClosePct: number | null = null;
+      try {
+        const { fetchNxtAfterMarket } = await import("@/lib/predict/kisMinute");
+        const sess = (g1aRef.data?.date as string | undefined) ?? null;
+        if (sess && kr.prevClose) {
+          const bars = await fetchNxtAfterMarket(symbol, sess.replace(/-/g, ""), "200000");
+          const last = bars?.length ? [...bars].sort((a, b) => a.time.localeCompare(b.time)).pop() : null;
+          if (last && last.close > 0) nxtClosePct = Math.round((last.close / kr.prevClose - 1) * 10000) / 100;
+        }
+      } catch { /* 결측 허용 */ }
+      const watch = (row.night as Record<string, unknown>).watch as { cp?: Record<string, import("./nightwatch").Checkpoint> } | undefined;
+      const nfClose = row.night.night_fut && !row.night.night_fut.late_arrival ? row.night.night_fut.v : null;
+      const { nightPathLine } = await import("./nightwatch");
+      const pathLine = nightPathLine({ nxtClosePct, cp2340: watch?.cp?.["2340"] ?? null, cp0300: watch?.cp?.["0300"] ?? null, nfClosePct: nfClose != null ? nfClose * 100 : null, beta: st.kalman.beta_mkt });
+      (row.night as Record<string, unknown>).nxt_close_pct = nxtClosePct;
+      (row.night as Record<string, unknown>).path_line = pathLine;
       const act = r1Action(
         refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null, has_position: hasPos } : null,
         expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
@@ -189,7 +242,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         experts: ex, virtual: true, night_flash: nightFlash,
         challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
         action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null , resid_open_exp: residOpenExp } : null,
-        report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
+        report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") + pathLine + "\n" +
           act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime, { sessionNight: g1aRef.data?.date ?? null, cutT: refT2?.nf?.level?.cut_t ?? null, cutPct: nfCut }),
         sent_at: new Date().toISOString(),
       };
@@ -334,7 +387,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
             hit_v11c: (() => { const x = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct; return sgnOf(x, 0.3) && sgnOf(actual, 0.3) ? sgnOf(x, 0.3) === sgnOf(actual, 0.3) : null; })(),
           },
         };
+        // [발주자 8/20 §4] 시장 간 정확도 리그전 — 애프터 최종가 vs 야간선물 마감 β환산, 누가 시가에 가까웠나
+        const { leagueScore } = await import("./nightwatch");
+        const nxtC = (row.night as Record<string, unknown> | null)?.nxt_close_pct as number | null | undefined;
+        const nfC = row.night?.night_fut && !row.night.night_fut.late_arrival ? row.night.night_fut.v : null;
+        const nfCB = nfC != null ? Math.round(nfC * 100 * st.kalman.beta_mkt * 100) / 100 : null;
+        const league = leagueScore({ nxtClosePct: nxtC ?? null, nfCloseBeta: nfCB, actualGap: actual });
         row.labels = {
+          league: { ...league, nxt_close_pct: nxtC ?? null, nf_close_beta: nfCB, note: "애프터 최종가 vs 야간선물 마감 — 잔여갭 야간선물 성분 편입 심사 직접 증거 (발주자 8/20 §4)" },
           actual_open: kr.todayOpen, actual_gap_pct: actual,
           te_r1_pct: f1 != null ? Math.round(Math.abs(actual - f1) * 100) / 100 : null,
           te_r2_pct: f2 != null ? Math.round(Math.abs(actual - (f2 as number)) * 100) / 100 : null,
@@ -513,6 +573,19 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     grade_nobet_score: { ...leanNight(gradeNoBetRows), 갭상승: gradeNoBetSplit("UP"), 갭하락: gradeNoBetSplit("DOWN") }, // High/Low 등급·베팅 없음 밤 (8/18 분리)
     e_shadow_nights: gaRows.filter((r) => (r.t2 as { e_shadow?: unknown } | null)?.e_shadow).length,
   };
+  // [헌법 발효 2026-08-20 §5] E-체계 채점 정식 행 — ①E-Lean 기울기 적중률 ②E-Low 발동 밤 가상 손익. D+60 성과 심사 재료.
+  // 전사(前史): 발효 전 e_shadow(retrospective 포함)는 분리 집계 — 본판정 이력(e_record·verdict.e_grade)과 섞지 않음.
+  const eRows = gaRows.filter((r) => (r.t2?.verdict as { event_night?: string | null } | undefined)?.event_night && r.labels?.L1 != null);
+  const eLean = eRows.filter((r) => (r.t2?.verdict as { e_grade?: string }).e_grade === "E-Lean");
+  const eLeanHit = eLean.filter((r) => { const sc = Number((r.t2?.verdict as { gap_score?: number }).gap_score ?? 0); const L1 = Number(r.labels!.L1); return Math.abs(L1) >= 0.3 && Math.sign(sc) === Math.sign(L1); }).length;
+  const eLow = eRows.filter((r) => (r.t2?.verdict as { e_grade?: string }).e_grade === "E-Low");
+  const eLowPnl = eLow.map((r) => Number(r.labels?.L1p ?? NaN) * ((r.t2?.verdict as { direction?: string }).direction === "UP" ? 1 : -1)).filter((x) => isFinite(x));
+  const preHist = gaRows.filter((r) => (r.t2 as { e_shadow?: { retrospective?: boolean } } | null)?.e_shadow);
+  const eSystem = {
+    effective_from: "2026-08-20", lean_nights: eLean.length, lean_hits: eLeanHit, lean_rate: eLean.length ? Math.round((eLeanHit / eLean.length) * 100) / 100 : null,
+    low_nights: eLow.length, low_pnl_sum_pct: eLowPnl.length ? Math.round(eLowPnl.reduce((a, b) => a + b, 0) * 100) / 100 : null,
+    prehistory_shadow_nights: preHist.length, note: "발효 전 E-섀도(8/12 CPI E-Lean 적중 등)는 전사 — retrospective 표식 유지, 본 행 미산입",
+  };
   const nfEveStart = floorReset(gaRows.find((r) => (r.t2 as { nf_evening?: unknown } | null)?.nf_evening)?.date ?? null);
   const p1Start = gaRows.find((r) => ((r.t2 as { pieces?: Record<string, unknown> } | null)?.pieces)?.p1_eu_semi_avg != null)?.date ?? null;
   // [발주자 8/15 정확도연동 §4] nf 전문가 리더보드 — 일일 loss·발언권(w_nf) 추이 + 챌린저 vs 챔피언 TE.
@@ -534,7 +607,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     te_r1_median_pct: med, te_r1_by_regime: teByRegime, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
-    nf_leaderboard: nfLeaderboard,
+    nf_leaderboard: nfLeaderboard, e_system: eSystem,
     // [발주자 8/18 §3] u1 대사 커버리지 분리 집계 — 커버리지 부분(연휴 밤·미국 세션 ≥2)은 정상 밤과 섞지 않는다
     nf_reconcile_by_coverage: (() => {
       const acc: Record<string, { n: number; match: number; mismatch: number; missing: number }> = {};

@@ -51,7 +51,7 @@ async function buildAbstainCtx(f: T2Features): Promise<AbstainCtx> {
   const { date, weekday } = kst();
   const [event, cb] = await Promise.all([fetchEventTonight(), fetchCircuitBreaker()]);
   return {
-    dateKst: date, weekday, eventTonight: event, impliedMoveRatio: null,
+    dateKst: date, weekday, eventTonight: event, impliedMoveRatio: null, positioningExtreme: null, // IM·포지셔닝 미조달 → E-Low 구조적 불가 (불변 조항)
     circuitBreaker: cb, expiryToday: isExpiryDay(date),
   };
 }
@@ -222,7 +222,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         const pieces = t2u.pieces as Record<string, number | null> | undefined;
         // 섀도 등급 매핑 = 본판정과 동일 기준 (발주자 8/14 §3): 베팅 문턱 θ + Lean 문턱 0.5 + gradeLabel
         const { gradeLabel: gl } = await import("@/lib/g1/action");
-        const isEvt = (verdict.abstain_reason ?? "").startsWith("보류1");
+        const isEvt = Boolean(verdict.event_night) || (verdict.abstain_reason ?? "").startsWith("보류1");
         const dcConfirm = (f.F21_dcpm ?? 0) >= G1A_CONFIG.trigger.minDcPm || (nfo?.dc_nf ?? 0) >= 0.6;
         const shadowGrade = (score: number) => {
           const dir0 = score >= 0.5 ? "UP" as const : score <= -0.5 ? "DOWN" as const : null;
@@ -250,7 +250,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       const { t2Grade } = await import("./score");
       const phase = await phaseTag("t2");
       const grade0 = t2Grade(verdict, th);   // 등급 = 점수 구간 (트리거 시각 θ 기준) — 행동과 분리 (발주자 확정 8/18)
-      const isEventN = (verdict.abstain_reason ?? "").startsWith("보류1");
+      const isEventN = Boolean(verdict.event_night) || (verdict.abstain_reason ?? "").startsWith("보류1");
       const grade = { ...grade0, label: gradeLabel(grade0.grade, grade0.lean_dir, isEventN) }; // 용어 확정판 8/13 — 3곳 동일 규격
       (t2 as Record<string, unknown>).grade = grade;   // 4등급 + Lean 채점 원천 (발주자 8/12 §1·2)
       // 상충 플래그 (발주자 8/13 §2): 방향 판단(score) vs 번역 추정(잔여갭) 부호 불일치 — 3자 대조 표본
@@ -264,7 +264,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         (t2 as Record<string, unknown>).conflict_v2 = conflictV2({ gapScore: verdict.gap_score, residGap: verdict.expected_residual_gap, nxtPx: f.nxt_last_px, rNxt: f.r_nxt, nfLevel: nfl });
       }
       // 즉시 시행 b (이벤트 밤): beat/miss 시나리오 2줄 — IM 미조달이라 G1B 이벤트 σ를 대용 (명기).
-      if ((verdict.abstain_reason ?? "").startsWith("보류1") && !(t2 as Record<string, unknown>).event_scenario) {
+      if ((verdict.event_night || (verdict.abstain_reason ?? "").startsWith("보류1")) && !(t2 as Record<string, unknown>).event_scenario) {
         const { G1B_CONFIG } = await import("@/lib/g1b/config");
         const se = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"].event;
         (t2 as Record<string, unknown>).event_scenario = {
@@ -276,12 +276,10 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         // + MT 내성 조건 병기 (WORKORDER_MT_v04 §5 사다리 2단계 — 기록 전용, 판정 무개입)
         const mtNote = await (await import("@/lib/mt/eshadow")).mtEShadowNote(
           symbol, date, verdict.gap_score >= 0.5 ? "UP" : verdict.gap_score <= -0.5 ? "DOWN" : null);
-        (t2 as Record<string, unknown>).e_shadow = {
-          grade: Math.abs(verdict.gap_score) >= th.high
-            ? "E-Low 후보 (1/12 가상 — IM·포지셔닝 미검, 헌법 발효 전 섀도)"
-            : grade.lean_dir ? `E-Lean (${grade.lean_dir === "UP" ? "상방" : "하방"} 기울기)` : "E-Flat",
-          score: verdict.gap_score, virtual_size: Math.abs(verdict.gap_score) >= th.high ? "1/12" : "0",
-          mt: mtNote,   // null = MT 미산출일 (마이그레이션 037 미적용 등)
+        // 헌법 발효(2026-08-20) 후: E-섀도 트랙 임무 종료 — 본판정 verdict.e_grade가 정본. 여기엔 발효 후 본판정 E 기록(e_record)만 남긴다.
+        (t2 as Record<string, unknown>).e_record = {
+          grade: verdict.e_grade ?? null, score: verdict.gap_score, size: verdict.size,
+          e_low_checks: verdict.e_low_checks ?? null, mt: mtNote, constitution: "이벤트 밤 4등급제 발효 2026-08-20 (본판정·가상)",
         };
       }
       if (!blocked && verdict.direction !== "NEUTRAL") {

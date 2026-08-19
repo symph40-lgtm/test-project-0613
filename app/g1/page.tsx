@@ -247,11 +247,13 @@ export default async function G1Page() {
             {(() => {
               const p = (r.t2 as { pieces?: Record<string, number | null> })?.pieces;
               const mo = (r.t2 as { mosaic?: { last?: { dir?: string; score?: number } } })?.mosaic;
-              const es = (r.t2 as { e_shadow?: { grade?: string } })?.e_shadow;
+              const es = (r.t2 as { e_shadow?: { grade?: string }; e_record?: { grade?: string | null; size?: string; e_low_checks?: { theta5: boolean; im_lt_1_5x: boolean | null; positioning_ok: boolean | null } | null } })?.e_record
+                ? { grade: `${(r.t2 as { e_record?: { grade?: string | null } }).e_record!.grade ?? "—"} (본판정·가상) — E-Low 요건: θ5 ${(r.t2 as { e_record?: { e_low_checks?: { theta5: boolean } | null } }).e_record!.e_low_checks?.theta5 ? "✓" : "✗"}·IM ${(r.t2 as { e_record?: { e_low_checks?: { im_lt_1_5x: boolean | null } | null } }).e_record!.e_low_checks?.im_lt_1_5x == null ? "미조달" : "✓"}·포지셔닝 ${(r.t2 as { e_record?: { e_low_checks?: { positioning_ok: boolean | null } | null } }).e_record!.e_low_checks?.positioning_ok == null ? "미조달" : "✓"}` }
+                : (r.t2 as { e_shadow?: { grade?: string } })?.e_shadow;
               return (<>
                 <Row label="정보 조각 P1 유럽반도체" value={p?.p1_eu_semi_avg != null ? `${pp(p.p1_eu_semi_avg)} (ASML ${pp(p.p1_asml)}·IFX ${pp(p.p1_ifx)}·STM ${pp(p.p1_stm)})` : "수집 대기"} />
                 <Row label="T2-모자이크 섀도" value={mo?.last ? `${mo.last.dir} (score ${mo.last.score})` : "—"} />
-                {es ? <Row label="E-등급 섀도 (헌법 발효 전)" value={es.grade ?? "—"} /> : null}
+                {es ? <Row label={(r.t2 as { e_record?: unknown })?.e_record ? "E-등급 (4등급제 발효 8/20·본판정)" : "E-등급 섀도 (발효 전·전사)"} value={es.grade ?? "—"} /> : null}
               </>);
             })()}
             {/* §A 카드 하단 고정 각주 — 템플릿 자동 생성 */}
@@ -322,6 +324,15 @@ export default async function G1Page() {
             return (<>
               <Row label="저녁판 대조 (19:35 동일 절단)" value={<span className="text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 저녁 번역(NXT 경로) {ev?.resid_open_exp != null ? <>{pp(ev.resid_open_exp)}{mk(ev.hit_resid)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
               <Row label="아침판 대조 (07:15 절단)" value={<span className="text-[15px] md:text-[12px]">챔피언 R1 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · 챌린저 v1.1c {mo?.v11c_pct != null ? <>{pp(mo.v11c_pct)}{mk(mo.hit_v11c)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
+            </>);
+          })()}
+          {/* [발주자 8/20 §3·§4] 밤의 궤적 한 줄 + 시장 간 리그전 (애프터 최종가 vs 야간선물 마감) */}
+          {(() => {
+            const pl = (r.night as Record<string, unknown> | null)?.path_line as string | undefined;
+            const lg = (r.labels as { league?: { err_nxt?: number | null; err_nf?: number | null; winner?: string | null; nxt_close_pct?: number | null; nf_close_beta?: number | null } } | null)?.league;
+            return (<>
+              {pl ? <Row label="밤의 궤적 (애프터 판단이 밤새 검증됐는가)" value={<span className="text-[14px] md:text-[11px]">{pl.replace(/^밤의 궤적: /, "")}</span>} /> : null}
+              {lg ? <Row label="시장 간 리그전 (시가 근접)" value={<span className="text-[14px] md:text-[11px]">애프터 최종 {pp(lg.nxt_close_pct)} (오차 {lg.err_nxt ?? "—"}) vs 야간선물 마감 β환산 {pp(lg.nf_close_beta)} (오차 {lg.err_nf ?? "—"}) → <b>{lg.winner === "nxt" ? "애프터 승" : lg.winner === "nf" ? "야간선물 승" : lg.winner === "tie" ? "무승부" : "—"}</b></span>} /> : null}
             </>);
           })()}
           <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
@@ -400,6 +411,11 @@ export default async function G1Page() {
             const first = arr[0];
             return `${NAME[s] ?? s} w_nf ${first?.w_nf ?? "—"}→${last?.w_nf ?? "—"} (loss ${last?.loss_nf ?? "—"} · TE v1.1c ${last?.te_v11c ?? "—"}% vs 챔피언 ${last?.te_champ ?? "—"}%)`;
           }).join(" / ")}</span>;
+        })()} />
+        <Row label="E-체계 채점 (헌법 발효 8/20 — D+60 심사 재료)" value={(() => {
+          const e = (m?.e_system ?? null) as { lean_nights?: number; lean_hits?: number; lean_rate?: number | null; low_nights?: number; low_pnl_sum_pct?: number | null; prehistory_shadow_nights?: number } | null;
+          if (!e) return "집계 전 (다음 계기판 갱신부터)";
+          return <span className="text-[14px] md:text-[11px]">E-Lean 기울기 {e.lean_nights ?? 0}밤 적중 {e.lean_hits ?? 0} ({e.lean_rate != null ? Math.round(e.lean_rate * 100) + "%" : "—"}) · E-Low 발동 {e.low_nights ?? 0}밤 가상 손익 {e.low_pnl_sum_pct != null ? `${e.low_pnl_sum_pct >= 0 ? "+" : ""}${e.low_pnl_sum_pct}%` : "—"} · 전사(섀도) {e.prehistory_shadow_nights ?? 0}밤 별도</span>;
         })()} />
         <Row label="Lean 채점 (θ 인하 심사 증거·밤 단위)" value={(() => {
           const t = (m?.t2plus_compare ?? null) as { lean_score?: { n: number; hits: number; rate: number | null }; base_bets?: number; shadow_bets?: number; mosaic_bets?: number; nights_tracked?: number } | null;

@@ -83,6 +83,7 @@ export type AbstainCtx = {
   weekday: number;                 // 0=일…5=금
   eventTonight: string | null;     // FOMC/CPI/고용/반도체 실적
   impliedMoveRatio: number | null; // 미조달 → null
+  positioningExtreme: boolean | null; // 미조달 → null (E-Low 요건: false여야 충족)
   circuitBreaker: boolean;         // 당일 또는 전일 KOSPI 일중 -8%
   expiryToday: boolean;            // 선물옵션 만기일 (매월 둘째 목요일)
 };
@@ -94,9 +95,15 @@ function nextDayIsKrHoliday(dateKst: string): boolean {
   return (C.abstain.krHolidays as readonly string[]).includes(next);
 }
 
+// 헌법 개정 발효 (발주자 재확인 2026-08-20, 제안 2026-08-12·쿨다운 7일 경과): "바이너리 이벤트 밤 무조건 보류" →
+// "이벤트 밤 4등급제(E-Lean/E-Low/E-Hold/E-Flat)". 이벤트 밤은 더 이상 abstain이 아니라 eventNight 표식으로 일반 판정 경로를 탄다.
+// 불변 조항: E-Low 발동 = High 문턱 5.0 + IM<1.5x + 포지셔닝 비극단 **전부 충족** (미조달 null = 미충족 = 진입 불가, 완화 없음) ·
+// 사이징 1/12 상한 · E-Hold 절반 축소 · 물타기 금지 · luck 분류. IM 미조달 시 "G1B 이벤트 σ 대용" 시나리오 규약 유지.
+export const E_LOW_THETA_HIGH = 5.0;
+export type EventCtx = { eventNight: string | null; impliedMoveRatio: number | null; positioningExtreme: boolean | null };
 export function abstainReason(f: T2Features, ctx: AbstainCtx): AbstainCheck {
   const A = C.abstain;
-  if (ctx.eventTonight) return { reason: `보류1 바이너리 이벤트 밤(${ctx.eventTonight})` };
+  // (발효 전) if (ctx.eventTonight) return { reason: `보류1 바이너리 이벤트 밤(...)` } — 4등급제로 대체, 아래 evaluateT2에서 E-등급 처리
   if (ctx.impliedMoveRatio != null && ctx.impliedMoveRatio >= 1.5) return { reason: "보류1 implied move 1.5배+" };
   if (ctx.weekday === 5) return { reason: "보류2 금요일(주말 보유 금지)" };
   if (nextDayIsKrHoliday(ctx.dateKst)) return { reason: "보류2 한국 연휴 전일" };
@@ -154,6 +161,20 @@ export function evaluateT2(
   const ab = abstainReason(f, ctx);
   if (ab.reason) return { verdict: { ...base, abstain_reason: ab.reason }, blocked: ab.reason };
 
+  // 이벤트 밤 4등급제 (헌법 발효 2026-08-20): E-Low 요건 3종 전부 충족 시만 1/12 진입, 아니면 E-Lean/E-Flat(베팅 없음)
+  if (ctx.eventTonight) {
+    const absE = Math.abs(gs.score);
+    const dirE: Direction = gs.score > 0 ? "UP" : "DOWN";
+    const imOk = ctx.impliedMoveRatio != null && ctx.impliedMoveRatio < 1.5;
+    const posOk = ctx.positioningExtreme === false;     // null(미조달) = 미충족
+    const eLow = absE >= E_LOW_THETA_HIGH && imOk && posOk && (f.F21_dcpm ?? 0) >= C.trigger.minDcPm;
+    const eb = { ...base, event_night: ctx.eventTonight, e_grade: eLow ? "E-Low" : absE >= 0.5 ? "E-Lean" : "E-Flat",
+      e_low_checks: { theta5: absE >= E_LOW_THETA_HIGH, im_lt_1_5x: ctx.impliedMoveRatio == null ? null : imOk, positioning_ok: ctx.positioningExtreme == null ? null : posOk } } as T2Verdict;
+    if (eLow) return { verdict: { ...eb, direction: dirE, confidence: "Low", size: "1/12", theta_applied: E_LOW_THETA_HIGH }, blocked: null };
+    const why = absE >= E_LOW_THETA_HIGH ? "E-Low 요건 미충족(IM·포지셔닝 미조달)" : `E 문턱 미달(${absE.toFixed(1)}<5.0)`;
+    return { verdict: eb, blocked: `이벤트 밤(${ctx.eventTonight}) ${why} → 베팅 없음(${absE >= 0.5 ? "E-Lean" : "E-Flat"})` };
+  }
+
   // §5.1 전 조건 — 미충족 사유를 blocked에 남긴다 (평가 궤적 기록용)
   const checks: [boolean, string][] = [
     [(f.F21_obs_min ?? 0) >= C.trigger.minPmObsMin && (f.F20_obs_min ?? 0) >= C.trigger.minEuObsMin, "관측 부족"],
@@ -200,7 +221,12 @@ export function t2Grade(v: { direction: string; confidence: string | null; gap_s
   const th = thetaOverride ?? thetaAt(C.windows.t2Final);
   const abs = Math.abs(v.gap_score);
   const dir = v.gap_score >= LEAN_MIN ? "UP" : v.gap_score <= -LEAN_MIN ? "DOWN" : null;
-  const isEvent = (v.abstain_reason ?? "").startsWith("보류1") || (v.abstain_reason ?? "").includes("이벤트");
+  const isEvent = (v.abstain_reason ?? "").startsWith("보류1") || (v.abstain_reason ?? "").includes("이벤트") || Boolean((v as { event_night?: string | null }).event_night);
+  if (isEvent && (v as { event_night?: string | null }).event_night) {
+    // 4등급제 발효 후: E-Low(1/12 진입) / E-Lean(|score|≥0.5, 방향 발표) / E-Flat — E 접두는 gradeLabel이 붙인다
+    if (v.direction === "UP" || v.direction === "DOWN") return { grade: "Low", lean_dir: v.direction, lean_score: v.gap_score };
+    return { grade: dir ? "Lean" : "Flat", lean_dir: dir, lean_score: v.gap_score };
+  }
   if (dir && abs >= th.high) return { grade: "High", lean_dir: dir, lean_score: v.gap_score };
   if (dir && abs >= th.low) return { grade: "Low", lean_dir: dir, lean_score: v.gap_score };
   return { grade: dir && !isEvent ? "Lean" : "Flat", lean_dir: dir, lean_score: v.gap_score };

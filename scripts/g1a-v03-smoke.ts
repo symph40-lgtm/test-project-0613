@@ -27,7 +27,7 @@ async function main() {
     F13_rate_z: macro.rateZ, F14_fx_z: macro.fxZ, F24_news: null,
     r_nxt: nxt.rNxt, nxt_last_px: nxt.lastPx, spread_pct: null,
   };
-  const ctx = { dateKst: new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10), weekday: new Date(Date.now() + 9 * 3600e3).getUTCDay(), eventTonight: ev, impliedMoveRatio: null, circuitBreaker: cb, expiryToday: isExpiryDay(new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)) };
+  const ctx = { dateKst: new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10), weekday: new Date(Date.now() + 9 * 3600e3).getUTCDay(), eventTonight: ev, impliedMoveRatio: null, positioningExtreme: null, circuitBreaker: cb, expiryToday: isExpiryDay(new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)) };
   console.log("\n판정(18:00 가정):", JSON.stringify(evaluateT2("000660", f, ctx, "18:00", false, false)));
   console.log("판정(19:40 최종):", JSON.stringify(evaluateT2("000660", f, ctx, "19:40", true, false)));
 

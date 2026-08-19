@@ -39,7 +39,7 @@ export type AbstainCheck = { reason: string | null; detail?: string };
 export type T2Verdict = {
   direction: Direction;
   confidence: Confidence;
-  size: "1/3" | "1/6" | "0";
+  size: "1/3" | "1/6" | "1/12" | "0";   // 1/12 = E-Low (헌법 개정 발효 2026-08-20)
   abstain_reason: string | null;
   gap_score: number;
   bias_gate: number;               // ×0.5 / ×1.0 / ×1.25
@@ -51,6 +51,10 @@ export type T2Verdict = {
   economics_pass: boolean | null;  // §5.1-6
   three_way_agree: boolean | null; // §5.1-4
   liquidity: "normal" | "downgrade" | "hold" | "unknown";
+  // 이벤트 밤 4등급제 (헌법 발효 2026-08-20)
+  event_night?: string | null;
+  e_grade?: "E-Low" | "E-Lean" | "E-Flat" | "E-Hold" | null;
+  e_low_checks?: { theta5: boolean; im_lt_1_5x: boolean | null; positioning_ok: boolean | null } | null;
 };
 
 export type T2State = {
