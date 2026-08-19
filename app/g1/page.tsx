@@ -22,6 +22,14 @@ const SYM_ORDER: Record<string, number> = { "005930": 0, "000660": 1 };
 const bySymOrder = <T extends { date: string; symbol: string }>(a: T, b: T) =>
   a.date !== b.date ? b.date.localeCompare(a.date) : (SYM_ORDER[a.symbol] ?? 9) - (SYM_ORDER[b.symbol] ?? 9);
 
+// 사이클 짝 표기 (발주자 8/19): T2 카드 "채점: M-D 아침" 예고 / R1·R2 카드 "(← M-D 저녁 T2의 밤)"
+const KR_HOLI = new Set(["2026-09-24", "2026-09-25", "2026-10-05", "2026-10-09", "2026-12-25"]);
+const nextKrxDay = (d: string) => {
+  const x = new Date(d + "T00:00:00Z");
+  do { x.setUTCDate(x.getUTCDate() + 1); } while ([0, 6].includes(x.getUTCDay()) || KR_HOLI.has(x.toISOString().slice(0, 10)));
+  return x.toISOString().slice(0, 10);
+};
+const md = (d: string) => d.slice(5);
 // §A 카드 하단 고정 각주 — 2줄 (템플릿 자동 생성, 자유 서술 금지)
 function Footnote({ f }: { f: TwoLines }) {
   if (!f) return null;
@@ -159,7 +167,7 @@ export default async function G1Page() {
         const v = r.t2?.verdict;
         const sig = sigmaOf[r.symbol];
         return (
-          <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${r.date} 저녁 결정`} badge="G1A T2">
+          <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 저녁 결정 (채점: ${md(nextKrxDay(r.date))} 아침)`} badge="G1A T2">
             <ActionLine line={r.t2?.action?.line} />
             {/* 방향+등급 복합 표기 (발주자 용어 확정판 8/13): ▲▼갭상승/갭하락, △▽ Lean, ─ Flat, [E] 접두.
                 색 규약: 갭상승 적색·갭하락 청색·Lean 연한 톤·Flat 회색 */}
@@ -261,7 +269,7 @@ export default async function G1Page() {
         const fair2 = (r.r2 as { fair_gap_r2_pct?: number | null } | null)?.fair_gap_r2_pct ?? null;
         const expOpen2 = fair2 != null && prevClose ? Math.round(prevClose * (1 + fair2 / 100)) : null;
         return (
-        <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${r.date} 아침`} badge="G1B R1·R2">
+        <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 아침${(r.r1 as { g1a_ref?: { date?: string } | null } | null)?.g1a_ref?.date ? ` (← ${md((r.r1 as { g1a_ref?: { date?: string } }).g1a_ref!.date!)} 저녁 T2의 밤)` : ""}`} badge="G1B R1·R2">
           <ActionLine line={r.r1?.action?.line} />
           <Row label="R1 공정 갭 (07:20)" value={r.r1 ? <>{pp(r.r1.fair_gap_pct)} ± {r.r1.sigma_pct?.toFixed(2)}% · 예상시가 {won(r.r1.expected_open)}</> : "발행 전"} />
           {/* 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재 ≠ 누락 */}
