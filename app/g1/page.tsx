@@ -194,7 +194,7 @@ export default async function G1Page() {
               return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[17px] md:text-[14px] md:text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
             })()}
             {v ? (
-              <Row label={`예상잔여갭 · 번역 추정(G1B)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
+              <Row label={`예상잔여갭 · 크기 추정(G1A: β_pm×바스켓−NXT 기반영)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
                 value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
             ) : null}
             {/* 기준가 라벨 명시 (발주자 8/18): 주식수 오독 방지 — "기준가(19:40 NXT 주가)" */}
