@@ -170,7 +170,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
         action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null } : null,
         report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
-          act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime),
+          act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime, { sessionNight: g1aRef.data?.date ?? null, cutT: refT2?.nf?.level?.cut_t ?? null, cutPct: nfCut }),
         sent_at: new Date().toISOString(),
       };
       await saveRow(row);

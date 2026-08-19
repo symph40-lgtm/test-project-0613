@@ -155,3 +155,29 @@ export function nfFlowLines(nf: {
   const line3 = `지수 ${sgn(cum)} ≈ 삼전 ${sgn(cum * betaSs)}(β${betaSs.toFixed(1)})·하닉 ${sgn(cum * betaHx)}(β${betaHx.toFixed(1)}) 상당 (β 환산)`;
   return [line1, line2, line3];
 }
+
+// ── 야간선물 표기 규격 (발주자 8/19 저녁): 모든 야간선물 수치에 "세션 밤짜 + 시각" 의무 병기 ──
+// 세션 밤짜 = 세션이 시작된 저녁의 날짜 (18:00 개장일). R1(아침, 라벨일 D)의 세션 밤짜 = 직전 거래일 저녁.
+const mdOf = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+const sgnP = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+
+// 아침 R1 카드: "야간선물(8/18밤): 저녁 절단 19:35 -1.56% → 새벽 04:50 -3.97% (밤사이 하락 심화)"
+export function nfSessionMorning(a: { sessionNight: string | null; cutT: string | null; cutPct: number | null; dawnT: string; dawnPct: number | null; dawnCorrected?: boolean }): string {
+  const head = a.sessionNight ? `야간선물(${mdOf(a.sessionNight)}밤)` : "야간선물";
+  const cut = a.cutPct != null ? `저녁 절단 ${a.cutT ?? "19:35"} ${sgnP(a.cutPct)}` : "저녁 절단 결측";
+  const dawn = a.dawnPct != null ? `새벽 ${a.dawnT} ${sgnP(a.dawnPct)}${a.dawnCorrected ? "(정정)" : ""}` : "새벽 관측 결측";
+  let note = "";
+  if (a.cutPct != null && a.dawnPct != null) {
+    const d = a.dawnPct - a.cutPct;
+    if (Math.abs(d) >= 1.0) {
+      const flipped = Math.sign(a.cutPct) !== Math.sign(a.dawnPct) && Math.abs(a.cutPct) >= 0.3;
+      note = flipped ? " (밤사이 반전)" : ` (밤사이 ${a.dawnPct < a.cutPct ? "하락" : "상승"} 심화)`;
+    }
+  }
+  return `${head}: ${cut} → ${dawn}${note}`;
+}
+
+// 저녁 T2 카드 흐름 줄 머리: "야간선물(8/19밤 진행중): 19:35 현재 +2.73%" — 전날 밤 값과 혼동 차단
+export function nfSessionEveningHead(a: { sessionNight: string; lastT: string; cumPct: number; closed: boolean }): string {
+  return `야간선물(${mdOf(a.sessionNight)}밤${a.closed ? "" : " 진행중"}): ${a.lastT} 현재 ${sgnP(a.cumPct)}`;
+}

@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell, Disclaimer } from "../_components/Shell";
-import { nfFlowLines, r1Footnote, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
+import { nfFlowLines, nfSessionEveningHead, nfSessionMorning, r1Footnote, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
 import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
 import type { MtDay } from "@/lib/mt/types";
 
@@ -34,7 +34,7 @@ const md = (d: string) => d.slice(5);
 function Footnote({ f }: { f: TwoLines }) {
   if (!f) return null;
   return (
-    <div className="mt-2 rounded-[10px] bg-pearl/60 px-3 py-2 text-[18px] md:text-[15px] md:text-[12px] leading-relaxed">
+    <div className="mt-2 rounded-[10px] bg-pearl/60 px-3 py-2 text-[15px] md:text-[12px] leading-relaxed">
       <p><span className="font-semibold text-ink-48">해석</span> <span className="text-ink-80">{f.해석}</span></p>
       <p><span className="font-semibold text-ink-48">할 일</span> <span className="text-ink-80">{f.할일}</span></p>
     </div>
@@ -46,13 +46,13 @@ function MtLine({ day }: { day: MtDay | undefined }) {
   if (!day) return null;
   const l = mtCardLines(day);
   return (
-    <div className="border-b border-hairline/40 py-1.5 text-[18px] md:text-[15px] md:text-[12px]">
+    <div className="border-b border-hairline/40 py-1.5 text-[15px] md:text-[12px]">
       <p className="text-ink-80">{l.head}</p>
       <p className="text-ink-48">{l.panel}</p>
       <p className="text-ink-48">{l.tail}</p>
-      {l.flags.length ? <p className="mt-0.5 text-[17px] md:text-[14px] md:text-[11px] font-semibold text-amber-700">{l.flags.join(" · ")}</p> : null}
+      {l.flags.length ? <p className="mt-0.5 text-[14px] md:text-[11px] font-semibold text-amber-700">{l.flags.join(" · ")}</p> : null}
       {/* 전환 선언 트랙 동결 (2026-08-16 발주자 판정 4 — 재채점 1회 미달·오탐률 86%): 화면 노출 없음, 로그만. 톤·패널·박스는 유지 */}
-      <p className="text-[17px] md:text-[14px] md:text-[11px] text-ink-48"><i>톤 트랙 검증 미달 꼬리표: 방향 적중 54% (기준선 대비 초과 ±2%p 이내) — 참고만, 판정 무개입</i></p>
+      <p className="text-[14px] md:text-[11px] text-ink-48"><i>톤 트랙 검증 미달 꼬리표: 방향 적중 54% (기준선 대비 초과 ±2%p 이내) — 참고만, 판정 무개입</i></p>
     </div>
   );
 }
@@ -75,7 +75,7 @@ function Card({ title, badge, children }: { title: string; badge?: string; child
     <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
       <div className="mb-2 flex items-center gap-2">
         <p className="text-[18px] md:text-[15px] font-semibold">{title}</p>
-        {badge ? <span className="rounded-full bg-pearl px-2 py-0.5 text-[17px] md:text-[14px] md:text-[11px] font-semibold text-ink-48">{badge}</span> : null}
+        {badge ? <span className="rounded-full bg-pearl px-2 py-0.5 text-[14px] md:text-[11px] font-semibold text-ink-48">{badge}</span> : null}
       </div>
       {children}
     </div>
@@ -147,11 +147,11 @@ export default async function G1Page() {
 
   return (
     <PageShell title="일봉 갭 예측 (G1A·G1B)" badge="60일 검증" width="default">
-      <div className="mb-2 rounded-[14px] border border-red-200 bg-red-50 p-3 text-[18px] md:text-[15px] md:text-[12px] text-red-700">
+      <div className="mb-2 rounded-[14px] border border-red-200 bg-red-50 p-3 text-[15px] md:text-[12px] text-red-700">
         <b>전 판정 가상(log-only)</b> — 60일 검증 완료·게이트 통과 전까지 실행 금지.
       </div>
       {/* A5: 운영 순서 고정 안내 */}
-      <p className="mb-4 rounded-[10px] bg-pearl/60 px-3 py-2 text-[18px] md:text-[15px] md:text-[12px] text-ink-48">
+      <p className="mb-4 rounded-[10px] bg-pearl/60 px-3 py-2 text-[15px] md:text-[12px] text-ink-48">
         운영 순서: <b>T2(저녁 결정) → R1(아침 재판·오판 시 프리장 청산) → R2(시가 확인)</b>
       </p>
 
@@ -159,7 +159,7 @@ export default async function G1Page() {
       {mtLatest.has("KOSPI200") ? (
         <Card title={`시장 톤·에너지 — ${mtLatest.get("KOSPI200")!.date}`} badge="MT 1단계">
           <MtLine day={mtLatest.get("KOSPI200")} />
-          <p className="mt-2 text-[17px] md:text-[14px] md:text-[11px] text-ink-48">{MT_DISCLAIMER}</p>
+          <p className="mt-2 text-[14px] md:text-[11px] text-ink-48">{MT_DISCLAIMER}</p>
         </Card>
       ) : null}
 
@@ -186,13 +186,13 @@ export default async function G1Page() {
                   <span className="text-ink-80"> {v.direction !== "NEUTRAL"
                     ? <>· {v.direction === "UP" ? `매수 권장 ${SIZE_KO[v.size ?? "0"]}` : "보유분 방어 전용 (신규 숏 없음)"}</>
                     : <>· 베팅 없음{g?.lean_score != null ? ` (score ${g.lean_score}` : ""}{(g?.grade === "High" || g?.grade === "Low") ? " · 트리거 조건 미달 — 등급은 점수대로" : ""}{g?.lean_score != null ? ")" : ""}</>}</span>
-                  {v.abstain_reason ? <span className="font-normal text-[18px] md:text-[15px] md:text-[12px] text-ink-48"> ({v.abstain_reason})</span> : null}
+                  {v.abstain_reason ? <span className="font-normal text-[15px] md:text-[12px] text-ink-48"> ({v.abstain_reason})</span> : null}
                 </>);
               })() : "저녁 감시 대기"}
             </p>
             {(() => {
               const sc = (r.t2 as { event_scenario?: { beat?: string; miss?: string } })?.event_scenario;
-              return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[17px] md:text-[14px] md:text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
+              return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[14px] md:text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
             })()}
             {v ? (
               <Row label={`예상잔여갭 · 크기 추정(G1A: β_pm×바스켓−NXT 기반영)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
@@ -208,22 +208,30 @@ export default async function G1Page() {
               const rb = vv.r_basket;
               const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
               return <Row label="트리거 조건 (DC-PM ≥60% · 바스켓 |수익률|(미 반도체 프리장 평균, 크기 기준) ≥0.5% · 3자 일치 · 경제성)"
-                value={<span className="text-[18px] md:text-[15px] md:text-[12px]">DC-PM {dc} · 바스켓 {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
+                value={<span className="text-[15px] md:text-[12px]">DC-PM {dc} · 바스켓 {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
             })() : null}
             {(() => {
               // §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) — 미래 예측 서술 금지, 현재 상태·일관성만
               const nf = (r.t2 as { nf?: { bars?: { t: string; pct: number }[]; level?: { pct: number } | null; dc_nf?: number | null } } | null)?.nf;
+              // 표기 규격 (발주자 8/19 저녁 §3): "오늘 밤 세션(진행중)" 라벨 고정 + 세션 밤짜·시각 병기 — 전날 밤 값과 혼동 차단.
+              // 세션 종료(06:00) 여부 = 이 카드 날짜가 오늘이 아니면 종료된 세션 (채점된 과거 카드)
+              const todayKst = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+              const closed = r.date < todayKst;
               if (nf?.bars?.length) {
                 const lines = nfFlowLines({ bars: nf.bars, level: nf.level, dc_nf: nf.dc_nf }, betaOf["005930"], betaOf["000660"]);
+                const lastT = nf.bars[nf.bars.length - 1].t;
+                const cum = nf.level?.pct ?? nf.bars[nf.bars.length - 1].pct;
+                const head = nfSessionEveningHead({ sessionNight: r.date, lastT, cumPct: cum, closed });
                 return (
-                  <div className="border-b border-hairline/40 py-1.5 text-[18px] md:text-[15px] md:text-[12px]">
-                    <p className="text-ink-80">{lines[0]}</p>
+                  <div className="border-b border-hairline/40 py-1.5 text-[15px] md:text-[12px]">
+                    <p className="text-ink-48 text-[14px] md:text-[11px] font-semibold">{closed ? `${md(r.date)} 밤 세션 (종료 — 새벽값은 아침 카드)` : "오늘 밤 세션 (진행중)"}</p>
+                    <p className="text-ink-80">{head} — {lines[0].replace(/^야간선물 흐름: /, "")}</p>
                     <p className="text-ink-48">{lines[1]} · {lines[2]}</p>
                   </div>
                 );
               }
               const nfe = r.t2?.nf_evening as { t: string; pct: number; corrected?: boolean } | null | undefined;
-              return <Row label="야간선물 초반 (E1·기록만)" value={nfe ? `${nfe.t} ${pp(nfe.pct)}${nfe.corrected ? " (정정)" : ""}` : "18:00~ 대기"} />;
+              return <Row label={closed ? `야간선물(${md(r.date)}밤) 초반 (E1·기록만)` : "야간선물 (오늘 밤 세션·진행중) 초반"} value={nfe ? `${nfe.t} ${pp(nfe.pct)}${nfe.corrected ? " (정정)" : ""}` : "18:00~ 대기"} />;
             })()}
             <MtLine day={mtLatest.get(r.symbol)} />
             <Row label="T2+ 섀도 (E2·본판정 미반영)" value={r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"} />
@@ -253,8 +261,8 @@ export default async function G1Page() {
               })} />;
             })()}
             {r.t2?.report_r1 ? (
-              <details className="mt-2 text-[18px] md:text-[15px] md:text-[12px] text-ink-48"><summary>리포트 전문</summary>
-                <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[17px] md:text-[14px] md:text-[11px] leading-relaxed text-ink-80">{r.t2.report_r1}</pre>
+              <details className="mt-2 text-[15px] md:text-[12px] text-ink-48"><summary>리포트 전문</summary>
+                <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[14px] md:text-[11px] leading-relaxed text-ink-80">{r.t2.report_r1}</pre>
               </details>
             ) : null}
           </Card>
@@ -276,7 +284,7 @@ export default async function G1Page() {
           {/* 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재 ≠ 누락 */}
           <Row label="가중 (Hedge)" value={<>
             {r.r1?.w_used ? Object.entries(r.r1.w_used).map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}
-            {nfObs?.v != null ? <span className="text-[17px] md:text-[14px] md:text-[11px] text-ink-48"> · 야간선물 관측 {pp(nfObs.v * 100)} (검증 중 — 챌린저 v1.1c 병행)</span> : null}
+            {nfObs?.v != null ? <span className="text-[14px] md:text-[11px] text-ink-48"> · 야간선물 새벽 {((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50"} 관측 {pp(nfObs.v * 100)} (검증 중 — 챌린저 v1.1c 병행)</span> : null}
           </>} />
           {r.r1 ? <Footnote f={r1Footnote({ code: r1a?.code ?? "", line: r1a?.line, residualSigma: r1a?.residual_sigma ?? null, sigmaPct: r.r1.sigma_pct ?? null, fairGapPct: r.r1.fair_gap_pct ?? null, phase: r1a?.phase ?? "가상" })} /> : null}
           <ActionLine line={r.r2?.action?.line} />
@@ -288,20 +296,23 @@ export default async function G1Page() {
             const gr = (r.r1 as { g1a_ref?: { nf_cut1935_pct?: number | null; nf_cut_t?: string | null; rule_score?: number | null } | null } | null)?.g1a_ref;
             const cov = (r.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string; us_sessions?: number } | undefined;
             const covTxt = cov ? (cov.kind === "partial" ? ` ⚠커버리지 부분(미 세션 ${cov.us_sessions})` : cov.kind === "none" ? " (미 휴장 밤)" : "") : "";
-            return <Row label={`야간선물 — 저녁 19:35 절단 / 아침 04:50 관측${covTxt}`}
-              value={<>{gr?.nf_cut1935_pct != null ? `${pp(gr.nf_cut1935_pct)} (${gr.nf_cut_t ?? "19:35"} 절단·T2 공유값)` : "저녁 결측"} / {nfObs?.v != null ? <>{pp(nfObs.v * 100)}{nfObs.corrected ? <span className="text-[17px] md:text-[14px] md:text-[11px] text-ink-48"> (정정 — KRX 정본 소급)</span> : null}</> : "결측"}</>} />;
+            // 표기 규격 (발주자 8/19 저녁 §1·§2): 세션 밤짜 + 시각 의무 병기, 화살표 연결, |Δ|≥1%p 자동 코멘트
+            const sessionNight = (r.r1 as { g1a_ref?: { date?: string } | null } | null)?.g1a_ref?.date ?? null;
+            const probeT = ((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50";
+            return <Row label={`야간선물 — 같은 세션의 진행${covTxt}`}
+              value={<>{nfSessionMorning({ sessionNight, cutT: gr?.nf_cut_t ?? "19:35", cutPct: gr?.nf_cut1935_pct ?? null, dawnT: probeT, dawnPct: nfObs?.v != null ? nfObs.v * 100 : null, dawnCorrected: nfObs?.corrected })}<span className="text-[14px] md:text-[11px] text-ink-48"> (저녁값 = T2 공유값{nfObs?.corrected ? " · 새벽값 KRX 정본 소급" : ""})</span></>} />;
           })()}
           {(() => {
             // 4자 대조 (발주자 검수 8/18 §3): 룰 vs 야간선물 vs 번역 vs 실측 — 신호 대결 표본
             const fw = (r.labels as { four_way?: { rule_score?: number | null; nf_cut1935_pct?: number | null; fair_r1_pct?: number | null; actual_gap_pct?: number; hit?: { rule?: boolean | null; nf?: boolean | null; fair?: boolean | null } } } | null)?.four_way;
             if (!fw) return null;
             const mk = (h: boolean | null | undefined) => (h == null ? "" : h ? " ✓" : " ✗");
-            return <Row label="4자 대조 (신호 대결 표본)" value={<span className="text-[18px] md:text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 번역 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />;
+            return <Row label="4자 대조 (신호 대결 표본)" value={<span className="text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 번역 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />;
           })()}
           <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
           {r.r1?.report ? (
-            <details className="mt-2 text-[18px] md:text-[15px] md:text-[12px] text-ink-48"><summary>리포트 전문</summary>
-              <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[17px] md:text-[14px] md:text-[11px] leading-relaxed text-ink-80">{r.r1.report}{r.r2?.report ? "\n\n" + r.r2.report : ""}</pre>
+            <details className="mt-2 text-[15px] md:text-[12px] text-ink-48"><summary>리포트 전문</summary>
+              <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[14px] md:text-[11px] leading-relaxed text-ink-80">{r.r1.report}{r.r2?.report ? "\n\n" + r.r2.report : ""}</pre>
             </details>
           ) : null}
         </Card>
@@ -311,7 +322,7 @@ export default async function G1Page() {
       {/* §B: 성적표·기회비용 — 서술형 판결문 (판정 코드→템플릿, 방향축 태그 자동) */}
       <Card title="G1A 성적 — 판결문 (베팅 밤 · 보류 기회비용)" badge="서술형">
         {aRows.filter((r) => ["UP", "DOWN"].includes(String(r.t2?.verdict?.direction)) && r.labels).map((r) => (
-          <p key={`${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[18px] md:text-[15px] md:text-[12px] leading-relaxed text-ink-80">
+          <p key={`${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[15px] md:text-[12px] leading-relaxed text-ink-80">
             {r.date.slice(5)} {verdictSentence({
               name: NAME[r.symbol] ?? r.symbol, bet: true,
               gradeLabel: (r.t2 as { grade?: { label?: string } } | null)?.grade?.label ?? null,
@@ -323,9 +334,9 @@ export default async function G1Page() {
         ))}
         {!aRows.some((r) => ["UP", "DOWN"].includes(String(r.t2?.verdict?.direction)) && r.labels)
           ? <p className="text-[16px] md:text-[13px] text-ink-48">베팅한 밤 없음 (전부 보류) — 아래 보류 기회비용 참조</p> : null}
-        <p className="mt-3 mb-1 text-[18px] md:text-[15px] md:text-[12px] font-semibold text-ink-48">보류 밤 기회비용 (가상 기준가(19:40 NXT 주가) → 시가)</p>
+        <p className="mt-3 mb-1 text-[15px] md:text-[12px] font-semibold text-ink-48">보류 밤 기회비용 (가상 기준가(19:40 NXT 주가) → 시가)</p>
         {aRows.filter((r) => r.t2?.verdict?.direction === "NEUTRAL" && r.labels?.L1p != null).slice(0, 6).map((r) => (
-          <p key={`ab-${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[18px] md:text-[15px] md:text-[12px] leading-relaxed text-ink-80">
+          <p key={`ab-${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[15px] md:text-[12px] leading-relaxed text-ink-80">
             {r.date.slice(5)} {verdictSentence({
               name: NAME[r.symbol] ?? r.symbol, bet: false,
               score: r.t2?.verdict?.gap_score ?? null, abstain: r.t2?.verdict?.abstain_reason ?? null,
@@ -347,9 +358,9 @@ export default async function G1Page() {
       <Card title="게이트 계기판 (D+15 판정 재료)" badge={String(m?.dryrun ?? "—")}>
         <Row label="가동률" value={`${m?.uptime_pct ?? "—"}%`} />
         <Row label="TE 레짐 분리 (평상 / 이벤트)" value={(() => { const t = (m?.te_r1_by_regime ?? null) as { normal?: number | null; event?: number | null; n?: { normal: number; event: number } } | null; return t ? `평상 ${t.normal ?? "—"}% (${t.n?.normal ?? 0}밤) · 이벤트 ${t.event ?? "—"}% (${t.n?.event ?? 0}밤)` : "집계 전"; })()} />
-        <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[17px] md:text-[14px] md:text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
+        <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[14px] md:text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
         <Row label="절단 위반 (late)" value={String(m?.late_arrival_total ?? "—")} />
-        <Row label="학습 상태 (CUSUM·bias·Hedge 가중)" value={<span className="text-[17px] md:text-[14px] md:text-[11px]">
+        <Row label="학습 상태 (CUSUM·bias·Hedge 가중)" value={<span className="text-[14px] md:text-[11px]">
           {["005930", "000660"].filter((s) => learnOf[s]).map((s) => {
             const l = learnOf[s];
             const cus = l.cusum;
@@ -362,14 +373,14 @@ export default async function G1Page() {
           const c = (m?.nf_reconcile_by_coverage ?? null) as Record<string, { n: number; match: number; mismatch: number; missing: number }> | null;
           if (!c || !Object.keys(c).length) return "집계 전";
           const nm: Record<string, string> = { normal: "정상 밤", partial: "커버리지 부분(연휴)", none: "미 휴장", unknown: "미분류" };
-          return <span className="text-[17px] md:text-[14px] md:text-[11px]">{Object.entries(c).map(([k, v]) => `${nm[k] ?? k} ${v.match}/${v.mismatch}/${v.missing} (n=${v.n})`).join(" · ")}</span>;
+          return <span className="text-[14px] md:text-[11px]">{Object.entries(c).map(([k, v]) => `${nm[k] ?? k} ${v.match}/${v.mismatch}/${v.missing} (n=${v.n})`).join(" · ")}</span>;
         })()} />
-        <Row label="기능별 개시일" value={<span className="text-[17px] md:text-[14px] md:text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
+        <Row label="기능별 개시일" value={<span className="text-[14px] md:text-[11px]">야간선물 {eff.night_fut ?? "—"} · 예상체결 {eff.auction_est ?? "—"} · R2잔차 {eff.r2_residual ?? "—"} · 저녁야간선물 {eff.g1a_nf_evening ?? "—"}</span>} />
         <Row label="nf 리더보드 (pack_v1.1c 섀도)" value={(() => {
           // 발주자 8/15 정확도연동 §4 — "정확도에 따라 비중이 실제로 오르는가"를 눈으로 확인
           const lb = (m?.nf_leaderboard ?? null) as { shadow_nights?: number; review_at_nights?: number; by_symbol?: Record<string, { date: string; w_nf: number | null; loss_nf: number | null; te_v11c: number | null; te_champ: number | null }[]> } | null;
-          if (!lb || !lb.by_symbol || !Object.keys(lb.by_symbol).length) return <span className="text-[17px] md:text-[14px] md:text-[11px]">섀도 개시 전 — 첫 라벨 밤부터 (심사 12거래밤)</span>;
-          return <span className="text-[17px] md:text-[14px] md:text-[11px]">섀도 {lb.shadow_nights ?? 0}/{lb.review_at_nights ?? 12}밤 · {Object.entries(lb.by_symbol).map(([s, arr]) => {
+          if (!lb || !lb.by_symbol || !Object.keys(lb.by_symbol).length) return <span className="text-[14px] md:text-[11px]">섀도 개시 전 — 첫 라벨 밤부터 (심사 12거래밤)</span>;
+          return <span className="text-[14px] md:text-[11px]">섀도 {lb.shadow_nights ?? 0}/{lb.review_at_nights ?? 12}밤 · {Object.entries(lb.by_symbol).map(([s, arr]) => {
             const last = arr[arr.length - 1];
             const first = arr[0];
             return `${NAME[s] ?? s} w_nf ${first?.w_nf ?? "—"}→${last?.w_nf ?? "—"} (loss ${last?.loss_nf ?? "—"} · TE v1.1c ${last?.te_v11c ?? "—"}% vs 챔피언 ${last?.te_champ ?? "—"}%)`;
@@ -378,16 +389,16 @@ export default async function G1Page() {
         <Row label="Lean 채점 (θ 인하 심사 증거·밤 단위)" value={(() => {
           const t = (m?.t2plus_compare ?? null) as { lean_score?: { n: number; hits: number; rate: number | null }; base_bets?: number; shadow_bets?: number; mosaic_bets?: number; nights_tracked?: number } | null;
           if (!t) return "집계 전";
-          return <span className="text-[17px] md:text-[14px] md:text-[11px]">Lean {t.lean_score?.n ?? 0}밤 적중 {t.lean_score?.hits ?? 0} ({t.lean_score?.rate != null ? Math.round(t.lean_score.rate * 100) + "%" : "—"}) · 베팅가능밤 T2 {t.base_bets}/{t.nights_tracked} vs T2+ {t.shadow_bets} vs 모자이크 {t.mosaic_bets} <i>(동일 밤 2종목 = 표본 1)</i></span>;
+          return <span className="text-[14px] md:text-[11px]">Lean {t.lean_score?.n ?? 0}밤 적중 {t.lean_score?.hits ?? 0} ({t.lean_score?.rate != null ? Math.round(t.lean_score.rate * 100) + "%" : "—"}) · 베팅가능밤 T2 {t.base_bets}/{t.nights_tracked} vs T2+ {t.shadow_bets} vs 모자이크 {t.mosaic_bets} <i>(동일 밤 2종목 = 표본 1)</i></span>;
         })()} />
         <Row label="보류 밤 집계 (D1·밤 단위)" value={abstain
-          ? <span className="text-[17px] md:text-[14px] md:text-[11px]">{String(abstain.nights)}밤 · 실제 갭 평균 {pp(abstain.avg_abs_gap_pct as number)} / 최대 {pp(abstain.max_abs_gap_pct as number)} · 가상 놓친 |수익| 합 {pp(abstain.missed_virtual_sum_pct as number)}</span>
+          ? <span className="text-[14px] md:text-[11px]">{String(abstain.nights)}밤 · 실제 갭 평균 {pp(abstain.avg_abs_gap_pct as number)} / 최대 {pp(abstain.max_abs_gap_pct as number)} · 가상 놓친 |수익| 합 {pp(abstain.missed_virtual_sum_pct as number)}</span>
           : "집계 전"} />
         <Row label="D1 방향 축 (완화 증거 vs 재료 개선 증거)" value={(() => {
           // 방향 적중+차단 = θ·규칙 완화 심사의 증거 / 방향 오판 = 방향 재료(nf 등) 개선의 증거
           const ax = (abstain?.dir_axis ?? null) as Record<string, number> | null;
           if (!ax) return "집계 전 (다음 계기판 갱신부터)";
-          return <span className="text-[17px] md:text-[14px] md:text-[11px]">오판 {ax["오판"] ?? 0} · 적중-문턱 {ax["적중_문턱"] ?? 0} · 적중-규칙 {ax["적중_규칙"] ?? 0} · 무방향 {ax["무방향"] ?? 0}</span>;
+          return <span className="text-[14px] md:text-[11px]">오판 {ax["오판"] ?? 0} · 적중-문턱 {ax["적중_문턱"] ?? 0} · 적중-규칙 {ax["적중_규칙"] ?? 0} · 무방향 {ax["무방향"] ?? 0}</span>;
         })()} />
       </Card>
 
