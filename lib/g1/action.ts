@@ -65,12 +65,17 @@ export function t2Action(
 
 // ── R1 (아침 재판 — 스펙 G1B v0.3 §5 조정 매트릭스의 행동어 사상) ──
 export function r1Action(
-  g1a: { direction: string; entry_px: number | null } | null,
+  g1a: { direction: string; entry_px: number | null; has_position?: boolean } | null,
   expectedOpen: number | null, sigmaPct: number, fairGapPct: number | null, phase: "가상" | "실사용",
 ): ActionLine & { residual_sigma: number | null } {
-  if (!g1a || g1a.direction === "NEUTRAL" || !g1a.entry_px || !expectedOpen) {
+  // 포지션 근거 (발주자 확인 8/19 §1): 갭하락 판정(DOWN)은 8/13 행동어 개정으로 '신규 숏 없음' —
+  // 가상 포지션이 없으므로 R1 조정 매트릭스(유지/축소/청산)의 대상이 아니다. 종전 코드는 DOWN을 숏 보유로
+  // 오계상해 '절반 축소'를 냈다 (8/19 하닉 — 소급 정정). has_position은 T2 행동 코드가 T2_BUY·T2_SELL_HOLDINGS일 때만 true.
+  const hasPos = g1a?.has_position ?? (g1a?.direction === "UP"); // 구 호출부 호환: UP만 매수 포지션
+  if (!g1a || !hasPos || !g1a.entry_px || !expectedOpen) {
     const opp = fairGapPct != null && sigmaPct > 0 && Math.abs(fairGapPct) >= 1.2 * sigmaPct;
-    return { ...fmt("R1_NOPOS_WATCH", `무포지션—기회 관찰${opp ? ` (|FairGap| ≥1.2σ 잔여분 후보)` : ""}`, phase), residual_sigma: null };
+    const downAlert = g1a?.direction === "DOWN" ? " · 어제 갭하락 경계(무보유)" : "";
+    return { ...fmt("R1_NOPOS_WATCH", `무포지션—기회 관찰${opp ? ` (|FairGap| ≥1.2σ 잔여분 후보)` : ""}${downAlert}`, phase), residual_sigma: null };
   }
   const residPct = (expectedOpen / g1a.entry_px - 1) * 100 * (g1a.direction === "UP" ? 1 : -1);
   const rs = sigmaPct > 0 ? Math.round((residPct / sigmaPct) * 100) / 100 : null;

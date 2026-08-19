@@ -144,11 +144,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const { r1Action, phaseTag } = await import("@/lib/g1/action");
       const g1aRef = await admin.from("g1a_days").select("date,t2").eq("symbol", symbol)
         .lt("date", date).order("date", { ascending: false }).limit(1).maybeSingle();
-      const refT2 = (g1aRef.data?.t2 ?? null) as { verdict?: { direction?: string; gap_score?: number }; entry_px_virtual?: number | null; nf?: { level?: { pct?: number; cut_t?: string; nf_level?: number } } } | null;
+      const refT2 = (g1aRef.data?.t2 ?? null) as { verdict?: { direction?: string; gap_score?: number }; entry_px_virtual?: number | null; action?: { code?: string }; nf?: { level?: { pct?: number; cut_t?: string; nf_level?: number } } } | null;
+      // 가상 포지션 유무 = T2 행동 코드 기준 (발주자 확인 8/19 §1): 매수(T2_BUY)·보유분 매도(T2_SELL_HOLDINGS)만 포지션.
+      // 갭하락 경계(T2_DOWN_ALERT)·Lean·Flat·등급만(T2_GRADE_NOBET)은 무포지션 — 숏 오계상 차단.
+      const hasPos = ["T2_BUY", "T2_SELL_HOLDINGS"].includes(String(refT2?.action?.code ?? ""));
       // [발주자 검수 8/18 §2·§3] 저녁 19:35 절단 야간선물 = G1A 저장값을 그대로 인용 (재조회 금지 — 판정=화면=로그)
       const nfCut = refT2?.nf?.level?.pct ?? null;
       const act = r1Action(
-        refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null } : null,
+        refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null, has_position: hasPos } : null,
         expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
       );
       // [발주자 8/15 §4] 야간 급변 플래그 — 야간 세션 내재갭 |±2%| 이상 밤 (절단 통과분만)
@@ -258,8 +261,14 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         } else {
           const livePct = liveV != null ? Math.round(liveV * 10000) / 100 : null;
           const diff = livePct != null ? Math.round((livePct - krx.u1_pct) * 100) / 100 : null;
+          // 판정 3단 (8/19 첫 실전 실측 후 보완): 04:50→06:00 70분 시점차는 급변 밤에 0.3%p를 넘을 수 있다
+          // (8/19: 라이브 -3.97 vs 정본 -4.29, 차 0.32 — 하락 밤 마지막 70분 추가 하락, 소스 정상).
+          // 오염(8/13~14 div=F)은 차 1.3~1.7%p·부호/크기 괴리였으므로 **1.0%p** 이상 또는 부호 불일치를 '오염 의심'으로 분리.
+          // 0.30~1.0%p는 '시점차 범위 — 정상'으로 기록만 (경보 없음). 문턱은 표본 축적 후 재조정 (발주자 결정).
+          const signMismatch = livePct != null && Math.abs(livePct) >= 0.3 && Math.abs(krx.u1_pct) >= 0.3 && Math.sign(livePct) !== Math.sign(krx.u1_pct);
           const verdict = livePct == null ? "라이브 결측 — 정본만 기록"
             : Math.abs(diff!) <= 0.30 ? "일치(±0.30%p)"
+            : Math.abs(diff!) < 1.0 && !signMismatch ? "시점차 범위(0.3~1.0%p) — 정상"
             : "불일치 — 소스 점검 필요";
           const cov = (row.night as Record<string, unknown>).nf_coverage as { kind?: string; us_sessions?: number } | undefined;
           (row.night as Record<string, unknown>).nf_reconcile = {
