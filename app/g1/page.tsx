@@ -57,11 +57,12 @@ function MtLine({ day }: { day: MtDay | undefined }) {
   );
 }
 
+// 모바일 반응형 (발주자 8/19 §2): 좁은 화면은 라벨/값 세로 적층 + 값 줄바꿈 허용(break-words), md: 이상은 가로 배치
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-hairline/40 py-1.5 text-[16px] md:text-[13px] last:border-b-0">
-      <span className="shrink-0 text-ink-48">{label}</span>
-      <span className="text-right text-ink-80">{value}</span>
+    <div className="flex flex-col gap-0.5 border-b border-hairline/40 py-1.5 text-[16px] md:flex-row md:items-baseline md:justify-between md:gap-3 md:text-[13px] last:border-b-0">
+      <span className="text-ink-48 md:shrink-0">{label}</span>
+      <span className="min-w-0 break-words text-ink-80 md:text-right">{value}</span>
     </div>
   );
 }
@@ -167,7 +168,7 @@ export default async function G1Page() {
         const v = r.t2?.verdict;
         const sig = sigmaOf[r.symbol];
         return (
-          <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 저녁 결정 (채점: ${md(nextKrxDay(r.date))} 아침)`} badge="G1A T2">
+          <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 저녁 결정${r.t2?.trigger_time ? ` · ${r.t2.trigger_time.slice(0, 5)} 발행` : ""} (채점: ${md(nextKrxDay(r.date))} 아침)`} badge="G1A T2">
             <ActionLine line={r.t2?.action?.line} />
             {/* 방향+등급 복합 표기 (발주자 용어 확정판 8/13): ▲▼갭상승/갭하락, △▽ Lean, ─ Flat, [E] 접두.
                 색 규약: 갭상승 적색·갭하락 청색·Lean 연한 톤·Flat 회색 */}
