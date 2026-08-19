@@ -109,6 +109,21 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       }
       await saveRow(row);
     }
+    // [발주자 시각 규율 8/19 §2] 06:00 세션 마감가로 교체 — R1 절단 07:15 이내 최신값 원칙.
+    // 실측(8/15·8/19): KIS div=CM은 세션 마감 후에도 '직전 세션 마감값'을 반환한다 (8/10 "빈 응답"은 주간 코드 F 시절).
+    // 06:00~07:14 첫 틱에 1회 읽어 night_fut을 마감가로 교체, 04:50 값은 night_fut_0450에 보존 (근접도 비교 재료).
+    if (hhmm >= W.nightStart && hhmm < C.cutoff.r1 && row.night && !(row.night as Record<string, unknown>).night_fut_close_done) {
+      const { fetchNightFutSnapshot } = await import("./data");
+      const nfc = await fetchNightFutSnapshot();
+      const prev = row.night.night_fut;
+      (row.night as Record<string, unknown>).night_fut_close_done = true;
+      if (nfc.v != null) {
+        if (prev?.v != null && !(prev as unknown as { t?: string }).t?.startsWith("06")) (row.night as Record<string, unknown>).night_fut_0450 = { ...prev, t: (row.night.night_fut_probe as unknown as { t?: string } | undefined)?.t ?? "04:50" };
+        row.night = { ...row.night, night_fut: { ...nfc, src: `KIS 야간선물 ${hhmm} 마감(CM)`, t: hhmm } as unknown as Obs } as Record<string, Obs>;
+        notes.push(`${symbol} 야간선물 마감가 ${(nfc.v * 100).toFixed(2)}% (04:50 ${prev?.v != null ? (prev.v * 100).toFixed(2) : "—"}%)`);
+      }
+      await saveRow(row);
+    }
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
     // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
     const coreMissing = (n: Record<string, Obs> | null) => !n || n.r_spx?.v == null || n.r_soxx?.v == null;
@@ -150,6 +165,11 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const hasPos = ["T2_BUY", "T2_SELL_HOLDINGS"].includes(String(refT2?.action?.code ?? ""));
       // [발주자 검수 8/18 §2·§3] 저녁 19:35 절단 야간선물 = G1A 저장값을 그대로 인용 (재조회 금지 — 판정=화면=로그)
       const nfCut = refT2?.nf?.level?.pct ?? null;
+      // [발주자 시각 규율 8/19 §1] 저녁판 대조용 — 저녁 번역(잔여갭 경로 시가 예상, 정규 종가 대비) 저장값 인용
+      const refV = (g1aRef.data?.t2 as { verdict?: { expected_residual_gap?: number | null; r_nxt_pre_entry?: number | null }; conflict_v2?: { openExp_resid?: number | null } } | null)?.verdict;
+      const refCv = (g1aRef.data?.t2 as { conflict_v2?: { openExp_resid?: number | null } } | null)?.conflict_v2;
+      const residOpenExp = refCv?.openExp_resid ?? (refV?.expected_residual_gap != null && refV?.r_nxt_pre_entry != null
+        ? Math.round(((1 + refV.r_nxt_pre_entry / 100) * (1 + refV.expected_residual_gap / 100) - 1) * 10000) / 100 : null);
       const act = r1Action(
         refT2?.verdict ? { direction: refT2.verdict.direction ?? "NEUTRAL", entry_px: refT2.entry_px_virtual ?? null, has_position: hasPos } : null,
         expOpen, sigma, fair != null ? Math.round(fair * 100) / 100 : null, await phaseTag("r1"),
@@ -168,7 +188,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         expected_open: expOpen, prev_close: kr.prevClose,
         experts: ex, virtual: true, night_flash: nightFlash,
         challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
-        action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null } : null,
+        action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null , resid_open_exp: residOpenExp } : null,
         report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") +
           act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime, { sessionNight: g1aRef.data?.date ?? null, cutT: refT2?.nf?.level?.cut_t ?? null, cutPct: nfCut }),
         sent_at: new Date().toISOString(),
@@ -303,6 +323,16 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
             fair: sgnOf(f1, 0.3) && sgnOf(actual, 0.3) ? sgnOf(f1, 0.3) === sgnOf(actual, 0.3) : null,
           },
           note: "신호 대결 표본 (발주자 8/18) — 룰·야간선물·번역 세 신호의 방향 vs 실측 갭",
+          // [발주자 시각 규율 8/19 §1] 2판 분리: 저녁판(19:35 동일 절단) = 룰·야간선물·저녁 번역(NXT 경로 시가 예상) /
+          // 아침판(07:15 절단) = 챔피언 R1·챌린저 v1.1c. 각 판의 절단 시각 명기.
+          evening: {
+            cut: "19:35", resid_open_exp: (gref as { resid_open_exp?: number | null } | null)?.resid_open_exp ?? null,
+            hit_resid: (() => { const x = (gref as { resid_open_exp?: number | null } | null)?.resid_open_exp; return sgnOf(x, 0.3) && sgnOf(actual, 0.3) ? sgnOf(x, 0.3) === sgnOf(actual, 0.3) : null; })(),
+          },
+          morning: {
+            cut: "07:15", v11c_pct: (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null,
+            hit_v11c: (() => { const x = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct; return sgnOf(x, 0.3) && sgnOf(actual, 0.3) ? sgnOf(x, 0.3) === sgnOf(actual, 0.3) : null; })(),
+          },
         };
         row.labels = {
           actual_open: kr.todayOpen, actual_gap_pct: actual,

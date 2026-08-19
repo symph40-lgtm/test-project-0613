@@ -257,6 +257,12 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
       (t2 as Record<string, unknown>).conflict =
         verdict.expected_residual_gap != null && verdict.gap_score !== 0 &&
         Math.sign(verdict.gap_score) !== Math.sign(verdict.expected_residual_gap);
+      // 상충 플래그 v2 (발주자 판정 8/19 밤): 기준점(정규 종가) 통일 3자 — 룰 방향 / 잔여갭 경로 시가 예상 / 야간선물 β환산
+      {
+        const { conflictV2 } = await import("@/lib/g1/copy");
+        const nfl = ((t2 as Record<string, unknown>).nf as { level?: { nf_level?: number } } | undefined)?.level?.nf_level ?? null;
+        (t2 as Record<string, unknown>).conflict_v2 = conflictV2({ gapScore: verdict.gap_score, residGap: verdict.expected_residual_gap, nxtPx: f.nxt_last_px, rNxt: f.r_nxt, nfLevel: nfl });
+      }
       // 즉시 시행 b (이벤트 밤): beat/miss 시나리오 2줄 — IM 미조달이라 G1B 이벤트 σ를 대용 (명기).
       if ((verdict.abstain_reason ?? "").startsWith("보류1") && !(t2 as Record<string, unknown>).event_scenario) {
         const { G1B_CONFIG } = await import("@/lib/g1b/config");

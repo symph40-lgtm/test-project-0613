@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageShell, Disclaimer } from "../_components/Shell";
-import { nfFlowLines, nfSessionEveningHead, nfSessionMorning, r1Footnote, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
+import { conflictV2, nfFlowLines, nfSessionEveningHead, nfSessionMorning, openExpText, r1Footnote, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
 import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
 import type { MtDay } from "@/lib/mt/types";
 
@@ -194,10 +194,19 @@ export default async function G1Page() {
               const sc = (r.t2 as { event_scenario?: { beat?: string; miss?: string } })?.event_scenario;
               return sc ? <p className="mb-1 rounded-[8px] bg-pearl/60 px-2 py-1 text-[14px] md:text-[11px] text-ink-48">이벤트 시나리오 — {sc.beat} / {sc.miss}</p> : null;
             })()}
-            {v ? (
-              <Row label={`예상잔여갭 · 크기 추정(G1A: β_pm×바스켓−NXT 기반영)${(r.t2 as {conflict?:boolean})?.conflict ? " ⚠방향 상충" : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
-                value={<>{pp(v.expected_residual_gap)}{sig ? ` ± ${sig.toFixed(2)}% (G1B σ 준용)` : ""}</>} />
-            ) : null}
+            {v ? (() => {
+              // 기준점 통일 병기 (발주자 확정 8/19 밤: 정규 종가 15:30) + 교차 검증 + 상충 플래그 v2 — 저장값 우선, 없으면 현장 환산
+              const t2x = r.t2 as { conflict_v2?: ReturnType<typeof conflictV2>; nf?: { level?: { nf_level?: number } } } | null;
+              const nfl = t2x?.nf?.level?.nf_level ?? null;
+              const rNxt = (v as { r_nxt_pre_entry?: number | null }).r_nxt_pre_entry ?? null;
+              const cv = t2x?.conflict_v2 ?? conflictV2({ gapScore: v.gap_score ?? null, residGap: v.expected_residual_gap ?? null, nxtPx: r.t2?.entry_px_virtual ?? null, rNxt, nfLevel: nfl });
+              const divergent = cv.divergence_pp != null && cv.divergence_pp >= 2;
+              return (<>
+                <Row label={`예상잔여갭 · 크기 추정(G1A: β_pm×바스켓−NXT 기반영)${cv.conflict ? ` ⚠상충(${cv.pairs.join("·")})` : ""}${v.direction === "NEUTRAL" ? " (가상 참고)" : ""}`}
+                  value={<>{pp(v.expected_residual_gap)} <span className="text-ink-48">{openExpText(cv.openExp_resid, cv.regClose)}</span>{sig ? <span className="text-ink-48"> ± {sig.toFixed(2)}%{divergent ? " (이견 밤 — 실오차 더 클 수 있음)" : " (G1B σ 준용)"}</span> : null}</>} />
+                <Row label="교차 검증 — 야간선물 β환산" value={<>{cv.openExp_nf != null ? <>{openExpText(cv.openExp_nf, cv.regClose)}{cv.divergence_pp != null ? <span className="text-ink-48"> · 괴리 {cv.divergence_pp}%p{divergent ? " — 시장 간 이견, 불확실성 높은 밤" : ""}</span> : null}</> : "야간선물 19:35 절단값 대기"}</>} />
+              </>);
+            })() : null}
             {/* 기준가 라벨 명시 (발주자 8/18): 주식수 오독 방지 — "기준가(19:40 NXT 주가)" */}
             <Row label="GapScore · 방향 판단(G1A) / 기준가(19:40 NXT 주가)" value={<>{v?.gap_score ?? "—"} / {won(r.t2?.entry_px_virtual)}{r.t2?.entry_px_virtual ? "원" : ""}</>} />
             {/* 트리거 조건 줄 (사용자 지적 8/15: DC-PM이 화면에 없어 DC-NF와 비대칭) — 저장값 표시만, 판정 무접촉 */}
@@ -284,7 +293,7 @@ export default async function G1Page() {
           {/* 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재 ≠ 누락 */}
           <Row label="가중 (Hedge)" value={<>
             {r.r1?.w_used ? Object.entries(r.r1.w_used).map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}
-            {nfObs?.v != null ? <span className="text-[14px] md:text-[11px] text-ink-48"> · 야간선물 새벽 {((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50"} 관측 {pp(nfObs.v * 100)} (검증 중 — 챌린저 v1.1c 병행)</span> : null}
+            {nfObs?.v != null ? <span className="text-[14px] md:text-[11px] text-ink-48"> · 야간선물 새벽 {(nfObs as unknown as { t?: string }).t ?? ((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50"} 관측 {pp(nfObs.v * 100)} (검증 중 — 챌린저 v1.1c 병행)</span> : null}
           </>} />
           {r.r1 ? <Footnote f={r1Footnote({ code: r1a?.code ?? "", line: r1a?.line, residualSigma: r1a?.residual_sigma ?? null, sigmaPct: r.r1.sigma_pct ?? null, fairGapPct: r.r1.fair_gap_pct ?? null, phase: r1a?.phase ?? "가상" })} /> : null}
           <ActionLine line={r.r2?.action?.line} />
@@ -298,7 +307,7 @@ export default async function G1Page() {
             const covTxt = cov ? (cov.kind === "partial" ? ` ⚠커버리지 부분(미 세션 ${cov.us_sessions})` : cov.kind === "none" ? " (미 휴장 밤)" : "") : "";
             // 표기 규격 (발주자 8/19 저녁 §1·§2): 세션 밤짜 + 시각 의무 병기, 화살표 연결, |Δ|≥1%p 자동 코멘트
             const sessionNight = (r.r1 as { g1a_ref?: { date?: string } | null } | null)?.g1a_ref?.date ?? null;
-            const probeT = ((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50";
+            const probeT = (nfObs as unknown as { t?: string } | undefined)?.t ?? ((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50";
             return <Row label={`야간선물 — 같은 세션의 진행${covTxt}`}
               value={<>{nfSessionMorning({ sessionNight, cutT: gr?.nf_cut_t ?? "19:35", cutPct: gr?.nf_cut1935_pct ?? null, dawnT: probeT, dawnPct: nfObs?.v != null ? nfObs.v * 100 : null, dawnCorrected: nfObs?.corrected })}<span className="text-[14px] md:text-[11px] text-ink-48"> (저녁값 = T2 공유값{nfObs?.corrected ? " · 새벽값 KRX 정본 소급" : ""})</span></>} />;
           })()}
@@ -307,7 +316,13 @@ export default async function G1Page() {
             const fw = (r.labels as { four_way?: { rule_score?: number | null; nf_cut1935_pct?: number | null; fair_r1_pct?: number | null; actual_gap_pct?: number; hit?: { rule?: boolean | null; nf?: boolean | null; fair?: boolean | null } } } | null)?.four_way;
             if (!fw) return null;
             const mk = (h: boolean | null | undefined) => (h == null ? "" : h ? " ✓" : " ✗");
-            return <Row label="4자 대조 (신호 대결 표본)" value={<span className="text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 번역 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />;
+            // 2판 분리 (발주자 시각 규율 8/19 §1): 저녁판 19:35 동일 절단 / 아침판 07:15 절단 — 절단 시각 명기
+            const fwx = fw as typeof fw & { evening?: { resid_open_exp?: number | null; hit_resid?: boolean | null }; morning?: { v11c_pct?: number | null; hit_v11c?: boolean | null } };
+            const ev = fwx.evening, mo = fwx.morning;
+            return (<>
+              <Row label="저녁판 대조 (19:35 동일 절단)" value={<span className="text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 저녁 번역(NXT 경로) {ev?.resid_open_exp != null ? <>{pp(ev.resid_open_exp)}{mk(ev.hit_resid)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
+              <Row label="아침판 대조 (07:15 절단)" value={<span className="text-[15px] md:text-[12px]">챔피언 R1 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · 챌린저 v1.1c {mo?.v11c_pct != null ? <>{pp(mo.v11c_pct)}{mk(mo.hit_v11c)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
+            </>);
           })()}
           <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
           {r.r1?.report ? (

@@ -181,3 +181,32 @@ export function nfSessionMorning(a: { sessionNight: string | null; cutT: string 
 export function nfSessionEveningHead(a: { sessionNight: string; lastT: string; cumPct: number; closed: boolean }): string {
   return `야간선물(${mdOf(a.sessionNight)}밤${a.closed ? "" : " 진행중"}): ${a.lastT} 현재 ${sgnP(a.cumPct)}`;
 }
+
+// ── 기준점 통일 환산 + 상충 플래그 v2 (발주자 판정 8/19 밤) ──
+// 기준점 = 정규장 종가(15:30) 확정. 잔여갭 경로 시가 예상 = NXT가 × (1+잔여갭) / 정규 종가 − 1.
+// 3자: ⓐ 룰 방향(GapScore 부호) ⓑ 잔여갭 경로 시가 예상 ⓒ 야간선물 β환산 — 어느 쌍이든 방향 불일치 또는 크기 괴리 ≥2%p → 상충.
+export type ConflictV2 = {
+  regClose: number | null; openExp_resid: number | null; openExp_nf: number | null; ruleSign: number;
+  pairs: string[]; divergence_pp: number | null; conflict: boolean;
+};
+export function conflictV2(a: { gapScore: number | null; residGap: number | null; nxtPx: number | null; rNxt: number | null; nfLevel: number | null }): ConflictV2 {
+  const regClose = a.nxtPx != null && a.rNxt != null ? Math.round(a.nxtPx / (1 + a.rNxt / 100)) : null;
+  const openExp_resid = a.residGap != null && a.rNxt != null ? Math.round(((1 + a.rNxt / 100) * (1 + a.residGap / 100) - 1) * 10000) / 100 : null;
+  const openExp_nf = a.nfLevel != null ? Math.round(a.nfLevel * 100) / 100 : null;
+  const ruleSign = a.gapScore != null && Math.abs(a.gapScore) >= 0.5 ? Math.sign(a.gapScore) : 0;
+  const pairs: string[] = [];
+  const sgnOf = (v: number | null) => (v == null || Math.abs(v) < 0.3 ? 0 : Math.sign(v));
+  if (openExp_resid != null && openExp_nf != null) {
+    const dirMis = sgnOf(openExp_resid) !== 0 && sgnOf(openExp_nf) !== 0 && sgnOf(openExp_resid) !== sgnOf(openExp_nf);
+    if (dirMis || Math.abs(openExp_resid - openExp_nf) >= 2) pairs.push("NXT vs 야간선물");
+  }
+  if (ruleSign !== 0 && openExp_resid != null && sgnOf(openExp_resid) !== 0 && sgnOf(openExp_resid) !== ruleSign) pairs.push("룰 vs NXT");
+  if (ruleSign !== 0 && openExp_nf != null && sgnOf(openExp_nf) !== 0 && sgnOf(openExp_nf) !== ruleSign) pairs.push("룰 vs 야간선물");
+  const divergence_pp = openExp_resid != null && openExp_nf != null ? Math.round(Math.abs(openExp_resid - openExp_nf) * 100) / 100 : null;
+  return { regClose, openExp_resid, openExp_nf, ruleSign, pairs, divergence_pp, conflict: pairs.length > 0 };
+}
+// 병기 표기 (발주자 확정): "≈ 내일 시가 예상 -0.3% (정규 종가 1,500,000 대비)"
+export function openExpText(pct: number | null, regClose: number | null): string {
+  if (pct == null) return "≈ 내일 시가 예상 — (환산 불가)";
+  return `≈ 내일 시가 예상 ${sgn(pct)}${regClose ? ` (정규 종가 ${regClose.toLocaleString()} 대비)` : ""}`;
+}
