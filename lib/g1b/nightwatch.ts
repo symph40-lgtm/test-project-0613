@@ -20,7 +20,7 @@ export type Checkpoint = {
   fetch_ts: string;
 };
 
-async function dayChange(sym: string): Promise<number | null> {
+export async function dayChange(sym: string): Promise<number | null> {
   try {
     const q = await yf.quote(sym) as { regularMarketChangePercent?: number; preMarketChangePercent?: number; marketState?: string };
     const v = q.regularMarketChangePercent;
@@ -28,7 +28,7 @@ async function dayChange(sym: string): Promise<number | null> {
   } catch { return null; }
 }
 
-async function nqSince16kst(): Promise<number | null> {
+export async function nqSince16kst(): Promise<number | null> {
   try {
     const r = await yf.chart("NQ=F", { period1: new Date(Date.now() - 2 * 86400e3), interval: "5m" });
     const qs = (r.quotes ?? []).filter((q) => q.close != null);

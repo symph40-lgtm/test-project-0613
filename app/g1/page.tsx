@@ -189,7 +189,18 @@ export default async function G1Page() {
           const b = betaOf[s] ?? 1.4;
           return { name: s === "005930" ? "삼" : "하", idxPct: oe != null && b > 0 ? Math.round((oe / b) * 100) / 100 : null };
         });
-        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} />;
+        // [발주자 지적 8/20 밤 23시] T2 매시 재판정(v2 시간별 트랙)을 같은 곡선에 — 시간당 1회 방향 마커 (위 삼전·아래 하닉)
+        const hOf = (s: string) => ((aRows.find((x) => x.symbol === s && x.date === sessionNight)?.t2 as { shadow_v2?: { hourly?: { t: string; dir?: string; nf_pct?: number | null }[] } } | null)?.shadow_v2?.hourly ?? []);
+        const hSs = hOf("005930"), hHx = hOf("000660");
+        const minOfH = (t: string) => { const [h, m] = t.split(":").map(Number); return (h < 12 ? h + 24 : h) * 60 + m; };
+        const v2Hourly = [...new Set([...hSs, ...hHx].map((h) => h.t.slice(0, 2)))]
+          .map((hh) => {
+            const a = hSs.find((h) => h.t.slice(0, 2) === hh), b = hHx.find((h) => h.t.slice(0, 2) === hh);
+            const t = (a ?? b)!.t;
+            return { t, dirSs: a?.dir ?? null, dirHx: b?.dir ?? null, nf_pct: a?.nf_pct ?? b?.nf_pct ?? null };
+          })
+          .sort((p, q) => minOfH(p.t) - minOfH(q.t));
+        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Hourly={v2Hourly} />;
       })()}
 
       {/* A1: G1A T2 — 맨 위 */}

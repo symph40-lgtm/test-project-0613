@@ -517,7 +517,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
 async function recordNightBars(hhmm: string, date: string, notes: string[]): Promise<void> {
   const admin = createAdminClient();
   const sessionNight = hhmm >= "18:00" ? date : (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
-  let snap: { pct: number; vol: number | null } | null = null;
+  let snap: { pct: number; vol: number | null; soxx: number | null; nq: number | null } | null = null;
   for (const symbol of G1B_SYMBOLS) {
     try {
       const t2 = (await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle()).data?.t2 as Record<string, unknown> | null;
@@ -531,9 +531,12 @@ async function recordNightBars(hhmm: string, date: string, notes: string[]): Pro
         const pct = (q as { changePercent?: number | null })?.changePercent;
         if (typeof pct !== "number") return;      // 세션 없음·결측 — 다음 틱 재시도
         const vol = (q as { volume?: number | null })?.volume;
-        snap = { pct, vol: typeof vol === "number" ? vol : null };
+        // [발주자 8/20 밤 23시] SOXX·나스닥100(NQ=F)도 같은 봉에 병기 — SOXX는 미 정규장(22:30~05:00)만 값이 있음(그 외 null)
+        const { dayChange, nqSince16kst } = await import("./nightwatch");
+        const [soxx, nq] = await Promise.all([dayChange("SOXX"), nqSince16kst()]);
+        snap = { pct, vol: typeof vol === "number" ? vol : null, soxx, nq };
       }
-      nf0.bars = [...nf0.bars, { t: hhmm, pct: snap.pct, ...(snap.vol != null ? { vol: snap.vol } : {}) }];
+      nf0.bars = [...nf0.bars, { t: hhmm, pct: snap.pct, ...(snap.vol != null ? { vol: snap.vol } : {}), ...(snap.soxx != null ? { soxx: snap.soxx } : {}), ...(snap.nq != null ? { nq: snap.nq } : {}) }];
       t2.nf = nf0;
       await admin.from("g1a_days").update({ t2 }).eq("date", sessionNight).eq("symbol", symbol);
       notes.push(`${symbol} 야간봉 ${hhmm} ${snap.pct >= 0 ? "+" : ""}${snap.pct}%`);
