@@ -13,6 +13,18 @@ export type NightCurve = {
   coverage: string | null;
 };
 
+// 범례 색 견본 (발주자 지적 8/20 밤: "검정=·주황=" 텍스트만으로는 어떤 선인지 불명 — 실제 선 모양·색을 그대로 표시)
+function LegendChip({ color, label, dash, dot, bold, textColor }: { color: string; label: string; dash?: string; dot?: boolean; bold?: boolean; textColor?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      <svg width={dot ? 12 : 26} height={10} aria-hidden="true">
+        {dot ? <circle cx={6} cy={5} r={3.4} fill={color} /> : <line x1={1} y1={5} x2={25} y2={5} stroke={color} strokeWidth={bold ? 2.6 : 1.8} strokeDasharray={dash || undefined} />}
+      </svg>
+      <span style={{ color: textColor ?? color }} className="font-medium">{label}</span>
+    </span>
+  );
+}
+
 const X0 = 18 * 60, X1 = 33 * 60; // 18:00 → 익일 09:00 (분)
 const minOf = (t: string) => { const [h, m] = t.split(":").map(Number); return (h < 12 ? h + 24 : h) * 60 + m; };
 
@@ -94,11 +106,17 @@ export async function NightFutSection({ curve, betaSs, betaHx }: { curve: NightC
         </span>
         {curve.coverage === "partial" || curve.coverage === "none" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[13px] md:text-[10px] text-amber-800">커버리지 {curve.coverage === "none" ? "공백(미 휴장)" : "부분(연휴)"}</span> : null}
       </div>
-      <p className="mb-2 text-[14px] md:text-[11px] text-ink-48">
-        {last ? `최신 ${last.t} ${last.pct >= 0 ? "+" : ""}${last.pct.toFixed(2)}%` : "18:05 첫 봉 대기"} · 파랑=10분봉(저녁) · 초록=체크포인트(23:40/03:00) · 빨강=06:00 마감 · 우측 축 = β환산(삼전·하닉)
-      </p>
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] md:text-[11px] text-ink-48">
+        <span>{last ? `최신 ${last.t} ${last.pct >= 0 ? "+" : ""}${last.pct.toFixed(2)}%` : "18:05 첫 봉 대기"}</span>
+        <LegendChip color="#1d4ed8" dot label="10분봉(저녁)" />
+        <LegendChip color="#059669" dot label="체크포인트 23:40/03:00" />
+        <LegendChip color="#dc2626" dot label="06:00 마감" />
+        <span>우측 축 = β환산(삼전·하닉)</span>
+      </div>
       <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} /></div>
-      <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">과거 1개월 — 야간 세션 일봉 (KRX 정본, T+1 라벨 · 적=u1 상승 / 청=하락)</p>
+      <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">
+        과거 1개월 — 야간 세션 일봉 (KRX 정본, T+1 라벨 · <span style={{ color: "#dc2626" }}>■ u1 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>)
+      </p>
       <div className="overflow-x-auto"><DailySvg days={daily} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
         1시간 해상도 15일 조회는 야간 크론 축적 개시 후 제공 (10분봉 저장 = 저녁 8/18~ · 밤 구간은 크론 등록부터). 8/12~14 라이브 기록은 KRX 정본 소급 정정본.
@@ -151,7 +169,15 @@ export function ThreePanelChart({ name, pts }: { name: string; pts: PanelPoint[]
           <text x={x(i)} y={H - 8} textAnchor="middle" fontSize={8} fill="#888">{p.date.slice(5)}</text>
         </g>))}
       </svg>
-      <p className="text-[13px] md:text-[10px] text-ink-48">{name} — 검정=실측 갭 · 주황=T2 잔여갭식 시가 예상 · 파랑 점선=야간선물 19:35×β(8/18~, 이전은 18:05 정정 근사) · 파랑 실선=야간선물 06:00 마감×β · 회색 점선=T2 스코어(우축 점수 — % 아님)</p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] md:text-[11px]">
+        <span className="font-semibold text-ink-48">{name}</span>
+        <LegendChip color="#111" bold label="실측 갭" />
+        <LegendChip color="#ea580c" label="T2 잔여갭식 시가 예상" />
+        <LegendChip color="#2563eb" dash="4 3" label="야간선물 19:35×β" />
+        <LegendChip color="#2563eb" label="야간선물 06:00 마감×β" />
+        <LegendChip color="#9ca3af" textColor="#6b7280" dash="2 3" label="T2 스코어 (우축 점수 — % 아님)" />
+      </div>
+      <p className="text-[12px] md:text-[10px] text-ink-48">19:35×β는 8/18부터 정본 절단 — 이전 구간은 18:05 정정 근사.</p>
     </div>
   );
 }
