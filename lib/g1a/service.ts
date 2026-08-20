@@ -120,6 +120,25 @@ async function miniHedgeWnf(symbol: G1ASymbol): Promise<number> {
   } catch { return 0.5; }
 }
 
+// [발주 D 8/20 + 경위 보완 8/20 밤] T2+ v2 섀도 생성 — 본판정 무접촉. 메인 판정 경로와
+// 캐치업(트리거 후) 경로가 공유한다. 기준점 = 19:35 절단 level 동결 저장값 (재조회 없음).
+async function tryShadowV2(symbol: G1ASymbol, t2u: Record<string, unknown>, f: T2Features, eventTonight: string | null, hhmm: string): Promise<void> {
+  const nfoV2 = t2u.nf as { level?: { pct: number; nf_level: number; beta_mkt: number }; dc_nf?: number | null } | undefined;
+  if (!nfoV2?.level || hhmm < "19:35" || t2u.shadow_v2) return;
+  const pieces = t2u.pieces as Record<string, number | null> | undefined;
+  const { judgeDrift, buildShadowV2 } = await import("./t2plusV2");
+  const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("./data");
+  const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol), fetchMacroEveningDelta()]);
+  const drift = judgeDrift({
+    basketAccel30m: accel, dcNf: nfoV2.dc_nf ?? null, nfCumSign: Math.abs(nfoV2.level.pct) >= 0.1 ? Math.sign(nfoV2.level.pct) : 0,
+    dcPm: f.F21_dcpm, basketSign: Math.abs(f.F21_basket ?? 0) >= 0.1 ? Math.sign(f.F21_basket!) : 0,
+    p1Slope: pieces?.p1_eu_semi_avg ?? null, eventTonight, macro,
+  });
+  const { G1B_CONFIG } = await import("@/lib/g1b/config");
+  const sigmaV2 = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"][eventTonight ? "event" : "normal"];
+  t2u.shadow_v2 = buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma: sigmaV2, volRatio: null, thetaLow: 2.5 });
+}
+
 // ── T2 사이클 (§5) ──
 async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string[]> {
   const notes: string[] = [];
@@ -249,22 +268,9 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         t2u.mosaic = mo;
         // [발주 D 8/20] T2+ v2 챌린저 — 야간선물 기준점 + drift 예측 (구판 shadow는 위에 보존·분리)
         // 판정 시점 = 19:35 절단(level 동결 시점) 이후 첫 평가. 성분별 기여 로그 포함 (절제 진단 구조).
+        // 거래량 배율: 20일 축적 전 null (강등 미적용 — 사전 등록 명기). 생성 로직은 tryShadowV2 공유.
         try {
-          const nfoV2 = t2u.nf as { level?: { pct: number; nf_level: number; beta_mkt: number }; dc_nf?: number | null; bars?: { t: string; pct: number; vol?: number }[] } | undefined;
-          if (nfoV2?.level && hhmm >= "19:35" && !t2u.shadow_v2) {
-            const { judgeDrift, buildShadowV2 } = await import("./t2plusV2");
-            const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("./data");
-            const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol), fetchMacroEveningDelta()]);
-            const drift = judgeDrift({
-              basketAccel30m: accel, dcNf: nfoV2.dc_nf ?? null, nfCumSign: Math.abs(nfoV2.level.pct) >= 0.1 ? Math.sign(nfoV2.level.pct) : 0,
-              dcPm: f.F21_dcpm, basketSign: Math.abs(f.F21_basket ?? 0) >= 0.1 ? Math.sign(f.F21_basket!) : 0,
-              p1Slope: pieces?.p1_eu_semi_avg ?? null, eventTonight: ctx.eventTonight, macro,
-            });
-            const { G1B_CONFIG } = await import("@/lib/g1b/config");
-            const sigmaV2 = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"][ctx.eventTonight ? "event" : "normal"];
-            // 거래량 배율: 20일 축적 전 null (강등 미적용 — 사전 등록 명기). 축적: bars[].vol
-            t2u.shadow_v2 = buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma: sigmaV2, volRatio: null, thetaLow: 2.5 });
-          }
+          await tryShadowV2(symbol, t2u, f, ctx.eventTonight, hhmm);
         } catch { /* v2 결측 허용 — 본판정 무접촉 */ }
       }
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
@@ -358,6 +364,16 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
           }
         }
       }
+    }
+    // [발주 D — 경위 보완 8/20 밤] v2 캐치업: 배포·일시 오류로 판정 창 내 shadow_v2가 못 만들어진 채
+    // T2가 먼저 확정된 경우(8/20 실사례: 확정 19:45:15 < 배포 19:47 → 미생성), t2End 전이면 여기서 생성.
+    if (t2.trigger_type && hhmm <= W.t2End && !(t2 as Record<string, unknown>).shadow_v2) {
+      try {
+        const f2 = await collectT2Features(symbol);
+        const ctx2 = await buildAbstainCtx(f2);
+        await tryShadowV2(symbol, t2 as Record<string, unknown>, f2, ctx2.eventTonight, hhmm);
+        if ((t2 as Record<string, unknown>).shadow_v2) notes.push(`${symbol} v2 캐치업 생성 (${hhmm})`);
+      } catch { /* 결측 허용 */ }
     }
     row.t2 = t2;
     await upsertDay(row);

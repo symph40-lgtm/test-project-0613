@@ -42,12 +42,14 @@ export type C1Day = {
   materialDir: -1 | 0 | 1;     // 재료 방향
   justified: number | null;    // 정당화 반응 %
   actual: number | null;       // 실반응 %
-  ratio: number | null;        // 반응배율
+  ratio: number | null;        // 반응배율 (윈저화 ±ratioClip 적용값)
+  raw: number | null;          // 윈저화 전 원값 (발주자 8/20 밤 §3ⓐ — 클리핑 밤 원시값 보존·표시)
+  clipped: boolean;            // 윈저화 발동 여부
   excluded: boolean;           // |정당화| < 0.3% → 재료 없는 날
   note: string;
 };
 export type CommonParts = {
-  C1: { ratio: number | null; grade: C1Grade; materialDir: -1 | 0 | 1; justified: number | null; excluded: boolean; beta: number | null };
+  C1: { ratio: number | null; grade: C1Grade; materialDir: -1 | 0 | 1; justified: number | null; excluded: boolean; beta: number | null; raw?: number | null; clipped?: boolean };
   C2_vol_asym: number | null;
   C3_clv20: number | null;
   C4_breadth_or_rs: number | null;

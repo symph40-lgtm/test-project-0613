@@ -286,6 +286,7 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
     C1: {
       ratio: today?.ratio ?? null, grade: today?.grade ?? null, materialDir: today?.materialDir ?? 0,
       justified: today?.justified ?? null, excluded: today?.excluded ?? true,
+      raw: today?.raw ?? null, clipped: today?.clipped ?? false,   // 윈저화 원값 보존 (발주자 8/20 밤 §3ⓐ)
       beta: null, // engine에서 채움 (β는 대상·창 단위 1회 산출)
     },
     C2_vol_asym: vol20.up && vol20.down ? r2(vol20.up / vol20.down) : null,

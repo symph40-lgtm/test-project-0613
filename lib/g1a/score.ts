@@ -176,17 +176,23 @@ export function evaluateT2(
   }
 
   // §5.1 전 조건 — 미충족 사유를 blocked에 남긴다 (평가 궤적 기록용)
+  // [발주자 8/20 밤 §6] 복합 사유 개별 나열 원칙: 구 "관측 부족"은 프리마켓·유럽 두 조건의 복합 코드였다 →
+  // 개별 코드로 분리하고, 미충족 사유는 첫 건만이 아니라 전부 "·"로 나열한다. (신규 코드 2건은 승인 요청 상태 — 대조표)
   const checks: [boolean, string][] = [
-    [(f.F21_obs_min ?? 0) >= C.trigger.minPmObsMin && (f.F20_obs_min ?? 0) >= C.trigger.minEuObsMin, "관측 부족"],
+    [(f.F21_obs_min ?? 0) >= C.trigger.minPmObsMin, "프리마켓 관측 부족"],
+    [(f.F20_obs_min ?? 0) >= C.trigger.minEuObsMin, "유럽 관측 부족"],
     [(f.F21_dcpm ?? 0) >= C.trigger.minDcPm, "DC-PM 미달"],
     [Math.abs(f.F21_basket ?? 0) >= C.trigger.minBasketAbs, "크기 미달"],
     [threeWay, "3자 불일치"],
     [econ === true, "경제성 미달"],
     [liq !== "hold", "유동성 보류"],
   ];
-  for (const [ok, why] of checks) {
-    if (!ok && !isFinal) return { verdict: base, blocked: why };
-    if (!ok && isFinal) return { verdict: base, blocked: `T2-F ${why} → 베팅 없음 확정(${Math.abs(gs.score) >= 0.5 ? "Lean" : "Flat"})` };
+  const unmet = checks.filter(([ok]) => !ok).map(([, why]) => why);
+  if (unmet.length) {
+    const why = unmet.join("·");
+    return isFinal
+      ? { verdict: base, blocked: `T2-F ${why} → 베팅 없음 확정(${Math.abs(gs.score) >= 0.5 ? "Lean" : "Flat"})` }
+      : { verdict: base, blocked: why };
   }
 
   const abs = Math.abs(gs.score);

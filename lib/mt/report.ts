@@ -70,9 +70,20 @@ export function flags(day: MtDay): string[] {
 /** 카드 상시 줄 (T2·R1) — 3줄 구조 */
 export function mtCardLines(day: MtDay): { head: string; panel: string; tail: string; flags: string[] } {
   const c1 = day.common.C1;
-  const c1txt = c1.grade
-    ? `C1 ${c1.excluded ? "재료 미달" : `배율 ${c1.ratio?.toFixed(2)}`} (등급 ${c1.grade}${c1.materialDir ? `·${c1.materialDir > 0 ? "호재" : "악재"}` : ""})`
-    : "C1 재료 없음";
+  // [발주자 8/20 밤 §3ⓑ·ⓒ] 표기 규격: "악재 과반응 5.0배 (하락 에너지)" —
+  //   재료(호재/악재) + 반응어(배율 부호·크기: 같은 방향 |r|>1 과반응 / |r|≤1 과소반응 / 반대 방향 역반응) + 실반응 에너지 방향.
+  //   등급 항상 병기(스펙 원칙) · 등급 C 날 확정 규격 = "등급 C 프록시·투표 제외" · 윈저화 밤은 원값 병기(§3ⓐ).
+  const c1txt = (() => {
+    if (!c1.grade) return "C1 재료 없음";
+    const gradeTxt = `등급 ${c1.grade}${c1.grade === "C" ? " 프록시·투표 제외" : ""}`;
+    if (c1.excluded || c1.ratio == null) return `C1 재료 미달 (${gradeTxt})`;
+    const r = c1.ratio;
+    const mat = c1.materialDir > 0 ? "호재" : "악재";
+    const react = r >= 0 ? (Math.abs(r) > 1 ? "과반응" : "과소반응") : "역반응";
+    const energy = c1.materialDir * Math.sign(r || 1) > 0 ? "상승 에너지" : "하락 에너지";
+    const rawTxt = c1.clipped && c1.raw != null ? `·원값 ${c1.raw.toFixed(1)} (±5 윈저화)` : "";
+    return `C1 ${mat} ${react} ${Math.abs(r).toFixed(1)}배 (${energy}·${gradeTxt}${rawTxt})`;
+  })();
   return {
     head: `MT ${MT_NAME[day.symbol] ?? day.symbol}: ${phaseLine(day)}${transitionPhrase(day)}`,
     panel: `패널 [${panelChips(day)}]`,

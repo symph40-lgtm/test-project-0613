@@ -55,7 +55,7 @@ export function c1ForDay(bars: Bar[], i: number, symbol: string, ctx: C1Context,
   const b = beta ?? betaSox(bars, i, symbol, ctx.soxByDate);
   const sox = ctx.soxByDate.get(date) ?? null;
   const base: C1Day = {
-    date, grade: null, materialDir: 0, justified: null, actual, ratio: null, excluded: true, note: "재료 없음",
+    date, grade: null, materialDir: 0, justified: null, actual, ratio: null, raw: null, clipped: false, excluded: true, note: "재료 없음",
   };
 
   const con = ctx.consensusByDate?.get(date);
@@ -89,6 +89,8 @@ function finish(base: C1Day, grade: C1Grade, justified: number, actual: number |
     justified: Math.round(justified * 100) / 100,
     actual,
     ratio: ratio == null ? null : Math.round(ratio * 100) / 100,
+    raw: raw == null ? null : Math.round(raw * 100) / 100,   // 윈저화 전 원값 (발주자 8/20 밤 §3ⓐ)
+    clipped,
     excluded,
     note: excluded
       ? `${note} — 재료 미달(|정당화| < ${cfg.minJustifiedAbs}%)`

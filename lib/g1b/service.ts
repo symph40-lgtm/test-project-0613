@@ -9,7 +9,7 @@ import { FOMC_DECISION_DATES, CPI_RELEASE_DATES, ES_RELEASE_DATES } from "@/lib/
 import type { G1BSymbol } from "./config";
 import { G1B_CONFIG as C, G1B_SYMBOLS } from "./config";
 import { collectMorning, collectNight, krDaily, type Obs } from "./data";
-import { challengerExperts, challengerUpdate, combine, combineW, dailyUpdate, expertsR1, initChallenger, initState, sigmaNight, type Experts, type LearnState } from "./engine";
+import { challengerExperts, challengerUpdate, combine, combineW, dailyUpdate, etaChallengerUpdate, expertsR1, initChallenger, initEtaChallenger, initState, sigmaNight, type Experts, type LearnState } from "./engine";
 import { buildR1, buildR2 } from "./report";
 
 type Row = {
@@ -242,12 +242,17 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       // 공식 개시(nights 증가)는 첫 라벨 밤부터 — 그 전 R1은 참고 기록.
       const chSt = st.challenger_v11c ?? initChallenger(symbol, st.hedge_w);
       const chC = regime === "event" ? { fair, wUsed } : combineW(chSt.hedge_w, st.bias, challengerExperts(ex));
+      // [발주자 8/20 밤 §4] 적응 η 챌린저 (기승인·등재 8/20 밤 — 하닉 CUSUM 8.0 상한 도달):
+      // 전문가 집합·bias·σ 전부 챔피언과 동일, 다른 것은 η 하나 (CUSUM 연동) — 측정 축 통제.
+      const etaSt = st.challenger_eta ?? initEtaChallenger(st.hedge_w);
+      const chEta = combineW(etaSt.hedge_w, st.bias, ex);
       row.r1 = {
         fair_gap_pct: fair != null ? Math.round(fair * 100) / 100 : null,
         sigma_pct: sigma, q80_pct: q80, regime, w_used: wUsed,
         expected_open: expOpen, prev_close: kr.prevClose,
         experts: ex, virtual: true, night_flash: nightFlash,
         challenger_v11c: { fair_gap_pct: chC.fair != null ? Math.round(chC.fair * 100) / 100 : null, w_used: chC.wUsed, nights: chSt.nights, virtual: true, event_champion_kept: regime === "event" },
+        challenger_eta: { fair_gap_pct: chEta.fair != null ? Math.round(chEta.fair * 100) / 100 : null, w_used: chEta.wUsed, nights: etaSt.nights, virtual: true },
         action: act, g1a_ref: refT2 ? { date: g1aRef.data?.date, dir: refT2.verdict?.direction, entry: refT2.entry_px_virtual, rule_score: refT2.verdict?.gap_score ?? null, nf_cut1935_pct: nfCut, nf_cut_t: refT2.nf?.level?.cut_t ?? null , resid_open_exp: residOpenExp } : null,
         report: (nightFlash ? `⚠ 야간 급변: 야간선물 ${(nfPct0! * 100).toFixed(2)}% (|±2%| 이상 밤)\n` : "") + pathLine + "\n" +
           act.line + "\n" + buildR1(symbol, date, fair, sigma, q80, expOpen, wUsed, row.night, regime, { sessionNight: g1aRef.data?.date ?? null, cutT: refT2?.nf?.level?.cut_t ?? null, cutPct: nfCut }),
@@ -332,7 +337,10 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         r2_residual_v11c: { fair_gap_r2_pct: fair2V != null ? Math.round(fair2V * 100) / 100 : null, residual_pct: resV, residual_sigma: resSigV, signal: sigV, virtual: true },
         r2_diverged: r2Diverged,   // 익일 채점 대상 (발주 C §2)
         manual_weight_ban: "야간선물 가중 수동 상향 금지 — v1.1c 자동 증감만 (발주 C §4)",
-        report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal) + `\n야간 정합: ${nfCons}${nfGap2 != null && aucGap2 != null ? ` (야간환산 ${nfGap2 > 0 ? "+" : ""}${nfGap2}% vs 동시호가 ${aucGap2 > 0 ? "+" : ""}${aucGap2}%)` : ""}`,
+        // [발주자 8/20 밤 — R2 표기] 3숫자 규격(실제값·이론값·차) + v1.1c 이론가 병기 (v1.1c는 첫 데이터 밤부터)
+        report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal, expOpen2,
+          { theoPx: fair2V != null && prevClose ? Math.round(prevClose * (1 + fair2V / 100)) : null, resSigma: resSigV }) +
+          `\n야간 정합: ${nfCons}${nfGap2 != null && aucGap2 != null ? ` (야간환산 ${nfGap2 > 0 ? "+" : ""}${nfGap2}% vs 동시호가 ${aucGap2 > 0 ? "+" : ""}${aucGap2}%)` : ""}`,
         sent_at: new Date().toISOString() };
       await saveRow(row);
       outbox.subject = "[G1B R2] 잔차 판정 (가상·log-only)";
@@ -417,13 +425,17 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const nfC = row.night?.night_fut && !row.night.night_fut.late_arrival ? row.night.night_fut.v : null;
         const nfCB = nfC != null ? Math.round(nfC * 100 * st.kalman.beta_mkt * 100) / 100 : null;
         const league = leagueScore({ nxtClosePct: nxtC ?? null, nfCloseBeta: nfCB, actualGap: actual });
+        // [발주자 8/20 밤 §5] 리그전 "잔여갭 식 대비" 행 — 애프터 유지(nxt 그대로) vs 차감 식(잔여갭 경로 시가 예상) 오차 병기.
+        // 잔여갭 식 재검토 안건의 증거 축적 — 채점 회계 무접촉, 병기만.
+        const residExp = (row.r1.g1a_ref as { resid_open_exp?: number | null } | null)?.resid_open_exp ?? null;
+        const leagueX = { ...league, resid_open_exp: residExp, err_resid: residExp != null ? Math.round(Math.abs(residExp - actual) * 100) / 100 : null };
         // [발주 ■7 8/20] 이원 채점 병행 저장 — 공식(종가比) 불변 + 애프터比(T2 19:40 기준가 기준) 기록
         const entryPxRef = (row.r1.g1a_ref as { entry?: number | null } | null)?.entry ?? null;
         const afterGap = entryPxRef && kr.prevClose ? Math.round(((kr.todayOpen / entryPxRef - 1) * 100) * 100) / 100 : null;
         row.labels = {
           after_basis: { actual_gap_after_pct: afterGap, entry_px_ref: entryPxRef, note: "애프터比 채점 병행 (공식 채점은 종가 자 유지 — D+60 자 전환 발주자 결정)" },
           big_after_night: afterGap != null && Math.abs(actual - afterGap) >= 3,
-          league: { ...league, nxt_close_pct: nxtC ?? null, nf_close_beta: nfCB, note: "애프터 최종가 vs 야간선물 마감 — 잔여갭 야간선물 성분 편입 심사 직접 증거 (발주자 8/20 §4)" },
+          league: { ...leagueX, nxt_close_pct: nxtC ?? null, nf_close_beta: nfCB, note: "애프터 최종가 vs 야간선물 마감 — 잔여갭 야간선물 성분 편입 심사 직접 증거 (발주자 8/20 §4) + 잔여갭식 대비(§5 8/20 밤)" },
           actual_open: kr.todayOpen, actual_gap_pct: actual,
           te_r1_pct: f1 != null ? Math.round(Math.abs(actual - f1) * 100) / 100 : null,
           te_r2_pct: f2 != null ? Math.round(Math.abs(actual - (f2 as number)) * 100) / 100 : null,
@@ -441,9 +453,15 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         st2.challenger_v11c = regKey === "event" ? chPrev : challengerUpdate(chPrev, chEx, actual, sigCh);
         const chFair = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null;
         (row.labels as Record<string, unknown>).te_v11c_pct = chFair != null ? Math.round(Math.abs(actual - chFair) * 100) / 100 : null;
+        // [발주자 8/20 밤 §4] 적응 η 챌린저 채점·갱신 — 매 라벨 밤 (챔피언과 동일 주기), η_eff는 갱신 전 챔피언 CUSUM 기준
+        const etaPrev = st.challenger_eta ?? initEtaChallenger(st.hedge_w);
+        st2.challenger_eta = etaChallengerUpdate(etaPrev, ex, actual, sigCh, st.cusum);
+        const etaFair = (row.r1.challenger_eta as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null;
+        (row.labels as Record<string, unknown>).te_eta_pct = etaFair != null ? Math.round(Math.abs(actual - etaFair) * 100) / 100 : null;
         row.learn = { hedge_w: st2.hedge_w, sigma_ewma: st2.sigma_ewma, bias: st2.bias, cusum: st2.cusum, pit_last: st2.pit_hist.at(-1), kalman_b1: st2.kalman.b1, clamp_hits: st2.kalman.clamp_hits,
           challenger_v11c: { w_nf: st2.challenger_v11c.hedge_w.nf ?? null, nights: st2.challenger_v11c.nights, event_skipped: regKey === "event",
-            loss_nf: regKey !== "event" && chEx.nf != null ? Math.round((Math.abs(actual - (chEx.nf as number)) / Math.max(sigCh, 0.3)) * 1000) / 1000 : null } };
+            loss_nf: regKey !== "event" && chEx.nf != null ? Math.round((Math.abs(actual - (chEx.nf as number)) / Math.max(sigCh, 0.3)) * 1000) / 1000 : null },
+          challenger_eta: { nights: st2.challenger_eta.nights, eta_boost: Math.round((1 + Math.max(0, (Math.abs(st.cusum) - 4) / 4)) * 100) / 100 } };
         await saveState(symbol, st2);
         // 일 1회 상태 스냅샷 + 해시 (발주자 요건 §3 — 롤백이 상태까지 복원 가능하게)
         const { createHash } = await import("crypto");
@@ -551,6 +569,13 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     if (te != null) (teReg[reg === "event" ? "event" : "normal"] ??= []).push(Number(te));
   }
   const teByRegime = { normal: upperMed(teReg.normal), event: upperMed(teReg.event), n: { normal: teReg.normal.length, event: teReg.event.length } };
+  // [발주자 8/20 밤 §7] TE 종목별 중앙값 분리 — 동일 상위 중앙값 규약 (전 레짐 합산; 레짐 분리는 위 행이 담당)
+  const teSym: Record<string, number[]> = {};
+  for (const r of rows) {
+    const te = (r.labels as { te_r1_pct?: number | null } | null)?.te_r1_pct;
+    if (te != null) (teSym[r.symbol] ??= []).push(Number(te));
+  }
+  const teBySymbol = Object.fromEntries(Object.entries(teSym).map(([s, xs]) => [s, { median: upperMed([...xs]), n: xs.length }]));
   const complete = per.filter((p) => p.r1ok === 2 && p.r2ok === 2).length;
   // D1 (발주자 8/12): G1A 보류 밤 집계 — θ 캘리브레이션의 공식 증거 + E2 T2+ 섀도 비교 + E1 개시일
   const ga = await admin.from("g1a_days").select("date,symbol,t2,labels").order("date", { ascending: true }).limit(120);
@@ -683,7 +708,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
-    te_r1_median_pct: med, te_r1_by_regime: teByRegime, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
+    te_r1_median_pct: med, te_r1_by_regime: teByRegime, te_r1_by_symbol: teBySymbol, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     nf_leaderboard: nfLeaderboard, e_system: eSystem, nf_vs_champ: nfVsChamp,

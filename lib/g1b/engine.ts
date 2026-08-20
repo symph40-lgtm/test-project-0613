@@ -15,6 +15,7 @@ export type LearnState = {
   cusum: number;
   nights: number;
   challenger_v11c?: ChallengerState;     // pack_v1.1c 섀도 (발주자 8/15) — 본판정 무접촉
+  challenger_eta?: ChallengerState;      // 적응 η 섀도 (발주자 8/20 밤 — 하닉 CUSUM 8.0 상한 도달로 등재) — 본판정 무접촉
 };
 
 // ── pack_v1.1c 챌린저 (발주자 지시 8/15 '정확도 연동' §1 — 섀도 전용) ──
@@ -44,6 +45,27 @@ export function challengerUpdate(ch: ChallengerState, ex: Experts, actualGapPct:
     const p = ex[n];
     if (p == null) continue;
     w[n] *= Math.exp(-L.hedgeEta * (Math.abs(actualGapPct - p) / Math.max(sig, 0.3)));
+  }
+  const tot = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  for (const n of Object.keys(w)) w[n] = Math.round(Math.min(L.hedgeMaxW, w[n] / tot) * 1000) / 1000;
+  return { hedge_w: w, nights: ch.nights + 1 };
+}
+
+// ── 적응 η 챌린저 (발주자 8/20 밤 등재 — 기승인분. 등재 문서: g1br/challengers/eta_adaptive.md) ──
+// 가설: |CUSUM|이 클수록(모형이 한 방향으로 뒤처짐) Hedge 학습률을 올리면 재배분이 빨라져 TE가 줄어든다.
+// 등재 상수: η_eff = η0 × (1 + max(0, (|CUSUM|−4)/4)) — |CUSUM|≤4는 챔피언과 동일, 캡(8)에서 2×η0.
+// CUSUM 원천 = 챔피언 학습 상태(진단 공유) — bias·전문가 집합·σ 전부 챔피언과 동일: 측정 축은 η 하나뿐.
+export function initEtaChallenger(incumbent: Record<string, number>): ChallengerState {
+  return { hedge_w: { ...incumbent }, nights: 0 };
+}
+export function etaChallengerUpdate(ch: ChallengerState, ex: Experts, actualGapPct: number, sig: number, champCusum: number): ChallengerState {
+  const L = C.learn;
+  const etaEff = L.hedgeEta * (1 + Math.max(0, (Math.abs(champCusum) - 4) / 4));
+  const w = { ...ch.hedge_w };
+  for (const n of Object.keys(w)) {
+    const p = ex[n];
+    if (p == null) continue;
+    w[n] *= Math.exp(-etaEff * (Math.abs(actualGapPct - p) / Math.max(sig, 0.3)));
   }
   const tot = Object.values(w).reduce((a, b) => a + b, 0) || 1;
   for (const n of Object.keys(w)) w[n] = Math.round(Math.min(L.hedgeMaxW, w[n] / tot) * 1000) / 1000;

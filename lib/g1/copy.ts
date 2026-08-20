@@ -86,13 +86,18 @@ export function r1Footnote(a: {
 }
 
 // ── §A R2 카드 각주 (내부 코드 유지 — 표시만 쉬운 말) ──
-export function r2Footnote(a: { code: string; residualSigma: number | null; expectedOpen: number | null; phase: string }): TwoLines {
+// [발주자 지시 8/20 밤 — R2 표기] 해석 각주도 판정 줄과 동일한 3숫자(실제값·이론값·차) 사용.
+export function r2Footnote(a: { code: string; residualSigma: number | null; expectedOpen: number | null; phase: string; est?: number | null }): TwoLines {
+  const diff = a.est != null && a.expectedOpen != null ? a.est - a.expectedOpen : null;
+  const three = (word: string) => diff != null && a.residualSigma != null
+    ? `시장이 매기는 시가(${a.est!.toLocaleString()})가 이론값(${a.expectedOpen!.toLocaleString()})보다 ${Math.abs(diff).toLocaleString()}원 ${word} — 정상 편차의 ${Math.abs(a.residualSigma).toFixed(1)}배`
+    : null;
   if (a.code === "R2_FADE_CANDIDATE" && a.residualSigma != null) return {
-    해석: `시장이 시가를 이론값보다 ${Math.abs(a.residualSigma).toFixed(1)}배(정상 편차 기준) 비싸게 매기는 중`,
+    해석: three("비쌈") ?? `시장이 시가를 이론값보다 ${Math.abs(a.residualSigma).toFixed(1)}배(정상 편차 기준) 비싸게 매기는 중`,
     할일: withTail(`시가 매수 금지. 시가 이후 밀림(되돌림) 관찰 — 조건 통과 시만 하락 베팅 후보`, a.phase),
   };
   if (a.code === "R2_OPEN_BUY") return {
-    해석: `시장이 시가를 이론값보다 싸게 매기는 중`,
+    해석: three("쌈") ?? `시장이 시가를 이론값보다 싸게 매기는 중`,
     할일: withTail(`시가 매수 후보 (목표 ${a.expectedOpen ? a.expectedOpen.toLocaleString() : "이론가"}, 시한 09:30, 1/6)`, a.phase),
   };
   if (a.code === "R2_NO_SIGNAL" && a.residualSigma != null) return {
@@ -120,18 +125,23 @@ export const DIR_AXIS_TAG: Record<DirAxis, string> = {
 };
 
 // ── §B 성적표 판결문 ──
+// [발주자 재촉 8/20 밤 — 기준점 통일 완전 이행] 헤드라인 = 애프터比(진입가/기준가 기준 = L1p) 우선, 종가比 괄호.
+// 채점의 자(적중 hit·L1 분류)는 종가 유지 — 이원 기록 원칙 불변. 규격 예시(발주자):
+// "T2는 갭하락으로 보고 쉬었으나 실제는 애프터比 -0.19% (종가比 +3.84% 갭상승) — 쉼이 결과적으로 정답, 방향은 오판"
 export function verdictSentence(a: {
   name: string; bet: boolean; gradeLabel?: string | null; dir?: string | null;
   score: number | null; abstain: string | null; L1: number | null; L1p: number | null; hit?: boolean | null;
 }): string {
-  const actual = a.L1 == null ? "미채점" : Math.abs(a.L1) < 0.3 ? `보합 ${sgn(a.L1)}` : a.L1 > 0 ? `갭상승 ${sgn(a.L1)}` : `갭하락 ${sgn(a.L1)}`;
+  const cls = a.L1 == null ? "" : Math.abs(a.L1) < 0.3 ? " 보합" : a.L1 > 0 ? " 갭상승" : " 갭하락";
+  const actual = a.L1 == null ? "미채점" : `애프터比 ${a.L1p != null ? sgn(a.L1p) : "—"} (종가比 ${sgn(a.L1)}${cls})`;
   if (a.bet) {
-    return `${a.name} — T2 '${a.gradeLabel ?? (a.dir === "UP" ? "갭상승" : "갭하락")}' → 실제 ${actual} — ${a.hit ? "적중" : a.hit === false ? "빗나감" : "채점 대기"}, 진입가 기준 ${a.L1p != null ? sgn(a.L1p) : "—"} (가상)`;
+    return `${a.name} — T2 '${a.gradeLabel ?? (a.dir === "UP" ? "갭상승" : "갭하락")}' → 실제 ${actual} — ${a.hit ? "적중" : a.hit === false ? "빗나감" : "채점 대기"} (채점 자=종가比, 가상)`;
   }
   const seen = a.score != null && a.score >= 0.5 ? "갭상승" : a.score != null && a.score <= -0.5 ? "갭하락" : "방향 없음";
-  const tag = DIR_AXIS_TAG[dirAxisOf({ score: a.score, abstain: a.abstain, L1: a.L1 })];
-  const money = a.L1p != null ? `저녁 가격에 들어갔다면 ${sgn(a.L1p)} ${a.L1p >= 0 ? "벌었을" : "잃었을"} 밤` : "가상 진입가 미기록";
-  return `${a.name} — T2는 '${seen}'으로 보고 쉬었으나 실제는 ${actual}. ${money} → ${tag}`;
+  const ax = dirAxisOf({ score: a.score, abstain: a.abstain, L1: a.L1 });
+  const AX_SHORT: Record<DirAxis, string> = { 오판: "방향은 오판", 적중_문턱: "방향은 적중(문턱에 막힘)", 적중_규칙: "방향은 적중(규칙에 막힘)", 무방향: "방향 판단 없음" };
+  const rest = a.L1p == null ? "가상 진입가 미기록" : a.L1p > 0.3 ? `쉬어서 ${sgn(a.L1p)} 놓침(애프터比)` : "쉼이 결과적으로 정답";
+  return `${a.name} — T2는 '${seen}'으로 보고 쉬었으나 실제는 ${actual} — ${rest}, ${AX_SHORT[ax]}`;
 }
 
 // ── §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) ──

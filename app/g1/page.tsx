@@ -100,8 +100,8 @@ type G1BRow = {
   date: string; symbol: string;
   night: Record<string, { v: number | null }> | null;
   r1: { fair_gap_pct?: number | null; sigma_pct?: number; expected_open?: number | null; w_used?: Record<string, number>; action?: Act; report?: string } | null;
-  r2: { residual_sigma?: number | null; signal?: string; action?: Act; report?: string } | null;
-  labels: { actual_gap_pct?: number; te_r1_pct?: number | null } | null;
+  r2: { residual_sigma?: number | null; residual_pct?: number | null; auction_est_px?: number | null; signal?: string; action?: Act; report?: string } | null;
+  labels: { actual_gap_pct?: number; te_r1_pct?: number | null; after_basis?: { actual_gap_after_pct?: number | null } | null } | null;
 };
 
 export default async function G1Page() {
@@ -127,11 +127,11 @@ export default async function G1Page() {
   const abstain = (m?.g1a_abstain ?? null) as Record<string, unknown> | null;
   const sigmaOf: Record<string, number> = {};
   // 학습 상태 (사용자 논의 8/15 — 적응 η 도입 시점 판단 재료): CUSUM·bias·Hedge 가중 표시 (저장값만)
-  const learnOf: Record<string, { cusum: number; bias: number; hedge_w: Record<string, number>; nights: number }> = {};
+  const learnOf: Record<string, { cusum: number; bias: number; hedge_w: Record<string, number>; nights: number; etaNights: number | null }> = {};
   for (const s of bState.data ?? []) {
-    const st = s.state as { sigma_ewma?: Record<string, number>; cusum?: number; bias?: number; hedge_w?: Record<string, number>; nights?: number };
+    const st = s.state as { sigma_ewma?: Record<string, number>; cusum?: number; bias?: number; hedge_w?: Record<string, number>; nights?: number; challenger_eta?: { nights?: number } };
     if (st?.sigma_ewma?.normal) sigmaOf[s.symbol] = Math.sqrt(st.sigma_ewma.normal);
-    learnOf[s.symbol] = { cusum: st?.cusum ?? 0, bias: st?.bias ?? 0, hedge_w: st?.hedge_w ?? {}, nights: st?.nights ?? 0 };
+    learnOf[s.symbol] = { cusum: st?.cusum ?? 0, bias: st?.bias ?? 0, hedge_w: st?.hedge_w ?? {}, nights: st?.nights ?? 0, etaNights: st?.challenger_eta?.nights ?? null };
   }
   aRows.sort(bySymOrder);
   rows.sort(bySymOrder);
@@ -182,7 +182,14 @@ export default async function G1Page() {
           closePct: !live && nfo?.v != null ? nfo.v * 100 : null, closeT: (nfo as { t?: string } | undefined)?.t ?? "06:00",
           coverage: cov?.kind ?? null,
         };
-        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} />;
+        // [발주자 검수 8/20 밤 §1] T2 판정값 마커 — 세션 밤의 저녁 번역(잔여갭식 시가 예상) ÷ β → 지수축 병기
+        const t2Marks = (["005930", "000660"] as const).map((s) => {
+          const ar = aRows.find((x) => x.symbol === s && x.date === sessionNight);
+          const oe = (ar?.t2 as { conflict_v2?: { openExp_resid?: number | null } } | null)?.conflict_v2?.openExp_resid ?? null;
+          const b = betaOf[s] ?? 1.4;
+          return { name: s === "005930" ? "삼" : "하", idxPct: oe != null && b > 0 ? Math.round((oe / b) * 100) / 100 : null };
+        });
+        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} />;
       })()}
 
       {/* A1: G1A T2 — 맨 위 */}
@@ -243,7 +250,8 @@ export default async function G1Page() {
               // 용어 (발주자 8/18): 바스켓은 |수익률| 절대값 조건 — "|-1.28%| ≥ 0.5% 통과" 형식으로 표기
               const rb = vv.r_basket;
               const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
-              return <Row label="트리거 조건 (DC-PM ≥60% · 바스켓 |수익률|(미 반도체 프리장 평균, 크기 기준) ≥0.5% · 3자 일치 · 경제성)"
+              {/* [발주자 8/20 밤 §8] "종목 바스켓" 명시 — 종목별 구성(공통 아님) 오독 방지 */}
+              return <Row label="트리거 조건 (DC-PM ≥60% · 종목 바스켓 |수익률|(해당 종목의 미 반도체 프리장 평균 — 종목별 구성) ≥0.5% · 3자 일치 · 경제성)"
                 value={<span className="text-[15px] md:text-[12px]">DC-PM {dc} · 바스켓 {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
             })() : null}
             {(() => {
@@ -273,14 +281,17 @@ export default async function G1Page() {
             {(() => {
               // 발주 D 8/20: T2+ v2 챌린저 줄 — base(야간선물 19:35×β) + drift 방향×확신도 → 예상갭
               const v2 = (r.t2 as { shadow_v2?: { base_stock_pct?: number; drift?: { dir?: string; conf?: number; invalidated?: string | null; components?: { key: string; vote: number }[] }; adj_pct?: number; expected_gap_pct?: number; grade?: string; confidence_vol?: number | null } } | null)?.shadow_v2;
-              if (!v2) return <Row label="T2+ v2 (야간선물 기준점+drift·챌린저)" value="19:35 판정 대기 (8/20 등재)" />;
+              // [발주자 검수 8/20 밤 §2] 미출력 경위 명시: 8/20 밤은 배포(19:47)가 T2 확정(19:45:15)보다 늦어 미생성 —
+              // 버그 아닌 배포 시점 문제. 캐치업 경로 추가로 재발 방지, 첫 실기록 = 8/21 19:45.
+              if (!v2) return <Row label="T2+ v2 (야간선물 기준점+drift·챌린저)"
+                value={r.date === "2026-08-20" ? "8/20 밤 미생성 — 배포 19:47 > T2 확정 19:45 (첫 실기록 8/21 19:45, 캐치업 경로 보강)" : "19:35 판정 대기 (8/20 등재)"} />;
               const dr = v2.drift;
               const votes = (dr?.components ?? []).filter((c) => c.vote !== 0).map((c) => `${c.key}${c.vote > 0 ? "↑" : "↓"}`).join(" ");
               return <Row label={`T2+ v2 (챌린저) — ${v2.grade ?? "—"}`}
                 value={<span className="text-[14px] md:text-[11px]">base {pp(v2.base_stock_pct)} + drift {dr?.invalidated ? `무효화(${dr.invalidated})` : `${dr?.dir ?? "중립"}·확신 ${Math.round((dr?.conf ?? 0) * 100)}%`} → 예상갭 {pp(v2.expected_gap_pct)}{votes ? ` (${votes})` : ""}{v2.confidence_vol == null ? " · 거래량 배율 축적 중(강등 미적용)" : ""}</span>} />;
             })()}
-            <Row label="T2+ 섀도 (E2·본판정 미반영)" value={r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"} />
             {(() => {
+              // [발주자 검수 8/20 밤 §2] 화면 정리: v2가 챌린저 정본 줄 — 구 T2+ 섀도(v1)·모자이크는 접힘으로 강등 (기록·집계는 분리 보존)
               const p = (r.t2 as { pieces?: Record<string, number | null> })?.pieces;
               const mo = (r.t2 as { mosaic?: { last?: { dir?: string; score?: number } } })?.mosaic;
               const es = (r.t2 as { e_shadow?: { grade?: string }; e_record?: { grade?: string | null; size?: string; e_low_checks?: { theta5: boolean; im_lt_1_5x: boolean | null; positioning_ok: boolean | null } | null } })?.e_record
@@ -288,8 +299,12 @@ export default async function G1Page() {
                 : (r.t2 as { e_shadow?: { grade?: string } })?.e_shadow;
               return (<>
                 <Row label="정보 조각 P1 유럽반도체" value={p?.p1_eu_semi_avg != null ? `${pp(p.p1_eu_semi_avg)} (ASML ${pp(p.p1_asml)}·IFX ${pp(p.p1_ifx)}·STM ${pp(p.p1_stm)})` : "수집 대기"} />
-                <Row label="T2-모자이크 섀도" value={mo?.last ? `${mo.last.dir} (score ${mo.last.score})` : "—"} />
                 {es ? <Row label={(r.t2 as { e_record?: unknown })?.e_record ? "E-등급 (4등급제 발효 8/20·본판정)" : "E-등급 섀도 (발효 전·전사)"} value={es.grade ?? "—"} /> : null}
+                <details className="border-b border-hairline/40 py-1.5 text-[15px] md:text-[12px] text-ink-48">
+                  <summary>구판 섀도 기록 (v1·모자이크 — v2로 대체, 분리 보존)</summary>
+                  <p className="mt-1">T2+ 섀도 v1 (E2): {r.t2?.shadow?.last ? `${r.t2.shadow.last.dir} (score ${r.t2.shadow.last.score})` : "—"}</p>
+                  <p>T2-모자이크: {mo?.last ? `${mo.last.dir} (score ${mo.last.score})` : "—"}</p>
+                </details>
               </>);
             })()}
             {/* §A 카드 하단 고정 각주 — 템플릿 자동 생성 */}
@@ -335,7 +350,15 @@ export default async function G1Page() {
           </>} />
           {r.r1 ? <Footnote f={r1Footnote({ code: r1a?.code ?? "", line: r1a?.line, residualSigma: r1a?.residual_sigma ?? null, sigmaPct: r.r1.sigma_pct ?? null, fairGapPct: r.r1.fair_gap_pct ?? null, phase: r1a?.phase ?? "가상" })} /> : null}
           <ActionLine line={r.r2?.action?.line} />
-          <Row label="R2 (08:55) — 챔피언(공식)" value={r.r2 ? <>{r.r2.signal}{r.r2.residual_sigma != null ? ` (${r.r2.residual_sigma}σ)` : ""}</> : "발행 전"} />
+          {/* [발주자 지시 8/20 밤 — R2 표기] 판정 줄 3숫자 규격: 실제값(동시호가)·이론값·차(원·%·σ) */}
+          <Row label="R2 (08:55) — 챔피언(공식)" value={r.r2 ? (() => {
+            const est2 = r.r2!.auction_est_px ?? null;
+            if (est2 && expOpen2 && r.r2!.residual_sigma != null) {
+              const dw = est2 - expOpen2;
+              return <span className="text-[15px] md:text-[12px]">동시호가 예상가 {won(est2)} vs 이론가 {won(expOpen2)} (차 {dw >= 0 ? "+" : "−"}{Math.abs(dw).toLocaleString()}·{pp(r.r2!.residual_pct)}·{r.r2!.residual_sigma}σ) → {r.r2!.signal}</span>;
+            }
+            return <>{r.r2!.signal}{r.r2!.residual_sigma != null ? ` (${r.r2!.residual_sigma}σ)` : ""}</>;
+          })() : "발행 전"} />
           {(() => {
             // 발주 C 8/20: v1.1c 이론가 기준 잔차 병행 + 갈린 날 플래그 / ■7: 예상가·목표가 이원 병기 + 수렴 여지
             const rv = (r.r2 as { r2_residual_v11c?: { fair_gap_r2_pct?: number | null; residual_sigma?: number | null; signal?: string }; r2_diverged?: boolean; auction_est_px?: number | null; fair_gap_r2_pct?: number | null } | null);
@@ -349,12 +372,17 @@ export default async function G1Page() {
             const conv = f2 != null && estGapClose != null ? Math.round((f2 - estGapClose) * 100) / 100 : null;
             return (<>
               <Row label={`R2 병행 — v1.1c 이론가(야간선물 06:00 반영)${rv.r2_diverged ? " ⚠판정 갈림 (익일 채점)" : ""}`}
-                value={<span className="text-[14px] md:text-[11px]">{vv.signal ?? "—"}{vv.residual_sigma != null ? ` (${vv.residual_sigma}σ)` : ""} — 이론가 기준 {pp(vv.fair_gap_r2_pct)}</span>} />
+                value={(() => {
+                  // [발주자 지시 8/20 밤] v1.1c 이중 잔차도 같은 3숫자 규격 — 두 이론가 중 어느 쪽이 시장과 가까운지 한눈에
+                  const theoV = vv.fair_gap_r2_pct != null && prevClose ? Math.round(prevClose * (1 + vv.fair_gap_r2_pct / 100)) : null;
+                  const dv = est != null && theoV != null ? est - theoV : null;
+                  return <span className="text-[14px] md:text-[11px]">{vv.signal ?? "—"} — vs v1.1c 이론가 {theoV != null ? `${won(theoV)}원` : pp(vv.fair_gap_r2_pct)}{dv != null ? ` (차 ${dv >= 0 ? "+" : "−"}${Math.abs(dv).toLocaleString()}원·${vv.residual_sigma ?? "—"}σ)` : vv.residual_sigma != null ? ` (${vv.residual_sigma}σ)` : ""}</span>;
+                })()} />
               {est ? <Row label="동시호가 예상가 (이원 병기·수렴 여지)"
                 value={<span className="text-[14px] md:text-[11px]">{won(est)}원 = {estGapAfter != null ? `${pp(estGapAfter)} 애프터比` : "애프터比 —"} (종가比 {pp(estGapClose)}) · 이론가까지 {conv != null ? `${conv >= 0 ? "+" : ""}${conv}%p` : "—"}</span>} /> : null}
             </>);
           })()}
-          {r.r2 ? <Footnote f={r2Footnote({ code: r2a?.code ?? "", residualSigma: r.r2.residual_sigma ?? null, expectedOpen: expOpen2, phase: r2a?.phase ?? "가상" })} /> : null}
+          {r.r2 ? <Footnote f={r2Footnote({ code: r2a?.code ?? "", residualSigma: r.r2.residual_sigma ?? null, expectedOpen: expOpen2, phase: r2a?.phase ?? "가상", est: r.r2.auction_est_px ?? null })} /> : null}
           <MtLine day={mtLatest.get(r.symbol)} />
           {/* 절단 시각 공통 스냅샷 (발주자 검수 8/18 §2): 저녁 19:35 절단값은 G1A 저장값 인용 — 재조회 없음, T2 카드와 동일 값 */}
           {(() => {
@@ -383,13 +411,18 @@ export default async function G1Page() {
           {/* [발주자 8/20 §3·§4] 밤의 궤적 한 줄 + 시장 간 리그전 (애프터 최종가 vs 야간선물 마감) */}
           {(() => {
             const pl = (r.night as Record<string, unknown> | null)?.path_line as string | undefined;
-            const lg = (r.labels as { league?: { err_nxt?: number | null; err_nf?: number | null; winner?: string | null; nxt_close_pct?: number | null; nf_close_beta?: number | null } } | null)?.league;
+            const lg = (r.labels as { league?: { err_nxt?: number | null; err_nf?: number | null; winner?: string | null; nxt_close_pct?: number | null; nf_close_beta?: number | null; resid_open_exp?: number | null; err_resid?: number | null } } | null)?.league;
+            // [발주자 8/20 밤 §5] 잔여갭 식 대비 행 — 구 라벨(err_resid 미저장)은 four_way.evening으로 현장 산출
+            const residExp = lg?.resid_open_exp ?? ((r.labels as { four_way?: { evening?: { resid_open_exp?: number | null } } } | null)?.four_way?.evening?.resid_open_exp ?? null);
+            const errResid = lg?.err_resid ?? (residExp != null && r.labels?.actual_gap_pct != null ? Math.round(Math.abs(residExp - r.labels.actual_gap_pct) * 100) / 100 : null);
             return (<>
               {pl ? <Row label="밤의 궤적 (애프터 판단이 밤새 검증됐는가)" value={<span className="text-[14px] md:text-[11px]">{pl.replace(/^밤의 궤적: /, "")}</span>} /> : null}
               {lg ? <Row label="시장 간 리그전 (시가 근접)" value={<span className="text-[14px] md:text-[11px]">애프터 최종 {pp(lg.nxt_close_pct)} (오차 {lg.err_nxt ?? "—"}) vs 야간선물 마감 β환산 {pp(lg.nf_close_beta)} (오차 {lg.err_nf ?? "—"}) → <b>{lg.winner === "nxt" ? "애프터 승" : lg.winner === "nf" ? "야간선물 승" : lg.winner === "tie" ? "무승부" : "—"}</b></span>} /> : null}
+              {lg ? <Row label="잔여갭 식 대비 (애프터 유지 vs 차감 식 — 재검토 증거 축적)" value={<span className="text-[14px] md:text-[11px]">애프터 유지 {pp(lg.nxt_close_pct)} (오차 {lg.err_nxt ?? "—"}) vs 잔여갭식(차감) {pp(residExp)} (오차 {errResid ?? "—"})</span>} /> : null}
             </>);
           })()}
-          <Row label="실측 갭 / R1 오차" value={r.labels ? <>{pp(r.labels.actual_gap_pct)} / TE {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
+          {/* [발주자 재촉 8/20 밤] 헤드라인 = 애프터比 우선 (종가比 괄호) — 채점의 자(TE)는 종가 유지 */}
+          <Row label="실측 갭 / R1 오차" value={r.labels ? <>{dualBasis({ afterPct: r.labels.after_basis?.actual_gap_after_pct ?? null, closePct: r.labels.actual_gap_pct ?? null })} / TE(종가 자) {pp(r.labels.te_r1_pct)}</> : "09:35 채점 대기"} />
           {r.r1?.report ? (
             <details className="mt-2 text-[15px] md:text-[12px] text-ink-48"><summary>리포트 전문</summary>
               <pre className="mt-1 whitespace-pre-wrap rounded-[10px] bg-pearl/50 p-2 text-[14px] md:text-[11px] leading-relaxed text-ink-80">{r.r1.report}{r.r2?.report ? "\n\n" + r.r2.report : ""}</pre>
@@ -463,7 +496,7 @@ export default async function G1Page() {
           const e = (x: number | null | undefined) => (x == null ? "—" : Math.abs(x - act).toFixed(2));
           return (
             <div key={`${r.date}-${r.symbol}`} className="border-b border-hairline/40 py-1.5 text-[14px] md:text-[11px]">
-              <p className="font-semibold text-ink-80">{md(r.date)} {NAME[r.symbol] ?? r.symbol} — 실측 {pp(act)}</p>
+              <p className="font-semibold text-ink-80">{md(r.date)} {NAME[r.symbol] ?? r.symbol} — 실측 {dualBasis({ afterPct: (r.labels as { after_basis?: { actual_gap_after_pct?: number | null } } | null)?.after_basis?.actual_gap_after_pct ?? null, closePct: act })}</p>
               <p className="text-ink-48">저녁판: 룰 {fw?.rule_score ?? "—"} · 야간선물(19:35) {pp(fw?.nf_cut1935_pct)} (오차 {e(fw?.nf_cut1935_pct != null ? fw.nf_cut1935_pct * beta : null)}) · 번역(NXT경로) {pp(fw?.evening?.resid_open_exp)} (오차 {e(fw?.evening?.resid_open_exp)})</p>
               <p className="text-ink-48">아침판: 챔피언 {pp(fw?.fair_r1_pct)} (오차 {e(fw?.fair_r1_pct)}) · v1.1c {pp(fw?.morning?.v11c_pct)} (오차 {e(fw?.morning?.v11c_pct)}) · 야간선물(마감) {pp(nfCloseB)}{nfo?.corrected ? "(정정)" : ""} (오차 {e(nfCloseB)})</p>
               <p className="text-ink-48">R2판: 챔피언 {(r.r2 as { signal?: string } | null)?.signal ?? "—"} · v1.1c {rv?.r2_residual_v11c?.signal ?? "— (8/21 가동)"}{rv?.r2_diverged ? " ⚠갈림" : ""}</p>
@@ -474,9 +507,10 @@ export default async function G1Page() {
 
       {/* C1: G1B 성적 (R1 오차) */}
       <Card title="G1B 성적 — R1 번역 오차" badge="TE_r1">
+        {/* [발주자 재촉 8/20 밤] 실측 헤드라인 = 애프터比 우선 (종가比 괄호) — TE 채점은 종가 자 유지 */}
         {rows.filter((r) => r.labels).slice(0, 8).map((r) => (
           <Row key={`${r.date}-${r.symbol}`} label={`${r.date.slice(5)} ${NAME[r.symbol] ?? r.symbol}`}
-            value={<>예측 {pp(r.r1?.fair_gap_pct)} → 실측 {pp(r.labels?.actual_gap_pct)} (오차 {pp(r.labels?.te_r1_pct)})</>} />
+            value={<>예측 {pp(r.r1?.fair_gap_pct)} → 실측 {dualBasis({ afterPct: r.labels?.after_basis?.actual_gap_after_pct ?? null, closePct: r.labels?.actual_gap_pct ?? null })} (TE·종가 자 {pp(r.labels?.te_r1_pct)})</>} />
         ))}
       </Card>
 
@@ -485,15 +519,22 @@ export default async function G1Page() {
         <Row label="가동률" value={`${m?.uptime_pct ?? "—"}%`} />
         <Row label="TE 레짐 분리 (평상 / 이벤트)" value={(() => { const t = (m?.te_r1_by_regime ?? null) as { normal?: number | null; event?: number | null; n?: { normal: number; event: number } } | null; return t ? `평상 ${t.normal ?? "—"}% (${t.n?.normal ?? 0}밤) · 이벤트 ${t.event ?? "—"}% (${t.n?.event ?? 0}밤)` : "집계 전"; })()} />
         <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[14px] md:text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />
+        {/* [발주자 8/20 밤 §7] 종목별 중앙값 분리 — 통합 중앙값이 하닉 대형 미스를 가리는 것 방지 */}
+        <Row label="TE_r1 종목별 중앙값" value={(() => {
+          const t = (m?.te_r1_by_symbol ?? null) as Record<string, { median: number | null; n: number }> | null;
+          if (!t || !Object.keys(t).length) return "다음 계기판 갱신부터";
+          return <span className="text-[14px] md:text-[11px]">{["005930", "000660"].filter((s) => t[s]).map((s) => `${NAME[s]} ${t[s].median ?? "—"}% (${t[s].n}밤)`).join(" · ")}</span>;
+        })()} />
         <Row label="절단 위반 (late)" value={String(m?.late_arrival_total ?? "—")} />
         <Row label="학습 상태 (CUSUM·bias·Hedge 가중)" value={<span className="text-[14px] md:text-[11px]">
           {["005930", "000660"].filter((s) => learnOf[s]).map((s) => {
             const l = learnOf[s];
             const cus = l.cusum;
             const flag = Math.abs(cus) >= 4 ? " ⚠뒤처짐" : "";
-            return `${NAME[s]} CUSUM ${cus >= 0 ? "+" : ""}${cus.toFixed(1)}${flag} · bias ${l.bias >= 0 ? "+" : ""}${l.bias.toFixed(2)}%p · ${Object.entries(l.hedge_w).map(([k, v]) => `${k} ${v}`).join("/")} (${l.nights}밤)`;
+            const etaBoost = Math.round((1 + Math.max(0, (Math.abs(cus) - 4) / 4)) * 100) / 100;
+            return `${NAME[s]} CUSUM ${cus >= 0 ? "+" : ""}${cus.toFixed(1)}${flag} · bias ${l.bias >= 0 ? "+" : ""}${l.bias.toFixed(2)}%p · ${Object.entries(l.hedge_w).map(([k, v]) => `${k} ${v}`).join("/")} (${l.nights}밤) · 적응η 섀도 ${l.etaNights ?? 0}밤(현재 η×${etaBoost})`;
           }).join("  |  ") || "상태 없음"}
-          <i> — |CUSUM|≥4 = 모형이 한 방향으로 계속 뒤처짐(η 상향 검토 신호)</i>
+          <i> — |CUSUM|≥4 = 모형이 한 방향으로 계속 뒤처짐 → 적응 η 챌린저 등재 8/20 밤 (본판정 무접촉)</i>
         </span>} />
         <Row label="야간 대사 — 커버리지 분리 (일치/불일치/결측)" value={(() => {
           const c = (m?.nf_reconcile_by_coverage ?? null) as Record<string, { n: number; match: number; mismatch: number; missing: number }> | null;

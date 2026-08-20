@@ -28,7 +28,10 @@ function LegendChip({ color, label, dash, dot, bold, textColor }: { color: strin
 const X0 = 18 * 60, X1 = 33 * 60; // 18:00 → 익일 09:00 (분)
 const minOf = (t: string) => { const [h, m] = t.split(":").map(Number); return (h < 12 ? h + 24 : h) * 60 + m; };
 
-function CurveSvg({ c, betaSs, betaHx }: { c: NightCurve; betaSs: number; betaHx: number }) {
+// [발주자 검수 8/20 밤 §1] T2 판정값 마커 — 저녁 번역(잔여갭식 시가 예상, 종목 %)을 ÷β로 지수축 환산해 19:35에 병기
+export type T2Mark = { name: string; idxPct: number | null };
+
+function CurveSvg({ c, betaSs, betaHx, t2Marks }: { c: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[] }) {
   const W = 720, H = 150, PL = 44, PR = 84, PT = 12, PB = 22;
   const pts: { m: number; v: number; kind: string }[] = [
     ...c.bars.map((b) => ({ m: minOf(b.t), v: b.pct, kind: "bar" })),
@@ -58,6 +61,12 @@ function CurveSvg({ c, betaSs, betaHx }: { c: NightCurve; betaSs: number; betaHx
         </g>
       ))}
       {d ? <path d={d} fill="none" stroke="#1d4ed8" strokeWidth={1.6} strokeLinejoin="round" /> : null}
+      {(t2Marks ?? []).filter((mk) => mk.idxPct != null && Math.abs(mk.idxPct) <= vmax).map((mk) => (
+        <g key={mk.name}>
+          <path d={`M${x(minOf("19:35")).toFixed(1)},${(y(mk.idxPct!) - 4).toFixed(1)} l4,4 l-4,4 l-4,-4 z`} fill="#7c3aed" />
+          <text x={x(minOf("19:35")) + 6} y={y(mk.idxPct!) + 3} fontSize={8} fill="#7c3aed">{mk.name}</text>
+        </g>
+      ))}
       {pts.map((p, i) => (
         <circle key={i} cx={x(p.m)} cy={y(p.v)} r={p.kind === "bar" ? 1.8 : 3}
           fill={p.kind === "close" ? "#dc2626" : p.kind === "cp" ? "#059669" : "#1d4ed8"} />
@@ -93,7 +102,7 @@ function DailySvg({ days }: { days: KrxNightDay[] }) {
   );
 }
 
-export async function NightFutSection({ curve, betaSs, betaHx }: { curve: NightCurve; betaSs: number; betaHx: number }) {
+export async function NightFutSection({ curve, betaSs, betaHx, t2Marks }: { curve: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[] }) {
   let daily: KrxNightDay[] = [];
   try { daily = await fetchKrxNightDaily(24); } catch { /* 정본 조회 실패 — 빈 배열 */ }
   const last = curve.bars.length ? curve.bars[curve.bars.length - 1] : null;
@@ -111,9 +120,10 @@ export async function NightFutSection({ curve, betaSs, betaHx }: { curve: NightC
         <LegendChip color="#1d4ed8" dot label="10분봉(저녁)" />
         <LegendChip color="#059669" dot label="체크포인트 23:40/03:00" />
         <LegendChip color="#dc2626" dot label="06:00 마감" />
+        {t2Marks?.some((mk) => mk.idxPct != null) ? <LegendChip color="#7c3aed" dot label="T2 판정값 19:35 (잔여갭식÷β)" /> : null}
         <span>우측 축 = β환산(삼전·하닉)</span>
       </div>
-      <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} /></div>
+      <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} /></div>
       <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">
         과거 1개월 — 야간 세션 일봉 (KRX 정본, T+1 라벨 · <span style={{ color: "#dc2626" }}>■ u1 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>)
       </p>
@@ -166,16 +176,24 @@ export function ThreePanelChart({ name, pts }: { name: string; pts: PanelPoint[]
         {series.map(([nm, get, color, dash, yf]) => <path key={nm} d={path(get, yf)} fill="none" stroke={color} strokeWidth={nm === "실측" ? 2.2 : 1.4} strokeDasharray={dash || undefined} strokeLinejoin="round" />)}
         {data.map((p, i) => (<g key={p.date}>
           {p.actual != null ? <circle cx={x(i)} cy={y(p.actual)} r={2.4} fill="#111" /> : null}
+          {/* [발주자 검수 8/20 밤 §1] 룰 방향 마커 — |스코어|≥0.5 밤의 방향을 ▲▼로 (스코어 선 위, 우축) */}
+          {p.score != null && Math.abs(p.score) >= 0.5 ? (
+            p.score > 0
+              ? <path d={`M${x(i).toFixed(1)},${(ys(p.score) - 4.5).toFixed(1)} l3.8,6.5 l-7.6,0 z`} fill="#dc2626" />
+              : <path d={`M${x(i).toFixed(1)},${(ys(p.score) + 4.5).toFixed(1)} l3.8,-6.5 l-7.6,0 z`} fill="#2563eb" />
+          ) : null}
           <text x={x(i)} y={H - 8} textAnchor="middle" fontSize={8} fill="#888">{p.date.slice(5)}</text>
         </g>))}
       </svg>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] md:text-[11px]">
         <span className="font-semibold text-ink-48">{name}</span>
         <LegendChip color="#111" bold label="실측 갭" />
-        <LegendChip color="#ea580c" label="T2 잔여갭식 시가 예상" />
+        <LegendChip color="#ea580c" label="T2 본판정 — 잔여갭식 시가 예상(NXT 경로)" />
         <LegendChip color="#2563eb" dash="4 3" label="야간선물 19:35×β" />
         <LegendChip color="#2563eb" label="야간선물 06:00 마감×β" />
         <LegendChip color="#9ca3af" textColor="#6b7280" dash="2 3" label="T2 스코어 (우축 점수 — % 아님)" />
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={10} aria-hidden="true"><path d="M6,1 l3.8,6.5 l-7.6,0 z" fill="#dc2626" /></svg><span style={{ color: "#dc2626" }} className="font-medium">▲룰 상방</span></span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={10} aria-hidden="true"><path d="M6,9 l3.8,-6.5 l-7.6,0 z" fill="#2563eb" /></svg><span style={{ color: "#2563eb" }} className="font-medium">▼룰 하방 (|스코어|≥0.5, 스코어 선 위)</span></span>
       </div>
       <p className="text-[12px] md:text-[10px] text-ink-48">19:35×β는 8/18부터 정본 절단 — 이전 구간은 18:05 정정 근사.</p>
     </div>

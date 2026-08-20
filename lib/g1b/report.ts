@@ -38,12 +38,20 @@ export function buildR1(symbol: G1BSymbol, date: string, fair: number | null, si
   ].join("\n");
 }
 
+// [발주자 지시 8/20 밤 — R2 표기] 판정 줄 3숫자 규격: "동시호가 예상가 X vs 이론가 Y (차 +원·+%·+σ) → 신호".
+// 기존 σ 단독 표기는 괄호 안에 유지 (채점 회계 불변). v1.1c 이론가는 데이터 있는 밤부터 같은 규격 병기.
 export function buildR2(symbol: G1BSymbol, date: string, fair2: number | null, est: number | null,
-                        residual: number | null, resSigma: number | null, signal: string): string {
+                        residual: number | null, resSigma: number | null, signal: string,
+                        theoPx?: number | null, v11c?: { theoPx: number | null; resSigma: number | null }): string {
+  const wonS = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toLocaleString()}`;
+  const judge = est && theoPx
+    ? `동시호가 예상가 ${est.toLocaleString()} vs 이론가 ${theoPx.toLocaleString()} (차 ${wonS(est - theoPx)}원·${p1(residual)}·${resSigma ?? "—"}σ) → ${signal}`
+    : `판정: ${signal}${est ? ` (잔차 ${p1(residual)} = ${resSigma ?? "—"}σ)` : ""}`;
   return [
     `[G1B/R2·가상] ${date.slice(5)} 08:55 | ${NAME[symbol]} (log-only)`,
     `FairGap_R2 ${p1(fair2)}`,
-    est ? `동시호가 예상체결 ${est.toLocaleString()} → 잔차 ${p1(residual)} = ${resSigma ?? "—"}σ` : `동시호가 예상체결 결측`,
-    `판정: ${signal}`,
+    est ? judge : `동시호가 예상체결 결측 — ${signal}`,
+    ...(est && v11c?.theoPx != null
+      ? [`병행 vs v1.1c 이론가 ${v11c.theoPx.toLocaleString()} (차 ${wonS(est - v11c.theoPx)}원·${v11c.resSigma ?? "—"}σ) — 채점 회계 무접촉`] : []),
   ].join("\n");
 }
