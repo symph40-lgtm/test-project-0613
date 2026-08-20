@@ -167,12 +167,18 @@ export default async function G1Page() {
       {/* 발주 A 8/20: 야간선물 전용 섹션 — T2 카드 위 */}
       {(() => {
         // 오늘 밤(진행중) 우선, 없으면 최근 세션: bars = G1A t2.nf.bars / cp·마감 = G1B 다음 라벨 행 night
-        const todayK = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-        const aBars = (aToday[0]?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? [];
-        const live = aLatest === todayK && aBars.length > 0;
-        const sessionNight = live ? todayK : (rows.find((r) => (r.night as Record<string, unknown> | null)?.night_fut)?.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? aLatest ?? todayK;
+        // [발주자 지적 8/21 02:27] 자정 넘김 버그 수정 — 종전 `aLatest === 오늘날짜` 판정은 새벽(00~06시)에
+        // 무조건 거짓이라 완료 세션(8/19밤)으로 밀렸다. 진행 중 밤 = 저녁(18:00~)이면 오늘, 새벽(~06:00)이면 직전 영업일.
+        const nowK = new Date(Date.now() + 9 * 3600e3);
+        const todayK = nowK.toISOString().slice(0, 10);
+        const hhK = nowK.toISOString().slice(11, 16);
+        const prevBiz = (d: string) => { const x = new Date(d + "T00:00:00Z"); do { x.setUTCDate(x.getUTCDate() - 1); } while ([0, 6].includes(x.getUTCDay())); return x.toISOString().slice(0, 10); };
+        const cand = hhK >= "18:00" ? todayK : hhK < "06:00" ? prevBiz(todayK) : null;
+        const candBars = cand ? ((aRows.find((r) => r.date === cand)?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? []) : [];
+        const live = cand != null && candBars.length > 0;
+        const sessionNight = live ? cand! : (rows.find((r) => (r.night as Record<string, unknown> | null)?.night_fut)?.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? aLatest ?? todayK;
         const bRow = rows.find((r) => ((r.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? "") === sessionNight);
-        const bars = live ? aBars : ((aRows.find((r) => r.date === sessionNight)?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? []);
+        const bars = live ? candBars : ((aRows.find((r) => r.date === sessionNight)?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? []);
         const watch = (bRow?.night as Record<string, unknown> | null)?.watch as { cp?: Record<string, { t: string; nf_pct: number | null }> } | undefined;
         const nfo = bRow?.night?.night_fut as { v: number | null; t?: string; late_arrival?: boolean } | undefined;
         const cov = (bRow?.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string } | undefined;
@@ -276,9 +282,11 @@ export default async function G1Page() {
               // §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) — 미래 예측 서술 금지, 현재 상태·일관성만
               const nf = (r.t2 as { nf?: { bars?: { t: string; pct: number }[]; level?: { pct: number } | null; dc_nf?: number | null } } | null)?.nf;
               // 표기 규격 (발주자 8/19 저녁 §3): "오늘 밤 세션(진행중)" 라벨 고정 + 세션 밤짜·시각 병기 — 전날 밤 값과 혼동 차단.
-              // 세션 종료(06:00) 여부 = 이 카드 날짜가 오늘이 아니면 종료된 세션 (채점된 과거 카드)
-              const todayKst = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-              const closed = r.date < todayKst;
+              // [8/21 02:27 자정 버그 동반 수정] 새벽(~06:00)엔 직전 영업일 밤 세션이 아직 진행 중 — 종료로 표기하지 않는다.
+              const nowT = new Date(Date.now() + 9 * 3600e3);
+              const todayKst = nowT.toISOString().slice(0, 10);
+              const dawnLive = nowT.toISOString().slice(11, 16) < "06:00" && (() => { const x = new Date(todayKst + "T00:00:00Z"); do { x.setUTCDate(x.getUTCDate() - 1); } while ([0, 6].includes(x.getUTCDay())); return x.toISOString().slice(0, 10); })() === r.date;
+              const closed = r.date < todayKst && !dawnLive;
               if (nf?.bars?.length) {
                 const lines = nfFlowLines({ bars: nf.bars, level: nf.level, dc_nf: nf.dc_nf }, betaOf["005930"], betaOf["000660"]);
                 const lastT = nf.bars[nf.bars.length - 1].t;
