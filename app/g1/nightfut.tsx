@@ -48,9 +48,9 @@ const minOf = (t: string) => { const [h, m] = t.split(":").map(Number); return (
 
 // [발주자 검수 8/20 밤 §1] T2 판정값 마커 — 저녁 번역(잔여갭식 시가 예상, 종목 %)을 ÷β로 지수축 환산해 19:35에 병기
 export type T2Mark = { name: string; idxPct: number | null };
-// [발주자 지적 8/20 밤 23시] T2 매시 재판정(v2 시간별 트랙)을 야간선물 곡선과 같은 화면에 —
-// 야간선물 = 10분봉, T2 = 시간당 1회 ▲▼● 마커 (위 = 삼전, 아래 = 하닉. 관측·학습 전용 — 채점 정본 = 19:35 불변)
-export type V2HourMark = { t: string; dirSs: string | null; dirHx: string | null; nf_pct: number | null };
+// [발주자 지적 8/20 밤 23시 + 8/21 새벽] T2+ v2 매시 재판정을 야간선물 곡선과 같은 화면에 —
+// 시간당 1회 **예상갭 값**(÷β 지수축) ◆삼전(채움)·◇하닉(빈), 색 = 드리프트 방향 (관측 전용 — 채점 정본 19:35 불변)
+export type V2HourMark = { t: string; dirSs: string | null; dirHx: string | null; nf_pct: number | null; expSsIdx?: number | null; expHxIdx?: number | null };
 // [발주자 8/20 밤 23시 2차] T2+ v2 예상갭 마커 — base+drift 최종 예상갭(종목 %)을 ÷β로 지수축 환산, 판정 시각 위치에 ◇
 export type V2Mark = { name: string; t: string; idxPct: number | null };
 
@@ -104,14 +104,16 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { c: NightC
           <text x={x(minOf(mk.t)) - 6} y={y(mk.idxPct!) + 3} textAnchor="end" fontSize={8} fill="#db2777">{mk.name}</text>
         </g>
       ))}
-      {(v2Hourly ?? []).filter((e) => e.nf_pct != null).map((e) => {
+      {(v2Hourly ?? []).map((e) => {
         const cx = x(minOf(e.t));
-        const cy0 = y(e.nf_pct!) - 12;   // 곡선 점 위에 위 삼전 · 아래 하닉 2단
-        const glyph = (dir: string | null, cy: number, key: string) => dir == null ? null
-          : dir === "상방" ? <path key={key} d={`M${cx.toFixed(1)},${(cy - 3).toFixed(1)} l3,5.2 l-6,0 z`} fill="#dc2626" />
-          : dir === "하방" ? <path key={key} d={`M${cx.toFixed(1)},${(cy + 3).toFixed(1)} l3,-5.2 l-6,0 z`} fill="#2563eb" />
-          : <circle key={key} cx={cx} cy={cy} r={2.2} fill="#9ca3af" />;
-        return <g key={"v2h" + e.t}>{glyph(e.dirSs, cy0 - 8, "s")}{glyph(e.dirHx, cy0, "h")}</g>;
+        const col = (dir: string | null) => (dir === "상방" ? "#dc2626" : dir === "하방" ? "#2563eb" : "#9ca3af");
+        const dia = (cy: number, r: number) => `M${cx.toFixed(1)},${(cy - r).toFixed(1)} l${r},${r} l-${r},${r} l-${r},-${r} z`;
+        return (
+          <g key={"v2h" + e.t}>
+            {e.expSsIdx != null && Math.abs(e.expSsIdx) <= vmax ? <path d={dia(y(e.expSsIdx), 3.2)} fill={col(e.dirSs)} /> : null}
+            {e.expHxIdx != null && Math.abs(e.expHxIdx) <= vmax ? <path d={dia(y(e.expHxIdx), 3.2)} fill="none" stroke={col(e.dirHx)} strokeWidth={1.4} /> : null}
+          </g>
+        );
       })}
       {pts.map((p, i) => (
         <circle key={i} cx={x(p.m)} cy={y(p.v)} r={p.kind === "bar" ? 1.8 : 3}
@@ -228,7 +230,7 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
         {v2Marks?.some((mk) => mk.idxPct != null) ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={12} aria-hidden="true"><path d="M6,1.5 l4.5,4.5 l-4.5,4.5 l-4.5,-4.5 z" fill="none" stroke="#db2777" strokeWidth={1.6} /></svg><span style={{ color: "#db2777" }} className="font-medium">T2+ v2 예상갭 (판정 시각·÷β)</span></span> : null}
         {curve.bars.some((b) => b.soxx != null) ? <LegendChip color="#ea580c" label="SOXX (미 정규장 22:30~05:00)" /> : null}
         {curve.bars.some((b) => b.nq != null) ? <LegendChip color="#14b8a6" label="나스닥100 선물 NQ=F (16시 KST~)" /> : null}
-        {v2Hourly?.length ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={12} aria-hidden="true"><path d="M6,1 l3,5.2 l-6,0 z" fill="#dc2626" /><path d="M6,11 l3,-5.2 l-6,0 z" fill="#2563eb" /></svg><span className="font-medium text-ink-80">T2 매시 재판정 (위 삼전·아래 하닉: ▲상방 ▼하방 ●중립)</span></span> : null}
+        {v2Hourly?.length ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={22} height={12} aria-hidden="true"><path d="M6,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="#9ca3af" /><path d="M16,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="none" stroke="#9ca3af" strokeWidth={1.4} /></svg><span className="font-medium text-ink-80">v2 매시 예상갭 ◆삼전·◇하닉 (÷β, 색=드리프트: 적 상방·청 하방·회 중립)</span></span> : null}
         <span>우측 축 = β환산(삼전·하닉)</span>
       </div>
       <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} /></div>

@@ -562,11 +562,20 @@ async function recordHourlyDriftTrack(hhmm: string, date: string, notes: string[
       const hourly = (sv2.hourly ?? []) as { t?: string }[];
       if (hourly.some((h) => h.t?.slice(0, 2) === slot)) continue; // 시간당 1회 — 연휴 다음날 새벽 중복 호출도 이 슬롯 규칙이 차단
       if (!cp) { const { takeCheckpoint } = await import("./nightwatch"); cp = await takeCheckpoint(hhmm); }
-      const { judgeDrift } = await import("@/lib/g1a/t2plusV2");
+      const { judgeDrift, V2 } = await import("@/lib/g1a/t2plusV2");
       const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("@/lib/g1a/data");
       const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol as "005930" | "000660"), fetchMacroEveningDelta()]);
       const dj = judgeDrift({ basketAccel30m: accel, dcNf: null, nfCumSign: cp.nf_pct != null && Math.abs(cp.nf_pct) >= 0.1 ? Math.sign(cp.nf_pct) : 0, dcPm: null, basketSign: 0, p1Slope: null, eventTonight: null, macro });
-      sv2.hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, reduced: true }];
+      // [발주자 8/21 새벽] 매시 재판정을 예상갭 값으로 — base(19:35 절단, 고정 수용) + 시간별 drift 조정 (등록 공식·상한 동일)
+      const base = sv2.base_stock_pct as number | undefined, beta = sv2.beta as number | undefined, sigma = sv2.sigma_used as number | undefined;
+      let adj: number | null = null, exp: number | null = null;
+      if (base != null && beta != null && sigma != null) {
+        const raw = dj.dir === "중립" ? 0 : (dj.dir === "상방" ? 1 : -1) * dj.conf * V2.CONF_FULL_ADJ_PCT * beta;
+        const cap = V2.DRIFT_CAP_SIGMA * sigma;
+        adj = Math.round(Math.max(-cap, Math.min(cap, raw)) * 100) / 100;
+        exp = Math.round((base + adj) * 100) / 100;
+      }
+      sv2.hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, adj_pct: adj, expected_gap_pct: exp, reduced: true }];
       await admin.from("g1a_days").update({ t2 }).eq("date", sessionNight).eq("symbol", symbol);
       notes.push(`${symbol} v2 매시 트랙 ${slot}시 ${dj.dir} conf ${dj.conf} nf ${cp.nf_pct ?? "—"}`);
     } catch { /* 트랙 결측 허용 */ }

@@ -208,9 +208,15 @@ export default async function G1Page() {
         const minOfH = (t: string) => { const [h, m] = t.split(":").map(Number); return (h < 12 ? h + 24 : h) * 60 + m; };
         const v2Hourly = [...new Set([...hSs, ...hHx].map((h) => h.t.slice(0, 2)))]
           .map((hh) => {
-            const a = hSs.find((h) => h.t.slice(0, 2) === hh), b = hHx.find((h) => h.t.slice(0, 2) === hh);
+            const a = hSs.find((h) => h.t.slice(0, 2) === hh) as { t: string; dir?: string; nf_pct?: number | null; expected_gap_pct?: number | null } | undefined;
+            const b = hHx.find((h) => h.t.slice(0, 2) === hh) as { t: string; dir?: string; nf_pct?: number | null; expected_gap_pct?: number | null } | undefined;
             const t = (a ?? b)!.t;
-            return { t, dirSs: a?.dir ?? null, dirHx: b?.dir ?? null, nf_pct: a?.nf_pct ?? b?.nf_pct ?? null };
+            // [발주자 8/21 새벽] 매시 예상갭 값(종목 %) ÷ β → 지수축 — ◆삼전·◇하닉, 색=드리프트 방향
+            return {
+              t, dirSs: a?.dir ?? null, dirHx: b?.dir ?? null, nf_pct: a?.nf_pct ?? b?.nf_pct ?? null,
+              expSsIdx: a?.expected_gap_pct != null ? Math.round((a.expected_gap_pct / (betaOf["005930"] ?? 1.4)) * 100) / 100 : null,
+              expHxIdx: b?.expected_gap_pct != null ? Math.round((b.expected_gap_pct / (betaOf["000660"] ?? 1.4)) * 100) / 100 : null,
+            };
           })
           .sort((p, q) => minOfH(p.t) - minOfH(q.t));
         return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} />;
