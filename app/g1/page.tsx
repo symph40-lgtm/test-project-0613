@@ -345,13 +345,14 @@ export default async function G1Page() {
           <Row label="R1 공정 갭 (07:20)" value={r.r1 ? <>{pp(r.r1.fair_gap_pct)} ± {r.r1.sigma_pct?.toFixed(2)}% · 예상시가 {won(r.r1.expected_open)}</> : "발행 전"} />
           {/* 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재 ≠ 누락 */}
           <Row label="가중 (Hedge)" value={<>
+            {(r.r1 as { champion_pack?: string } | null)?.champion_pack?.includes("v1.1c") ? <b className="text-emerald-700">[{(r.r1 as { champion_pack?: string }).champion_pack}] </b> : null}
             {r.r1?.w_used ? Object.entries(r.r1.w_used).map(([k, v]) => `${k} ${v}`).join(" · ") : "—"}
             {nfObs?.v != null ? <span className="text-[14px] md:text-[11px] text-ink-48"> · 야간선물 새벽 {(nfObs as unknown as { t?: string }).t ?? ((r.night as Record<string, unknown> | null)?.night_fut_probe as { t?: string } | undefined)?.t ?? "04:50"} 관측 {pp(nfObs.v * 100)} (검증 중 — 챌린저 v1.1c 병행)</span> : null}
           </>} />
           {r.r1 ? <Footnote f={r1Footnote({ code: r1a?.code ?? "", line: r1a?.line, residualSigma: r1a?.residual_sigma ?? null, sigmaPct: r.r1.sigma_pct ?? null, fairGapPct: r.r1.fair_gap_pct ?? null, phase: r1a?.phase ?? "가상" })} /> : null}
           <ActionLine line={r.r2?.action?.line} />
           {/* [발주자 지시 8/20 밤 — R2 표기] 판정 줄 3숫자 규격: 실제값(동시호가)·이론값·차(원·%·σ) */}
-          <Row label="R2 (08:55) — 챔피언(공식)" value={r.r2 ? (() => {
+          <Row label={`R2 (08:55) — ${(r.r2 as { champion_pack_r2?: string } | null)?.champion_pack_r2?.includes("교체") ? (r.r2 as { champion_pack_r2?: string }).champion_pack_r2 + "(공식)" : "챔피언(공식)"}`} value={r.r2 ? (() => {
             const est2 = r.r2!.auction_est_px ?? null;
             if (est2 && expOpen2 && r.r2!.residual_sigma != null) {
               const dw = est2 - expOpen2;
@@ -552,6 +553,17 @@ export default async function G1Page() {
             const first = arr[0];
             return `${NAME[s] ?? s} w_nf ${first?.w_nf ?? "—"}→${last?.w_nf ?? "—"} (loss ${last?.loss_nf ?? "—"} · TE v1.1c ${last?.te_v11c ?? "—"}% vs 챔피언 ${last?.te_champ ?? "—"}%)`;
           }).join(" / ")}</span>;
+        })()} />
+        {/* [발주자 '적용 가속' §1·§2 8/20 밤] 조기 심사 자동 표시 — 상신은 발주자 판정 */}
+        <Row label="v1.1c 조기 심사 (8밤 시점 — ⓐ승≥7/8 ⓑ개선>0 ⓒ악화=커버리지 공백뿐)" value={(() => {
+          const e = (m?.v11c_early_review ?? null) as Record<string, { n: number; verdict: string; wins8?: number; med_improve_pp?: number | null }> | null;
+          if (!e || !Object.keys(e).length) return "다음 계기판 갱신부터";
+          return <span className="text-[14px] md:text-[11px]">{["005930", "000660"].filter((s) => e[s]).map((s) => `${NAME[s]} ${e[s].verdict}${e[s].wins8 != null ? ` (승 ${e[s].wins8}/8·개선중앙 ${e[s].med_improve_pp}%p)` : ""}`).join(" / ")}</span>;
+        })()} />
+        <Row label="R2 이론가 조기 심사 (8회 시점 — 승≥6/8·개선>0, 사전 등록)" value={(() => {
+          const e = (m?.r2_theory_early_review ?? null) as Record<string, { n: number; verdict: string; wins8?: number; med_improve_pp?: number | null }> | null;
+          if (!e || !Object.keys(e).length) return "다음 계기판 갱신부터";
+          return <span className="text-[14px] md:text-[11px]">{["005930", "000660"].filter((s) => e[s]).map((s) => `${NAME[s]} ${e[s].verdict}${e[s].wins8 != null ? ` (승 ${e[s].wins8}/8·개선중앙 ${e[s].med_improve_pp}%p)` : ""}`).join(" / ")}</span>;
         })()} />
         <Row label="E-체계 채점 (헌법 발효 8/20 — D+60 심사 재료)" value={(() => {
           const e = (m?.e_system ?? null) as { lean_nights?: number; lean_hits?: number; lean_rate?: number | null; low_nights?: number; low_pnl_sum_pct?: number | null; prehistory_shadow_nights?: number } | null;

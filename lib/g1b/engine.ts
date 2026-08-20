@@ -16,6 +16,9 @@ export type LearnState = {
   nights: number;
   challenger_v11c?: ChallengerState;     // pack_v1.1c 섀도 (발주자 8/15) — 본판정 무접촉
   challenger_eta?: ChallengerState;      // 적응 η 섀도 (발주자 8/20 밤 — 하닉 CUSUM 8.0 상한 도달로 등재) — 본판정 무접촉
+  // 승격 마커 (발주자 '적용 가속' §4 8/20 밤 — promotion_playbook_v11c.md): 승인 시 스크립트가 심는다.
+  promo_v11c?: { at: string };           // R1 챔피언 = v1.1c(nf 편입) — 가중 이관 후
+  promo_r2_v11c?: { at: string };        // R2 공식 이론가 = v1.1c
 };
 
 // ── pack_v1.1c 챌린저 (발주자 지시 8/15 '정확도 연동' §1 — 섀도 전용) ──
