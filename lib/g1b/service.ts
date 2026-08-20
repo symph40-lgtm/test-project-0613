@@ -65,6 +65,12 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
   if (probe.error) return { ok: false, window: "none", notes: ["마이그레이션 035 미적용"] };
 
   const W = C.windows;
+  // [발주 D §5 — 매시 확장 8/20 밤] 시간별 drift 재판정 트랙 20:30~06:00, 시간당 1회(슬롯 = 시각 앞 2자리).
+  // 관측·학습 전용(채점 정본 = 19:35 판정 불변) · 성분은 등록 축소판(ⓐ·ⓕ·누적 부호) 유지 — 성분 확장은 재등록 사항.
+  // 크론이 오는 시각만 채워진다 — 매시 격자 등록은 발주자 설정(cron-job.org). 세션 없는 밤(일요일·토요일 저녁)은 제외.
+  if ((hhmm >= "20:30" || hhmm < "06:00") && wd !== 0 && !(wd === 6 && hhmm >= "20:30")) {
+    await recordHourlyDriftTrack(hhmm, date, notes);
+  }
   // 주말 차단은 야간 창 뒤에 — 토요일 03:00(금요일 밤 세션 = 월요일 라벨)은 허용, 일·토 23:40은 세션 없음(nf 결측 기록)
   const isWeekend = wd === 0 || wd === 6;
   const nightWin = (hhmm >= "23:30" && hhmm <= "23:59") || (hhmm >= "02:50" && hhmm <= "03:20");
@@ -95,20 +101,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const hr = await sendG1Notify("[G1 야간 역행] 저녁 판단 뒤집히는 중 (가상)", `[G1 야간 역행·${hhmm}] ${nm} ${rc.why} (가상 — 따라 하지 않기)`);
         notes.push(`${symbol} 야간 역행 경보 발송(${hr.via}) ${hr.sent}건`);
       }
-      // [발주 D §5 8/20] 시간별 drift 재판정 트랙 — 관측·학습 전용 분리 저장 (채점 정본 = 19:35 판정 불변).
-      // 체크포인트 시점 성분 축소판(ⓐ 바스켓 가속·ⓕ 매크로Δ·야간선물 누적 부호) — 명기. 크론 확장 시 매시로 확대.
-      try {
-        const sv2t = (await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle()).data?.t2 as Record<string, unknown> | null;
-        if (sv2t?.shadow_v2) {
-          const { judgeDrift } = await import("@/lib/g1a/t2plusV2");
-          const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("@/lib/g1a/data");
-          const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol as "005930" | "000660"), fetchMacroEveningDelta()]);
-          const dj = judgeDrift({ basketAccel30m: accel, dcNf: null, nfCumSign: cp.nf_pct != null && Math.abs(cp.nf_pct) >= 0.1 ? Math.sign(cp.nf_pct) : 0, dcPm: null, basketSign: 0, p1Slope: null, eventTonight: null, macro });
-          const hourly = ((sv2t.shadow_v2 as Record<string, unknown>).hourly ?? []) as unknown[];
-          (sv2t.shadow_v2 as Record<string, unknown>).hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, reduced: true }];
-          await admin.from("g1a_days").update({ t2: sv2t }).eq("date", sessionNight).eq("symbol", symbol);
-        }
-      } catch { /* 트랙 결측 허용 */ }
+      // [발주 D §5 8/20] 시간별 drift 재판정 트랙은 매시 통합 함수(recordHourlyDriftTrack)가 담당 — 8/20 밤 매시 확장으로 이전.
       night.watch = watch;
       row.night = night as Record<string, Obs>;
       await saveRow(row);
@@ -473,6 +466,35 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
     await updateGateDashboard(date, notes);
   }
   return { ok: true, window: hhmm, notes };
+}
+
+// [발주 D §5 — 매시 확장 8/20 밤] 시간별 drift 재판정 트랙 (관측·학습 전용, 채점 정본 = 19:35 판정 불변).
+// 저장: g1a_days[세션 밤].t2.shadow_v2.hourly — 시간당 1회 (슬롯 = HH). 기준점 섀도(shadow_v2) 미생성 밤은
+// 트랙 없음 (기준점 없이 drift만은 무의미 — 명기). 성분은 등록 축소판(ⓐ 바스켓 가속·ⓕ 매크로Δ·야간선물
+// 누적 부호, reduced: true) 유지 — ⓑⓒⓓⓔ 추가는 사전 등록 변경 = 재등록 사항이라 여기서 확장하지 않는다.
+async function recordHourlyDriftTrack(hhmm: string, date: string, notes: string[]): Promise<void> {
+  const admin = createAdminClient();
+  // 세션 밤 = 저녁(20:30~)이면 오늘, 새벽(~06:00)이면 직전 영업일 (CP 블록과 동일 규약)
+  const sessionNight = hhmm >= "18:00" ? date : (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+  const slot = hhmm.slice(0, 2);
+  let cp: import("./nightwatch").Checkpoint | null = null;
+  for (const symbol of G1B_SYMBOLS) {
+    try {
+      const t2 = (await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle()).data?.t2 as Record<string, unknown> | null;
+      const sv2 = t2?.shadow_v2 as Record<string, unknown> | undefined;
+      if (!sv2) continue;
+      const hourly = (sv2.hourly ?? []) as { t?: string }[];
+      if (hourly.some((h) => h.t?.slice(0, 2) === slot)) continue; // 시간당 1회 — 연휴 다음날 새벽 중복 호출도 이 슬롯 규칙이 차단
+      if (!cp) { const { takeCheckpoint } = await import("./nightwatch"); cp = await takeCheckpoint(hhmm); }
+      const { judgeDrift } = await import("@/lib/g1a/t2plusV2");
+      const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("@/lib/g1a/data");
+      const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol as "005930" | "000660"), fetchMacroEveningDelta()]);
+      const dj = judgeDrift({ basketAccel30m: accel, dcNf: null, nfCumSign: cp.nf_pct != null && Math.abs(cp.nf_pct) >= 0.1 ? Math.sign(cp.nf_pct) : 0, dcPm: null, basketSign: 0, p1Slope: null, eventTonight: null, macro });
+      sv2.hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, reduced: true }];
+      await admin.from("g1a_days").update({ t2 }).eq("date", sessionNight).eq("symbol", symbol);
+      notes.push(`${symbol} v2 매시 트랙 ${slot}시 ${dj.dir} conf ${dj.conf} nf ${cp.nf_pct ?? "—"}`);
+    } catch { /* 트랙 결측 허용 */ }
+  }
 }
 
 async function updateGateDashboard(date: string, notes: string[]): Promise<void> {
