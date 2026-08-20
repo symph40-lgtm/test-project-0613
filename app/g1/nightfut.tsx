@@ -106,3 +106,52 @@ export async function NightFutSection({ curve, betaSs, betaHx }: { curve: NightC
     </div>
   );
 }
+
+// ── 발주 B 8/20 (보완 8/20 밤): 3판 비교 그래프 — T2 값과 야간선물값을 같은 그래프에 (라벨별 누적) ──
+// 좌축 %: 실측(검정 굵게)·T2 잔여갭식 시가 예상(주황)·야간선물 19:35×β(파랑 점선)·야간선물 마감×β(파랑 실선)
+// 우축 점수: T2 스코어(회색 점선 — % 아님, 방향 판단용 별도 축)
+export type PanelPoint = { date: string; actual: number | null; resid: number | null; nf1935b: number | null; nfCloseB: number | null; score: number | null };
+export function ThreePanelChart({ name, pts }: { name: string; pts: PanelPoint[] }) {
+  const W = 720, H = 170, PL = 40, PR = 40, PT = 14, PB = 26;
+  const data = pts.filter((p) => p.actual != null || p.resid != null || p.nf1935b != null || p.nfCloseB != null);
+  if (data.length < 2) return <p className="text-[13px] text-ink-48">{name}: 표본 2 미만 — 누적 후 표시</p>;
+  const vals = data.flatMap((p) => [p.actual, p.resid, p.nf1935b, p.nfCloseB]).filter((v): v is number => v != null);
+  const vmax = Math.max(2, ...vals.map(Math.abs)) * 1.1;
+  const smax = Math.max(2, ...data.map((p) => Math.abs(p.score ?? 0))) * 1.1;
+  const x = (i: number) => PL + (i / (data.length - 1)) * (W - PL - PR);
+  const y = (v: number) => PT + (1 - (v + vmax) / (2 * vmax)) * (H - PT - PB);
+  const ys = (v: number) => PT + (1 - (v + smax) / (2 * smax)) * (H - PT - PB);
+  const path = (get: (p: PanelPoint) => number | null, yf: (v: number) => number) => {
+    const seg: string[] = [];
+    let started = false;
+    data.forEach((p, i) => {
+      const v = get(p);
+      if (v == null) { started = false; return; }
+      seg.push(`${started ? "L" : "M"}${x(i).toFixed(1)},${yf(v).toFixed(1)}`);
+      started = true;
+    });
+    return seg.join(" ");
+  };
+  const series: [string, (p: PanelPoint) => number | null, string, string, ((v: number) => number)][] = [
+    ["실측", (p) => p.actual, "#111", "", y],
+    ["T2 잔여갭식", (p) => p.resid, "#ea580c", "", y],
+    ["nf 19:35×β", (p) => p.nf1935b, "#2563eb", "4 3", y],
+    ["nf 마감×β", (p) => p.nfCloseB, "#2563eb", "", y],
+    ["스코어(우축)", (p) => p.score, "#9ca3af", "2 3", ys],
+  ];
+  return (
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label={`${name} 3판 비교 그래프`}>
+        <line x1={PL} y1={y(0)} x2={W - PR} y2={y(0)} stroke="#ddd" strokeWidth={1} />
+        {[vmax, -vmax].map((v) => <text key={v} x={PL - 4} y={y(v) + 4} textAnchor="end" fontSize={9} fill="#888">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>)}
+        {[smax, -smax].map((v) => <text key={"s" + v} x={W - PR + 4} y={ys(v) + 4} textAnchor="start" fontSize={9} fill="#9ca3af">{v > 0 ? "+" : ""}{v.toFixed(1)}점</text>)}
+        {series.map(([nm, get, color, dash, yf]) => <path key={nm} d={path(get, yf)} fill="none" stroke={color} strokeWidth={nm === "실측" ? 2.2 : 1.4} strokeDasharray={dash || undefined} strokeLinejoin="round" />)}
+        {data.map((p, i) => (<g key={p.date}>
+          {p.actual != null ? <circle cx={x(i)} cy={y(p.actual)} r={2.4} fill="#111" /> : null}
+          <text x={x(i)} y={H - 8} textAnchor="middle" fontSize={8} fill="#888">{p.date.slice(5)}</text>
+        </g>))}
+      </svg>
+      <p className="text-[13px] md:text-[10px] text-ink-48">{name} — 검정=실측 갭 · 주황=T2 잔여갭식 시가 예상 · 파랑 점선=야간선물 19:35×β(8/18~, 이전은 18:05 정정 근사) · 파랑 실선=야간선물 06:00 마감×β · 회색 점선=T2 스코어(우축 점수 — % 아님)</p>
+    </div>
+  );
+}

@@ -10,7 +10,7 @@ import { PageShell, Disclaimer } from "../_components/Shell";
 import { BIG_AFTER_BADGE, conflictV2, dualBasis, nfFlowLines, nfSessionEveningHead, nfSessionMorning, openExpText, r1Footnote, toAfterBasis, r2Footnote, t2Footnote, verdictSentence, type TwoLines } from "@/lib/g1/copy";
 import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
 import type { MtDay } from "@/lib/mt/types";
-import { NightFutSection, type NightCurve } from "./nightfut";
+import { NightFutSection, ThreePanelChart, type NightCurve, type PanelPoint } from "./nightfut";
 
 export const dynamic = "force-dynamic";
 
@@ -429,6 +429,30 @@ export default async function G1Page() {
       {/* 발주 B 8/20: 동시각 3판 비교표 — 라벨별 누적. 각 판의 절단 시각 명기. 오염 밤(8/15 이전 저녁값)은 비교 불가 */}
       <Card title="동시각 3판 비교 (라벨별 누적)" badge="절단 시각 통일">
         <p className="mb-1 text-[13px] md:text-[10px] text-ink-48">저녁판(19:35 동일 절단): 룰(GapScore 방향)·야간선물(19:35 β환산)·저녁 번역(NXT경로 시가 예상) vs 실측 / 아침판(07:15): 챔피언 R1·챌린저 v1.1c·야간선물(06:00 마감 β환산) vs 실측 / R2판(08:52): 챔피언 vs v1.1c 잔차 판정</p>
+        {(() => {
+          // 그래프 (발주 B — T2 값과 야간선물값을 같은 그래프에): 라벨별 누적, 세션 밤짜 = g1a_ref.date
+          const build = (sym: string): PanelPoint[] => rows
+            .filter((r) => r.symbol === sym && r.labels?.actual_gap_pct != null)
+            .map((r) => {
+              const sess = (r.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? "";
+              const a = aRows.find((x) => x.symbol === sym && x.date === sess);
+              const t2x = a?.t2 as { verdict?: { gap_score?: number }; conflict_v2?: { openExp_resid?: number | null }; nf?: { level?: { pct?: number } }; nf_evening?: { pct?: number } } | null;
+              const beta = betaOf[sym] ?? 1.4;
+              const lvl = t2x?.nf?.level?.pct ?? t2x?.nf_evening?.pct ?? null;
+              const nfo = r.night?.night_fut as { v: number | null; late_arrival?: boolean } | undefined;
+              return {
+                date: r.date, actual: r.labels!.actual_gap_pct ?? null,
+                resid: t2x?.conflict_v2?.openExp_resid ?? null,
+                nf1935b: lvl != null ? Math.round(lvl * beta * 100) / 100 : null,
+                nfCloseB: nfo?.v != null && !nfo.late_arrival ? Math.round(nfo.v * 100 * beta * 100) / 100 : null,
+                score: t2x?.verdict?.gap_score ?? null,
+              };
+            }).reverse();
+          return (<>
+            <ThreePanelChart name="삼성전자" pts={build("005930")} />
+            <ThreePanelChart name="하이닉스" pts={build("000660")} />
+          </>);
+        })()}
         {rows.filter((r) => r.labels?.actual_gap_pct != null).slice(0, 8).map((r) => {
           const fw = (r.labels as { four_way?: { rule_score?: number | null; nf_cut1935_pct?: number | null; fair_r1_pct?: number | null; evening?: { resid_open_exp?: number | null }; morning?: { v11c_pct?: number | null } } } | null)?.four_way;
           const nfo = r.night?.night_fut as { v: number | null; corrected?: boolean } | undefined;
