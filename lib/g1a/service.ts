@@ -430,6 +430,8 @@ async function runLabels(): Promise<string[]> {
         (row.labels as unknown as Record<string, unknown>).v2 = {
           te_pct: Math.round(Math.abs(L1 - sv2.expected_gap_pct) * 100) / 100,
           drift_hit: driftHit, nf_path_pct: path != null ? Math.round(path * 100) / 100 : null,
+          // 지연 생성 밤(발주자 지시 8/20 밤 — 판정 창 후 생성) = 공식 표본 분리 (드리프트가 늦은 정보를 봄)
+          late: (sv2 as { late?: boolean }).late === true,
           note: "ⓑ는 base 무임승차 차단 — drift 단독 채점 (발주 D §4)",
         };
       }
