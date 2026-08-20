@@ -59,7 +59,7 @@ export function UrgentBanner({ alert, className = "" }: { alert: UrgentAlert | n
 
           {alert.news.length > 0 && (
             <div className="mt-3">
-              <p className="text-[12px] font-semibold text-ink-48">긴급뉴스 (AI·메모리 우선)</p>
+              <p className="text-[12px] font-semibold text-ink-48">긴급뉴스 (AI·메모리 우선 · 호재/악재 구분)</p>
               <ul className="mt-1 space-y-1">
                 {alert.news.map((n, i) => (
                   <li key={i}>
@@ -74,6 +74,12 @@ export function UrgentBanner({ alert, className = "" }: { alert: UrgentAlert | n
                         <span className={`mr-1 rounded px-1 py-0.5 text-[10px] font-bold ${s.badge}`}>긴급</span>
                         {n.tier === 2 && (
                           <span className="mr-1 rounded bg-ink px-1 py-0.5 text-[10px] font-bold text-white">AI·메모리</span>
+                        )}
+                        {n.sentiment === "호재" && (
+                          <span className="mr-1 rounded bg-red-500 px-1 py-0.5 text-[10px] font-bold text-white">호재</span>
+                        )}
+                        {n.sentiment === "악재" && (
+                          <span className="mr-1 rounded bg-blue-600 px-1 py-0.5 text-[10px] font-bold text-white">악재</span>
                         )}
                         {n.title}
                         <span className="text-ink-48">

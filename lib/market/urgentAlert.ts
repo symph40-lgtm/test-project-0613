@@ -13,13 +13,36 @@ export type UrgentNews = {
   link: string;
   pubDate?: string;
   tier: 1 | 2; // 1=나스닥·빅테크 영향, 2=AI·메모리 직결(최우선)
+  // 한국 메모리(삼전·하닉) 관점의 방향성 (2026-08-20 사용자 지적: +14% 급등 카드에
+  // "메모리 다이어트"·"HBM 의존 낮추기" 같은 악재성 기사가 원인처럼 묶임 — 방향 구분 필요)
+  sentiment: "호재" | "악재" | "중립";
 };
+
+// 한국 메모리 관점 방향 분류 — 제목 키워드 (악재 우선 판정: 악재 키워드가 있으면 악재)
+const NEG_WORDS = [
+  "의존 낮", "의존도 낮", "다이어트", "둔화", "피크아웃", "고점", "버블", "거품", "과잉",
+  "감산", "쇼크", "급락", "차익실현", "고평가", "하향", "우려", "부진", "원가 방어", "축소",
+  "줄인다", "줄이는", "경계령", "거리두기",
+];
+const POS_WORDS = [
+  "낙수효과", "잘 팔리", "개발 성공", "호황", "호조", "확대", "급증", "강세", "상향",
+  "서프라이즈", "회복", "훈풍", "질주", "최대 실적", "수요 지속", "호황 지속", "동반 상승",
+  "달 아래", "수혜", "특수",
+];
+
+export function newsSentimentOf(title: string): "호재" | "악재" | "중립" {
+  const t = title.toLowerCase();
+  if (NEG_WORDS.some((k) => t.includes(k))) return "악재";
+  if (POS_WORDS.some((k) => t.includes(k))) return "호재";
+  return "중립";
+}
 
 export type UrgentAlert = {
   active: boolean;
   direction: "급등" | "급락" | "혼조" | null; // 한국식 색상: 급등=빨강, 급락=파랑
-  grade: 1 | 2 | 3;                            // 1=경계, 2=심각, 3=위급 (색 농도 그레이드)
-  level: "경계" | "심각" | "위급" | null;
+  grade: 1 | 2 | 3;                            // 색 농도 그레이드
+  // 급락: 경계/심각/위급 · 급등: 경계/주의/과열 (2026-08-20 — 급등에 '위급'은 부적절)
+  level: "경계" | "심각" | "위급" | "주의" | "과열" | null;
   movers: { ticker: string; changePercent: number }[]; // 트리거된 삼성·하이닉스
   headline: string; // 한 줄 경고
   detail: string;   // 원인 → 취약 종목 → 가능한 결과 → 확인할 지표 (FR-013)
@@ -138,7 +161,7 @@ export function detectUrgentBigtechAlert(input: {
     const tier = newsRelevanceTier(n.title);
     if (tier === 0) continue;
     seen.add(n.title);
-    cands.push({ title: n.title, source: n.source, link: n.link, pubDate: n.pubDate, tier, ts });
+    cands.push({ title: n.title, source: n.source, link: n.link, pubDate: n.pubDate, tier, sentiment: newsSentimentOf(n.title), ts });
   }
   cands.sort((a, b) => b.tier - a.tier || b.ts - a.ts); // AI·메모리 우선 → 그다음 최신
   const urgentNews: UrgentNews[] = cands.slice(0, 6).map(({ ts: _ts, ...rest }) => rest);
@@ -157,7 +180,12 @@ export function detectUrgentBigtechAlert(input: {
   let grade: 1 | 2 | 3 = maxMove >= 8 ? 3 : maxMove >= 5 ? 2 : 1;
   const hasTopRelevance = urgentNews.some((n) => n.tier === 2);
   if (hasTopRelevance && grade < 3) grade = (grade + 1) as 1 | 2 | 3;
-  const level: UrgentAlert["level"] = grade === 3 ? "위급" : grade === 2 ? "심각" : "경계";
+  // 라벨 언어를 방향에 맞춤 (2026-08-20 사용자 지적: 급등에 '위급'은 급락용 언어) —
+  // 급락: 경계/심각/위급, 급등: 경계/주의/과열
+  const level: UrgentAlert["level"] =
+    direction === "급락"
+      ? grade === 3 ? "위급" : grade === 2 ? "심각" : "경계"
+      : grade === 3 ? "과열" : grade === 2 ? "주의" : "경계";
 
   const moversStr = movers
     .map((m) => `${m.ticker} ${m.changePercent > 0 ? "+" : ""}${m.changePercent.toFixed(1)}%`)
@@ -169,14 +197,30 @@ export function detectUrgentBigtechAlert(input: {
     direction === "급락"
       ? "AI 메모리(HBM·D램) 수요 눈높이가 낮아지면 반도체주 변동성이 더 커질 수 있습니다."
       : direction === "급등"
-        ? "AI 투자·수요 기대가 반영된 반등일 수 있으나, 되돌림 변동성에 유의가 필요합니다."
+        ? "AI 투자·수요 기대가 반영된 급등일 수 있으나, 되돌림(차익실현) 변동성에 유의가 필요합니다."
         : "수급이 엇갈려 방향이 불확실하니 추격 매매보다 확인이 안전합니다.";
 
+  // 원인은 고정 템플릿("메타 등")이 아니라 방향에 부합하는 실제 1순위 뉴스를 인용 (2026-08-20
+  // 사용자 지적: 뉴스에 메타가 없는데 "메타 등"으로 지목 + 악재성 기사가 급등 원인처럼 묶임)
+  const aligned = urgentNews.filter((n) =>
+    direction === "급등" ? n.sentiment !== "악재" : direction === "급락" ? n.sentiment !== "호재" : true,
+  );
+  const causeNews = aligned[0] ?? null;
+  const causeLine = causeNews
+    ? `원인(추정): "${causeNews.title.length > 45 ? causeNews.title.slice(0, 45) + "…" : causeNews.title}" (${causeNews.source}) 등 AI·메모리 뉴스가 부각됐습니다.`
+    : `원인(추정): 당일 ${dirWord}과 방향이 일치하는 뉴스는 특정되지 않았습니다 — 수급·해외 요인 가능성.`;
+  const counterNews = urgentNews.filter((n) =>
+    direction === "급등" ? n.sentiment === "악재" : direction === "급락" ? n.sentiment === "호재" : false,
+  );
+  const counterLine = counterNews.length > 0
+    ? ` ※ 반대 방향 뉴스 ${counterNews.length}건 공존("${counterNews[0].title.slice(0, 30)}…") — 원인 단정 금지, 되돌림 유의.`
+    : "";
+
   const detail =
-    `원인: AI 빅테크(메타 등)의 AI 수요·투자 관련 이슈가 부각됐습니다. → ` +
+    `${causeLine} → ` +
     `취약 종목: ${moversStr} 로 당일 ${dirWord} 중입니다. → ` +
     `가능한 결과: ${resultLine} → ` +
-    `확인할 지표: 필라델피아 반도체지수(SOX)·엔비디아 등 빅테크 주가·미국 선물 흐름을 함께 보세요.`;
+    `확인할 지표: 필라델피아 반도체지수(SOX)·엔비디아 등 빅테크 주가·미국 선물 흐름을 함께 보세요.${counterLine}`;
 
   return { active: true, direction, grade, level, movers, headline, detail, news: urgentNews, generatedAt: nowIso };
 }
