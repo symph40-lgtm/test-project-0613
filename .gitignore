@@ -49,3 +49,4 @@ mtpro/.cache/
 mtpro/logs/
 mtpro/data/
 mtpro/.venv/
+scripts/_*.tmp.ts
