@@ -210,3 +210,21 @@ export function openExpText(pct: number | null, regClose: number | null): string
   if (pct == null) return "≈ 내일 시가 예상 — (환산 불가)";
   return `≈ 내일 시가 예상 ${sgn(pct)}${regClose ? ` (정규 종가 ${regClose.toLocaleString()} 대비)` : ""}`;
 }
+
+// ── 기준점 통일 v2 (발주자 ■7 8/20 — 기발주 재확인): 표시 = "애프터比(T2 19:40 기준가)" 단일화 + (종가比) 병기 ──
+// 규격: "+4.2% 애프터比 (종가比 +6.1%)". 공식 채점(TE·Lean·게이트)은 종가 자 유지(60일 검증 불변) —
+// 애프터比 채점은 병행 저장(labels.after_basis), D+60에 자 전환 여부 발주자 결정.
+export function dualBasis(a: { afterPct: number | null; closePct: number | null }): string {
+  const f = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
+  if (a.afterPct == null && a.closePct == null) return "—";
+  if (a.afterPct == null) return `${f(a.closePct)} 종가比 (애프터比 산출 불가)`;
+  return `${f(a.afterPct)} 애프터比 (종가比 ${f(a.closePct)})`;
+}
+// 갭 %를 애프터比로 환산: (1+종가比)/(1+애프터마진) − 1, 애프터마진 = 기준가/종가 − 1
+export function toAfterBasis(closeBasisPct: number | null, entryPx: number | null, regClose: number | null): number | null {
+  if (closeBasisPct == null || !entryPx || !regClose || regClose <= 0) return null;
+  const m = entryPx / regClose;
+  return Math.round(((1 + closeBasisPct / 100) / m - 1) * 10000) / 100;
+}
+export const BIG_AFTER_BADGE = (closePct: number | null, afterPct: number | null) =>
+  closePct != null && afterPct != null && Math.abs(closePct - afterPct) >= 3 ? "⚡애프터 대변동 밤" : null;

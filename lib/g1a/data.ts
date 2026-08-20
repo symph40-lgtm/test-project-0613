@@ -297,3 +297,34 @@ export async function fetchEventTonight(): Promise<string | null> {
   } catch { /* 실적 조회 실패는 결측 처리 */ }
   return null;
 }
+
+// ── T2+ v2 성분 (발주 D 8/20) — 전부 변화율·기울기만 (레벨 금지 원칙) ──
+// ⓐ 미 프리장 바스켓 마지막 30분 변화율 (가속/감속): 바스켓 가중 합의 최근 30분 로그수익률
+export async function fetchBasketAccel30m(symbol: G1ASymbol): Promise<number | null> {
+  const cfg = G1A_CONFIG.basket[symbol];
+  let acc = 0, got = 0;
+  for (const [tk, w] of Object.entries(cfg.weights)) {
+    const bars = await chart5m(tk, 2, true);
+    if (bars.length < 8) continue;
+    const cut = bars[bars.length - 1].ts.getTime() - 30 * 60_000;
+    const win = bars.filter((b) => b.ts.getTime() >= cut);
+    if (win.length < 2) continue;
+    const chg = (win[win.length - 1].close / win[0].close - 1) * 100 / (tk === "SOXL" ? cfg.soxlDiv : 1);
+    acc += w * chg; got += w;
+  }
+  return got > 0.5 ? Math.round((acc / got) * 100) / 100 : null;
+}
+// ⓕ 매크로 저녁 변화율: 17:00 KST → 현재. 10Y(^TNX, bp)·달러원(KRW=X, %)·WTI(CL=F, %) — 레벨 절대 금지
+export async function fetchMacroEveningDelta(): Promise<{ dTnxBp: number | null; dFxPct: number | null; dWtiPct: number | null }> {
+  const today = kstDate();
+  const anchor = new Date(today + "T08:00:00Z"); // 17:00 KST
+  const delta = async (sym: string, asBp: boolean): Promise<number | null> => {
+    const bars = await chart5m(sym, 2);
+    const from = bars.filter((b) => b.ts >= anchor);
+    if (from.length < 2) return null;
+    const a = from[0].close, b = from[from.length - 1].close;
+    return asBp ? Math.round((b - a) * 100 * 10) / 10 : Math.round((b / a - 1) * 10000) / 100; // ^TNX는 10배 스케일(4.25=4.25%) → bp = Δ×100
+  };
+  const [t, f, w] = await Promise.all([delta("^TNX", true), delta("KRW=X", false), delta("CL=F", false)]);
+  return { dTnxBp: t, dFxPct: f, dWtiPct: w };
+}

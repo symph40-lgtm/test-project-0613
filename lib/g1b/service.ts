@@ -95,6 +95,20 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const hr = await sendG1Notify("[G1 야간 역행] 저녁 판단 뒤집히는 중 (가상)", `[G1 야간 역행·${hhmm}] ${nm} ${rc.why} (가상 — 따라 하지 않기)`);
         notes.push(`${symbol} 야간 역행 경보 발송(${hr.via}) ${hr.sent}건`);
       }
+      // [발주 D §5 8/20] 시간별 drift 재판정 트랙 — 관측·학습 전용 분리 저장 (채점 정본 = 19:35 판정 불변).
+      // 체크포인트 시점 성분 축소판(ⓐ 바스켓 가속·ⓕ 매크로Δ·야간선물 누적 부호) — 명기. 크론 확장 시 매시로 확대.
+      try {
+        const sv2t = (await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle()).data?.t2 as Record<string, unknown> | null;
+        if (sv2t?.shadow_v2) {
+          const { judgeDrift } = await import("@/lib/g1a/t2plusV2");
+          const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("@/lib/g1a/data");
+          const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol as "005930" | "000660"), fetchMacroEveningDelta()]);
+          const dj = judgeDrift({ basketAccel30m: accel, dcNf: null, nfCumSign: cp.nf_pct != null && Math.abs(cp.nf_pct) >= 0.1 ? Math.sign(cp.nf_pct) : 0, dcPm: null, basketSign: 0, p1Slope: null, eventTonight: null, macro });
+          const hourly = ((sv2t.shadow_v2 as Record<string, unknown>).hourly ?? []) as unknown[];
+          (sv2t.shadow_v2 as Record<string, unknown>).hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, reduced: true }];
+          await admin.from("g1a_days").update({ t2: sv2t }).eq("date", sessionNight).eq("symbol", symbol);
+        }
+      } catch { /* 트랙 결측 허용 */ }
       night.watch = watch;
       row.night = night as Record<string, Obs>;
       await saveRow(row);
@@ -285,6 +299,10 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const gx2 = row.morning.gx2?.late_arrival ? null : row.morning.gx2?.v;
       const fair1 = row.r1.fair_gap_pct as number | null;
       const fair2 = fair1 != null ? fair1 + 0.1 * (asx ?? 0) * 100 + 0.1 * (nk ?? 0) * 100 + 0.3 * ((gx2 ?? 0) - (row.night?.gx?.v ?? 0)) * 100 : null;
+      // [발주 C 8/20] R2 잔차 이중 산출 — v1.1c 이론가(야간선물 06:00 마감 반영) 기준 병행. 공식 판정은 챔피언 불변.
+      // 야간선물 가중 수동 상향 금지 — v1.1c 내 자동 증감(일일 채점)만 (원칙 명기).
+      const fair1V = (row.r1.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct ?? null;
+      const fair2V = fair1V != null ? fair1V + 0.1 * (asx ?? 0) * 100 + 0.1 * (nk ?? 0) * 100 + 0.3 * ((gx2 ?? 0) - (row.night?.gx?.v ?? 0)) * 100 : null;
       const est = row.morning.auction_est_px?.v ?? null;
       const prevClose = row.r1.prev_close as number | null;
       const sigma = row.r1.sigma_pct as number;
@@ -302,12 +320,25 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const nfV2 = row.night?.night_fut?.late_arrival ? null : row.night?.night_fut?.v;
       const nfGap2 = nfV2 != null ? Math.round(nfV2 * 100 * st.kalman.beta_mkt * 100) / 100 : null;
       const aucGap2 = est && prevClose ? Math.round(((est / prevClose - 1) * 100) * 100) / 100 : null;
+      // v1.1c 잔차 병행 (발주 C §1·§2): 갈린 날 플래그 — R2 이론가 교체 승격 심사 증거
+      let resV: number | null = null, resSigV: number | null = null, sigV = "산출 불가";
+      if (est && prevClose && fair2V != null) {
+        resV = Math.round(((est / prevClose - 1) * 100 - fair2V) * 100) / 100;
+        resSigV = Math.round((resV / sigma) * 100) / 100;
+        sigV = Math.abs(resSigV) < C.thresholds.r2NoSignal ? "무신호" : Math.abs(resSigV) >= C.thresholds.r2Fire ? (resSigV < 0 ? "과소반영 — 시가 매수 후보(가상)" : "과잉반영 — 페이드 후보(가상·금지조건 미검)") : "관망";
+      }
+      const r2Diverged = resSigma != null && resSigV != null &&
+        ((Math.abs(resSigma) >= C.thresholds.r2Fire) !== (Math.abs(resSigV) >= C.thresholds.r2Fire) || (Math.sign(resSigma) !== Math.sign(resSigV) && Math.abs(resSigma) >= C.thresholds.r2Fire));
       const nfCons = nfGap2 == null || aucGap2 == null ? "결측 — 검사 불가"
         : Math.abs(nfGap2) < 0.3 || Math.abs(aucGap2) < 0.3 ? "판정 보류(미세)"
         : Math.sign(nfGap2) === Math.sign(aucGap2) ? "동방향 — 잔차 신호 정상"
         : "역방향 — 사이징 1단계 강등(가상)";
       row.r2 = { fair_gap_r2_pct: fair2 != null ? Math.round(fair2 * 100) / 100 : null, auction_est_px: est, residual_pct: residual, residual_sigma: resSigma, signal, action: act2, virtual: true,
         nf_consistency: { nf_gap_x_beta: nfGap2, auction_gap_pct: aucGap2, verdict: nfCons },
+        r2_residual_champ: { residual_pct: residual, residual_sigma: resSigma, signal },
+        r2_residual_v11c: { fair_gap_r2_pct: fair2V != null ? Math.round(fair2V * 100) / 100 : null, residual_pct: resV, residual_sigma: resSigV, signal: sigV, virtual: true },
+        r2_diverged: r2Diverged,   // 익일 채점 대상 (발주 C §2)
+        manual_weight_ban: "야간선물 가중 수동 상향 금지 — v1.1c 자동 증감만 (발주 C §4)",
         report: act2.line + "\n" + buildR2(symbol, date, fair2, est, residual, resSigma, signal) + `\n야간 정합: ${nfCons}${nfGap2 != null && aucGap2 != null ? ` (야간환산 ${nfGap2 > 0 ? "+" : ""}${nfGap2}% vs 동시호가 ${aucGap2 > 0 ? "+" : ""}${aucGap2}%)` : ""}`,
         sent_at: new Date().toISOString() };
       await saveRow(row);
@@ -393,7 +424,12 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
         const nfC = row.night?.night_fut && !row.night.night_fut.late_arrival ? row.night.night_fut.v : null;
         const nfCB = nfC != null ? Math.round(nfC * 100 * st.kalman.beta_mkt * 100) / 100 : null;
         const league = leagueScore({ nxtClosePct: nxtC ?? null, nfCloseBeta: nfCB, actualGap: actual });
+        // [발주 ■7 8/20] 이원 채점 병행 저장 — 공식(종가比) 불변 + 애프터比(T2 19:40 기준가 기준) 기록
+        const entryPxRef = (row.r1.g1a_ref as { entry?: number | null } | null)?.entry ?? null;
+        const afterGap = entryPxRef && kr.prevClose ? Math.round(((kr.todayOpen / entryPxRef - 1) * 100) * 100) / 100 : null;
         row.labels = {
+          after_basis: { actual_gap_after_pct: afterGap, entry_px_ref: entryPxRef, note: "애프터比 채점 병행 (공식 채점은 종가 자 유지 — D+60 자 전환 발주자 결정)" },
+          big_after_night: afterGap != null && Math.abs(actual - afterGap) >= 3,
           league: { ...league, nxt_close_pct: nxtC ?? null, nf_close_beta: nfCB, note: "애프터 최종가 vs 야간선물 마감 — 잔여갭 야간선물 성분 편입 심사 직접 증거 (발주자 8/20 §4)" },
           actual_open: kr.todayOpen, actual_gap_pct: actual,
           te_r1_pct: f1 != null ? Math.round(Math.abs(actual - f1) * 100) / 100 : null,
@@ -601,13 +637,34 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   }
   for (const s of Object.keys(nfBoard)) nfBoard[s] = nfBoard[s].slice(-10);
   const nfLeaderboard = { shadow_nights: chNights, review_at_nights: 12, by_symbol: nfBoard };
+  // [발주 ■1 8/20] 야간선물 단독 vs 챔피언 R1 누적 오차 대조표 — v1.1c 승격 심사 핵심 증거 행.
+  // 라벨별 · 커버리지 공백 밤 분리 · 야간선물 소스 시각 태깅(04:50 스냅샷 표본 vs 06:00 마감 표본 — 8/20~).
+  const nfVsChamp: { date: string; symbol: string; nf_solo_err: number | null; champ_err: number | null; nf_src_t: string; coverage: string; corrected: boolean }[] = [];
+  const betaBy: Record<string, number> = { "005930": 1.316, "000660": 1.517 };
+  {
+    const stAll = await admin.from("g1b_state").select("symbol,state");
+    for (const x of stAll.data ?? []) {
+      const b = (x.state as { kalman?: { beta_mkt?: number } })?.kalman?.beta_mkt;
+      if (typeof b === "number" && b > 0) betaBy[x.symbol as string] = b;
+    }
+  }
+  for (const r of [...rows].sort((a, b) => a.date.localeCompare(b.date))) {
+    const lab = r.labels as { actual_gap_pct?: number; te_r1_pct?: number | null } | null;
+    if (lab?.actual_gap_pct == null) continue;
+    const nfo = r.night?.night_fut as (Obs & { t?: string; corrected?: boolean }) | undefined;
+    const beta = betaBy[r.symbol] ?? 1.4;
+    const nfSolo = nfo?.v != null && !nfo.late_arrival ? Math.round(Math.abs(nfo.v * 100 * beta - lab.actual_gap_pct) * 100) / 100 : null;
+    const cov = (r.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string } | undefined;
+    nfVsChamp.push({ date: r.date, symbol: r.symbol, nf_solo_err: nfSolo, champ_err: lab.te_r1_pct ?? null,
+      nf_src_t: nfo?.t ?? (nfo ? "04:50" : "—"), coverage: cov?.kind ?? "unknown", corrected: nfo?.corrected === true });
+  }
   const metrics = {
     days_tracked: per.length, uptime_pct: per.length ? Math.round((complete / per.length) * 100) : 0,
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, te_r1_by_regime: teByRegime, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
-    nf_leaderboard: nfLeaderboard, e_system: eSystem,
+    nf_leaderboard: nfLeaderboard, e_system: eSystem, nf_vs_champ: nfVsChamp,
     // [발주자 8/18 §3] u1 대사 커버리지 분리 집계 — 커버리지 부분(연휴 밤·미국 세션 ≥2)은 정상 밤과 섞지 않는다
     nf_reconcile_by_coverage: (() => {
       const acc: Record<string, { n: number; match: number; mismatch: number; missing: number }> = {};

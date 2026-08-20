@@ -78,7 +78,7 @@ async function krxLogin(): Promise<string | null> {
   } catch { return null; }
 }
 
-type KrxRow = { TRD_DD: string; TDD_CLSPRC: string; TDD_OPNPRC: string };
+type KrxRow = { TRD_DD: string; TDD_CLSPRC: string; TDD_OPNPRC: string; TDD_HGPRC?: string; TDD_LWPRC?: string };
 
 async function fetchSeries(cookie: string, isu: string, agg: "0" | "2", strt: string, end: string): Promise<KrxRow[]> {
   const r = await fetch(`${BASE}/comm/bldAttendant/getJsonData.cmd`, {
@@ -116,4 +116,33 @@ export async function fetchKrxNightU1(labelDate: string): Promise<KrxNightU1> {
   const nc = num(nRow.TDD_CLSPRC);
   if (!prev || !isFinite(nc) || nc <= 0) return null;
   return { u1_pct: Math.round((nc / prev.c - 1) * 10000) / 100, night_close: nc, day_close_ref: prev.c, contract };
+}
+
+// ── 일봉 시계열 (발주 A §2 — /g1 야간선물 섹션 과거 조회, KRX 정본) ──
+// 최근월 스티칭 없이 현재 최근월 1계약으로 최근 ~1개월 (계약 경계 밤은 만기 주간에만 발생 — 표식).
+export type KrxNightDay = { label_date: string; open: number; high: number; low: number; close: number; day_close_ref: number | null; u1_pct: number | null };
+let dailyCache: { at: number; data: KrxNightDay[] } | null = null;
+export async function fetchKrxNightDaily(days = 24): Promise<KrxNightDay[]> {
+  if (dailyCache && Date.now() - dailyCache.at < 15 * 60_000) return dailyCache.data;   // 15분 캐시 (페이지 로드마다 로그인 방지)
+  const cookie = await krxLogin();
+  if (!cookie) return dailyCache?.data ?? [];
+  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const { isu } = krxFrontIsu(today);
+  const s0 = new Date(today + "T00:00:00Z"); s0.setUTCDate(s0.getUTCDate() - Math.ceil(days * 1.6));
+  const strt = (s0.getUTCFullYear() < Number(today.slice(0, 4)) ? `${today.slice(0, 4)}0101` : s0.toISOString().slice(0, 10).replace(/-/g, ""));
+  const num = (v: string) => parseFloat(String(v).replace(/,/g, ""));
+  const norm = (d: string) => d.replace(/\//g, "-");
+  const night = await fetchSeries(cookie, isu, "2", strt, today.replace(/-/g, ""));
+  const day = await fetchSeries(cookie, isu, "0", strt, today.replace(/-/g, ""));
+  const dayC = day.map((r) => ({ d: norm(r.TRD_DD), c: num(r.TDD_CLSPRC) })).filter((r) => isFinite(r.c) && r.c > 0).sort((a, b) => a.d.localeCompare(b.d));
+  const out: KrxNightDay[] = [];
+  for (const r of night.map((x) => ({ ...x, d: norm(x.TRD_DD) })).sort((a, b) => a.d.localeCompare(b.d))) {
+    const o = num(r.TDD_OPNPRC), h = num((r as unknown as { TDD_HGPRC: string }).TDD_HGPRC), l = num((r as unknown as { TDD_LWPRC: string }).TDD_LWPRC), c = num(r.TDD_CLSPRC);
+    if (!isFinite(c) || c <= 0) continue;
+    const ref = dayC.filter((x) => x.d < r.d).pop()?.c ?? null;
+    out.push({ label_date: r.d, open: o, high: h, low: l, close: c, day_close_ref: ref, u1_pct: ref ? Math.round((c / ref - 1) * 10000) / 100 : null });
+  }
+  const sliced = out.slice(-days);
+  dailyCache = { at: Date.now(), data: sliced };
+  return sliced;
 }

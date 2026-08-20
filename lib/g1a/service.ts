@@ -138,6 +138,8 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         const nfq = await fetchKisNightFutures();   // CM 기본 (kis.ts) — 8/15 정화 이후 단일 시장구분
         const pct = (nfq as { changePercent?: number | null })?.changePercent;
         if (typeof pct === "number") snap.nf_pct = pct;
+        const vol = (nfq as { volume?: number | null })?.volume;
+        if (typeof vol === "number") (snap as Record<string, unknown>).nf_vol = vol;   // T2+ v2 confidence_vol 축적 (8/20~)
       }
     } catch { /* 결측 허용 */ }
   }
@@ -170,7 +172,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
           {
             const pct = snap.nf_pct;   // 공통 스냅샷 (호출당 1회 조회 — 두 종목 동일 값)
             if (typeof pct === "number") {
-              nf0.bars = [...nf0.bars, { t: hhmm, pct }];
+              nf0.bars = [...nf0.bars, { t: hhmm, pct, ...(typeof (snap as Record<string, unknown>).nf_vol === "number" ? { vol: (snap as Record<string, unknown>).nf_vol as number } : {}) }];
               // β_mkt: G1B 라이브 칼만 갱신치 우선 (R1 nf 전문가와 동일 β — 일관성), 결측 시 pack 초기값
               let beta: number = (await import("@/lib/g1b/config")).G1B_CONFIG.init.betaMkt[symbol as "000660" | "005930"];
               try {
@@ -245,6 +247,25 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         if (!mo.first_trigger && (mg.grade === "High" || mg.grade === "Low")) mo.first_trigger = { t: hhmm, dir: mg.dir, score: mScore };
         mo.last = { t: hhmm, score: mScore, dir: mg.dir ?? "NEUTRAL", label: mg.label };
         t2u.mosaic = mo;
+        // [발주 D 8/20] T2+ v2 챌린저 — 야간선물 기준점 + drift 예측 (구판 shadow는 위에 보존·분리)
+        // 판정 시점 = 19:35 절단(level 동결 시점) 이후 첫 평가. 성분별 기여 로그 포함 (절제 진단 구조).
+        try {
+          const nfoV2 = t2u.nf as { level?: { pct: number; nf_level: number; beta_mkt: number }; dc_nf?: number | null; bars?: { t: string; pct: number; vol?: number }[] } | undefined;
+          if (nfoV2?.level && hhmm >= "19:35" && !t2u.shadow_v2) {
+            const { judgeDrift, buildShadowV2 } = await import("./t2plusV2");
+            const { fetchBasketAccel30m, fetchMacroEveningDelta } = await import("./data");
+            const [accel, macro] = await Promise.all([fetchBasketAccel30m(symbol), fetchMacroEveningDelta()]);
+            const drift = judgeDrift({
+              basketAccel30m: accel, dcNf: nfoV2.dc_nf ?? null, nfCumSign: Math.abs(nfoV2.level.pct) >= 0.1 ? Math.sign(nfoV2.level.pct) : 0,
+              dcPm: f.F21_dcpm, basketSign: Math.abs(f.F21_basket ?? 0) >= 0.1 ? Math.sign(f.F21_basket!) : 0,
+              p1Slope: pieces?.p1_eu_semi_avg ?? null, eventTonight: ctx.eventTonight, macro,
+            });
+            const { G1B_CONFIG } = await import("@/lib/g1b/config");
+            const sigmaV2 = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"][ctx.eventTonight ? "event" : "normal"];
+            // 거래량 배율: 20일 축적 전 null (강등 미적용 — 사전 등록 명기). 축적: bars[].vol
+            t2u.shadow_v2 = buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma: sigmaV2, volRatio: null, thetaLow: 2.5 });
+          }
+        } catch { /* v2 결측 허용 — 본판정 무접촉 */ }
       }
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
       const { t2Grade } = await import("./score");
@@ -380,6 +401,23 @@ async function runLabels(): Promise<string[]> {
       ? (v.direction === "UP" ? L1p >= G1A_CONFIG.label.flatBand : L1p <= -G1A_CONFIG.label.flatBand)
       : null;
     row.outcome = { hit, luck_flag: false, postmortem: "" };
+    // [발주 D §4 8/20] T2+ v2 이중 채점: ⓐ 최종 예상갭 vs 실측(L1) ⓑ drift 방향 vs 실제 야간 궤적(19:35→06:00)
+    try {
+      const sv2 = (row.t2 as unknown as Record<string, unknown>).shadow_v2 as { expected_gap_pct?: number; base_pct?: number; drift?: { dir?: string } } | undefined;
+      if (sv2?.expected_gap_pct != null && L1 != null) {
+        const { createAdminClient } = await import("@/lib/supabase/admin");
+        const gb = await createAdminClient().from("g1b_days").select("night").eq("date", d1.date).eq("symbol", symbol).maybeSingle();
+        const nfClose = (gb.data?.night as { night_fut?: { v?: number | null; late_arrival?: boolean } } | null)?.night_fut;
+        const path = nfClose?.v != null && !nfClose.late_arrival && sv2.base_pct != null ? nfClose.v * 100 - sv2.base_pct : null;
+        const driftDir = sv2.drift?.dir ?? "중립";
+        const driftHit = path == null || driftDir === "중립" ? null : Math.abs(path) < 0.15 ? null : (driftDir === "상방") === (path > 0);
+        (row.labels as unknown as Record<string, unknown>).v2 = {
+          te_pct: Math.round(Math.abs(L1 - sv2.expected_gap_pct) * 100) / 100,
+          drift_hit: driftHit, nf_path_pct: path != null ? Math.round(path * 100) / 100 : null,
+          note: "ⓑ는 base 무임승차 차단 — drift 단독 채점 (발주 D §4)",
+        };
+      }
+    } catch { /* v2 채점 결측 허용 */ }
     await upsertDay(row);
     notes.push(`${symbol} ${row.date} 라벨 (L1' ${row.labels.L1p ?? "—"}%)`);
   }

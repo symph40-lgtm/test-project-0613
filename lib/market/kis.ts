@@ -47,7 +47,7 @@ export function frontMonthNightFutCode(now = new Date()): string {
 
 // changePercent null = 등락률 필드 파싱 실패 (실측 2026-07-15 아침 브리핑: 야간 마감 후 응답에
 // 등락률이 없어 0으로 강제하니 "1105.0 0.0%"처럼 오해 유발 — 사용자 지적. 모르면 ?로 표기)
-export type KisFutures = { price: number; changePercent: number | null } | null;
+export type KisFutures = { price: number; changePercent: number | null; volume?: number | null } | null;
 
 // 야간 코스피200 선물 현재가·전일대비율. 키 미설정/실패 시 null(호출부에서 네이버 폴백).
 // div: 시장구분 코드 — "CM" = 야간 세션 확정 (2026-08-15 실측).
@@ -93,7 +93,8 @@ export async function fetchKisNightFutures(div = "CM"): Promise<KisFutures> {
     const sign = String(o.prdy_vrss_sign ?? "");
     if (chg !== null && chg > 0 && (sign === "4" || sign === "5")) chg = -chg;
     if (!isFinite(price) || price <= 0) return null;
-    return { price, changePercent: chg };
+    const vol = num(o.acml_vol); // 세션 누적 거래량 (T2+ v2 confidence_vol 재료 — 8/20 축적 시작)
+    return { price, changePercent: chg, volume: isFinite(vol) ? vol : null };
   } catch {
     return null;
   }
