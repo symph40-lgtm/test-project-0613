@@ -120,7 +120,8 @@ function DailySvg({ days }: { days: KrxNightDay[] }) {
             <line x1={cx} y1={y(d.high)} x2={cx} y2={y(d.low)} stroke={up ? "#dc2626" : "#2563eb"} strokeWidth={1} />
             <rect x={cx - Math.max(1.5, bw * 0.22)} y={Math.min(y(d.open), y(d.close))} width={Math.max(3, bw * 0.44)}
               height={Math.max(1, Math.abs(y(d.open) - y(d.close)))} fill={up ? "#dc2626" : "#2563eb"} opacity={0.85} />
-            {i % 4 === 0 ? <text x={cx} y={H - 6} textAnchor="middle" fontSize={8} fill="#888">{d.label_date.slice(5)}</text> : null}
+            {/* [발주자 8/20 밤] 날짜 전 봉 표기 — 4일 간격 → 매 봉 (라벨 = T+1 규약 그대로) */}
+            <text x={cx} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(d.label_date.slice(5, 7))}/${Number(d.label_date.slice(8, 10))}`}</text>
           </g>
         );
       })}
