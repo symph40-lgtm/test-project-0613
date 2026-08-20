@@ -4,6 +4,24 @@
 // 크론 등록 전까지 부분 곡선 — 결측 구간은 점 없이 표시.
 
 import { fetchKrxNightDaily, type KrxNightDay } from "@/lib/market/krxNight";
+import YahooFinance from "yahoo-finance2";
+
+const yfd = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
+
+// [발주자 8/21 새벽] 20일 비교 그래프 재료 — 일간 등락률 (close/prevClose)
+async function fetchDailyPct(sym: string, n = 40): Promise<{ date: string; pct: number }[]> {
+  try {
+    const r = await yfd.chart(sym, { period1: new Date(Date.now() - 75 * 86400e3), interval: "1d" });
+    const qs = (r.quotes ?? []).filter((q) => q.close != null);
+    const out: { date: string; pct: number }[] = [];
+    for (let i = 1; i < qs.length; i++) {
+      out.push({ date: (qs[i].date as Date).toISOString().slice(0, 10), pct: Math.round(((qs[i].close as number) / (qs[i - 1].close as number) - 1) * 10000) / 100 });
+    }
+    return out.slice(-n);
+  } catch { return []; }
+}
+
+export type CompareRow = { date: string; nf: number | null; ss: number | null; hx: number | null; soxx: number | null; ndx: number | null };
 
 type Bar = { t: string; pct: number; soxx?: number | null; nq?: number | null };   // soxx·nq: 8/20 밤 23시 발주 — 병기 계열
 type Cp = { t: string; nf_pct: number | null } | null;
@@ -131,9 +149,66 @@ function DailySvg({ days }: { days: KrxNightDay[] }) {
   );
 }
 
+// [발주자 8/21 새벽] 20일 비교 — 야간선물 마감(실선 기준) vs 당일 삼전·하닉 vs 간밤 SOXX·나스닥.
+// 목적: 삼전·하닉이 밤 재료 대비 어느 정도로 움직이는지 (민감도) 육안 비교. 계열별 색 구별.
+const CMP_SERIES: { key: keyof CompareRow; label: string; color: string; w: number }[] = [
+  { key: "nf", label: "야간선물 06:00 마감", color: "#1d4ed8", w: 2.4 },
+  { key: "ss", label: "삼전 당일", color: "#dc2626", w: 1.6 },
+  { key: "hx", label: "하닉 당일", color: "#7c3aed", w: 1.6 },
+  { key: "soxx", label: "SOXX 간밤", color: "#ea580c", w: 1.2 },
+  { key: "ndx", label: "나스닥 간밤", color: "#14b8a6", w: 1.2 },
+];
+function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
+  const W = 720, H = 180, PL = 40, PR = 10, PT = 12, PB = 22;
+  if (rows.length < 2) return <p className="text-[13px] text-ink-48">비교 표본 부족 — 소스 조회 실패 또는 축적 대기</p>;
+  const vals = rows.flatMap((r) => [r.nf, r.ss, r.hx, r.soxx, r.ndx]).filter((v): v is number => v != null);
+  const vmax = Math.max(2, ...vals.map(Math.abs)) * 1.1;
+  const x = (i: number) => PL + (i / (rows.length - 1)) * (W - PL - PR);
+  const y = (v: number) => PT + (1 - (v + vmax) / (2 * vmax)) * (H - PT - PB);
+  const path = (get: (r: CompareRow) => number | null) => {
+    const seg: string[] = [];
+    let started = false;
+    rows.forEach((r, i) => {
+      const v = get(r);
+      if (v == null) { started = false; return; }
+      seg.push(`${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+      started = true;
+    });
+    return seg.join(" ");
+  };
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label="야간선물 대비 20일 민감도 비교">
+      <line x1={PL} y1={y(0)} x2={W - PR} y2={y(0)} stroke="#ddd" strokeWidth={1} />
+      {[vmax, -vmax].map((v) => <text key={v} x={PL - 4} y={y(v) + 4} textAnchor="end" fontSize={9} fill="#888">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>)}
+      {CMP_SERIES.map((s) => <path key={s.key} d={path((r) => r[s.key] as number | null)} fill="none" stroke={s.color} strokeWidth={s.w} strokeLinejoin="round" />)}
+      {rows.map((r, i) => (
+        <text key={r.date} x={x(i)} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(r.date.slice(5, 7))}/${Number(r.date.slice(8, 10))}`}</text>
+      ))}
+    </svg>
+  );
+}
+
 export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { curve: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v2Hourly?: V2HourMark[] }) {
   let daily: KrxNightDay[] = [];
   try { daily = await fetchKrxNightDaily(24); } catch { /* 정본 조회 실패 — 빈 배열 */ }
+  // [발주자 8/21 새벽] 20일 비교 데이터 — 정렬: 라벨일 L 기준. 야간선물 u1(L) = L 새벽에 끝난 밤 /
+  // SOXX·나스닥 = 같은 밤의 미 세션(L 이전 마지막 미 거래일) / 삼전·하닉 = L 당일 등락 (정규 종가 기준 —
+  // 프리·애프터 확장 등락은 NXT 이력 축적 후 교체 예정, 명기).
+  let cmp: CompareRow[] = [];
+  try {
+    const [ssD, hxD, sxD, ixD] = await Promise.all([
+      fetchDailyPct("005930.KS"), fetchDailyPct("000660.KS"), fetchDailyPct("SOXX"), fetchDailyPct("^IXIC"),
+    ]);
+    const at = (arr: { date: string; pct: number }[], d: string) => arr.find((z) => z.date === d)?.pct ?? null;
+    const lastBefore = (arr: { date: string; pct: number }[], d: string) => [...arr].reverse().find((z) => z.date < d)?.pct ?? null;
+    // 날짜 축: KRX 정본 우선, 조회 실패 시 삼전 거래일로 폴백 (야간선물 선만 결측 — 나머지 4계열은 유지)
+    const spine = daily.length ? daily.slice(-20).map((z) => z.label_date) : ssD.slice(-20).map((z) => z.date);
+    cmp = spine.map((d) => ({
+      date: d, nf: daily.find((z) => z.label_date === d)?.u1_pct ?? null,
+      ss: at(ssD, d), hx: at(hxD, d),
+      soxx: lastBefore(sxD, d), ndx: lastBefore(ixD, d),
+    }));
+  } catch { /* 비교 결측 허용 */ }
   const last = curve.bars.length ? curve.bars[curve.bars.length - 1] : null;
   return (
     <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
@@ -164,6 +239,16 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       <div className="overflow-x-auto"><DailySvg days={daily} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
         1시간 해상도 15일 조회는 야간 크론 축적 개시 후 제공 (10분봉 저장 = 저녁 8/18~ · 밤 구간은 크론 등록부터). 8/12~14 라이브 기록은 KRX 정본 소급 정정본.
+      </p>
+      {/* [발주자 8/21 새벽] 20일 민감도 비교 — 삼전·하닉이 밤 재료(야간선물·SOXX·나스닥) 대비 얼마나 움직이나 */}
+      <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">20일 비교 — 야간선물 마감 vs 당일 삼전·하닉 vs 간밤 SOXX·나스닥 (일간 %)</p>
+      <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] md:text-[11px]">
+        {CMP_SERIES.map((s) => <LegendChip key={s.key} color={s.color} bold={s.key === "nf"} label={s.label} />)}
+      </div>
+      <div className="overflow-x-auto"><DailyCompareSvg rows={cmp} /></div>
+      <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
+        정렬: 라벨일 기준 — 야간선물·SOXX·나스닥 = 그 라벨일 새벽에 끝난 같은 밤 / 삼전·하닉 = 라벨일 당일 등락.
+        삼전·하닉은 정규 종가 기준 (프리~애프터 확장 등락은 NXT 이력 축적 후 교체 — 명기).
       </p>
     </div>
   );
