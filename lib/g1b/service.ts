@@ -65,6 +65,12 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
   if (probe.error) return { ok: false, window: "none", notes: ["마이그레이션 035 미적용"] };
 
   const W = C.windows;
+  // [발주 A — 결측 정정 8/20 밤 22시 (발주자 실측 22:20)] 야간 10분봉 전 구간 수집:
+  // 종전 수집 창이 G1A T2 창(18:00~19:40)에 한정돼 19:35 이후 봉이 0개였다 — 발주 A "익일 09:00까지 전 구간" 미이행 정정.
+  // */10 종일 크론이 호출하는 이 엔드포인트가 19:45~06:00 구간을 이어받는다 (저장처는 G1A와 동일 — 당일 곡선·vol 축적 공용).
+  if ((hhmm >= "19:45" || hhmm < "06:00") && wd !== 0 && !(wd === 6 && hhmm >= "18:00")) {
+    await recordNightBars(hhmm, date, notes);
+  }
   // [발주 D §5 — 매시 확장 8/20 밤] 시간별 drift 재판정 트랙 20:30~06:00, 시간당 1회(슬롯 = 시각 앞 2자리).
   // 관측·학습 전용(채점 정본 = 19:35 판정 불변) · 성분은 등록 축소판(ⓐ·ⓕ·누적 부호) 유지 — 성분 확장은 재등록 사항.
   // 크론이 오는 시각만 채워진다 — 매시 격자 등록은 발주자 설정(cron-job.org). 세션 없는 밤(일요일·토요일 저녁)은 제외.
@@ -505,6 +511,36 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
   return { ok: true, window: hhmm, notes };
 }
 
+// [발주 A — 결측 정정 8/20 밤] 야간 10분봉 수집 (19:45~06:00) — 저장: g1a_days[세션 밤].t2.nf.bars (G1A 동일 원천).
+// 19:35 절단 동결 불변: level/dc_nf는 절대 재계산하지 않고 bars만 append (절단 이후 봉 = 관측·표시·vol 축적 전용).
+// 10분 슬롯당 1회 (t 앞 4자리 dedupe — G1A 수집과 동일 규칙이라 창 겹침도 안전).
+async function recordNightBars(hhmm: string, date: string, notes: string[]): Promise<void> {
+  const admin = createAdminClient();
+  const sessionNight = hhmm >= "18:00" ? date : (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+  let snap: { pct: number; vol: number | null } | null = null;
+  for (const symbol of G1B_SYMBOLS) {
+    try {
+      const t2 = (await admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle()).data?.t2 as Record<string, unknown> | null;
+      if (!t2) continue;                          // 세션 밤 행 없음(휴장 등) — 수집 없음
+      const nf0 = (t2.nf ?? { bars: [] }) as { bars: { t: string; pct: number; vol?: number }[] } & Record<string, unknown>;
+      if (nf0.bars.some((b) => b.t.slice(0, 4) === hhmm.slice(0, 4))) continue;
+      if (!snap) {
+        const { fetchKisNightFutures, hasKisKeys } = await import("@/lib/market/kis");
+        if (!hasKisKeys()) return;
+        const q = await fetchKisNightFutures("CM");
+        const pct = (q as { changePercent?: number | null })?.changePercent;
+        if (typeof pct !== "number") return;      // 세션 없음·결측 — 다음 틱 재시도
+        const vol = (q as { volume?: number | null })?.volume;
+        snap = { pct, vol: typeof vol === "number" ? vol : null };
+      }
+      nf0.bars = [...nf0.bars, { t: hhmm, pct: snap.pct, ...(snap.vol != null ? { vol: snap.vol } : {}) }];
+      t2.nf = nf0;
+      await admin.from("g1a_days").update({ t2 }).eq("date", sessionNight).eq("symbol", symbol);
+      notes.push(`${symbol} 야간봉 ${hhmm} ${snap.pct >= 0 ? "+" : ""}${snap.pct}%`);
+    } catch { /* 결측 허용 */ }
+  }
+}
+
 // [발주 D §5 — 매시 확장 8/20 밤] 시간별 drift 재판정 트랙 (관측·학습 전용, 채점 정본 = 19:35 판정 불변).
 // 저장: g1a_days[세션 밤].t2.shadow_v2.hourly — 시간당 1회 (슬롯 = HH). 기준점 섀도(shadow_v2) 미생성 밤은
 // 트랙 없음 (기준점 없이 drift만은 무의미 — 명기). 성분은 등록 축소판(ⓐ 바스켓 가속·ⓕ 매크로Δ·야간선물
@@ -783,6 +819,32 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     dryrun: per.slice(0, C.dryRunDays).every((p) => p.r1ok === 2 && p.r2ok === 2) && per.length >= C.dryRunDays ? "통과 후보 — 3영업일 연속 완주" : "진행 중",
     daily: per.slice(0, 10),
   };
+  // [발주자 B6 8/20 밤] 이벤트 밤 전(거래일) 자동 통보 — E-체계 첫 실전 놓침 방지.
+  // 대상: FOMC 결정일·CPI·고용(2026+ ES 사전 일정 없음 → 첫 금요일 규칙 보강)·수동 등록 실적(ops_settings.g1_event_manual).
+  // 다음 거래일 기준(월요일 이벤트는 금요일에 통보). 중복 억제: ops_settings.g1_event_notice_last. 장애 무해(통보 실패해도 계기판 진행).
+  try {
+    const nextBiz = (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() + 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+    const { FOMC_DECISION_DATES: FD, CPI_RELEASE_DATES: CD, ES_RELEASE_DATES: ED } = await import("@/lib/predict-daily/eventCalendar");
+    const kinds: string[] = [];
+    if (FD.includes(nextBiz)) kinds.push("FOMC 결정(발표 익일 새벽 KST)");
+    if (CD.includes(nextBiz)) kinds.push("CPI(21:30 KST)");
+    if (ED.includes(nextBiz)) kinds.push("고용보고서(21:30 KST)");
+    const nb = new Date(nextBiz + "T00:00:00Z");
+    if (!kinds.some((k) => k.startsWith("고용")) && nb.getUTCDay() === 5 && nb.getUTCDate() <= 7 && nextBiz > "2025-12-16") kinds.push("고용보고서(첫 금요일 규칙)");
+    const manual = (await admin.from("ops_settings").select("value").eq("key", "g1_event_manual").maybeSingle()).data?.value as { date: string; name: string }[] | null;
+    for (const mv of manual ?? []) if (mv.date === nextBiz) kinds.push(mv.name);
+    if (kinds.length) {
+      const last = (await admin.from("ops_settings").select("value").eq("key", "g1_event_notice_last").maybeSingle()).data?.value as { date?: string } | null;
+      if (last?.date !== nextBiz) {
+        const { sendG1Notify } = await import("@/lib/alerts/g1notify");
+        const hr = await sendG1Notify("[G1 이벤트 전일 통보]",
+          `[G1 이벤트 D-1] ${nextBiz.slice(5)} 밤 = ${kinds.join(" · ")} — [E] 본판정 대상 밤. ` +
+          `컨센서스(IM) 수동 입력 리마인드: /ops에서 ops_settings.g1_event_consensus 입력 (미입력 시 E-Low 요건 IM '미조달' 처리).`);
+        await admin.from("ops_settings").upsert({ key: "g1_event_notice_last", value: { date: nextBiz, kinds }, updated_at: new Date().toISOString() });
+        notes.push(`이벤트 전일 통보(${hr.via}) — ${nextBiz} ${kinds.join("·")}`);
+      }
+    }
+  } catch { /* 통보 실패 무해 */ }
   const { error } = await admin.from("g1b_gate").upsert({ date, metrics });
   if (error) notes.push(`계기판 저장 실패: ${error.message}`);
 }

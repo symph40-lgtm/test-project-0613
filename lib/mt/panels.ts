@@ -146,11 +146,22 @@ export function buildPanels(bars: Bar[], i: number, ctx: PanelContext): {
     fill == null ? null : clvTerm == null ? fill : (1 - w) * fill + w * clvTerm;
 
   // ── S1 바닥권
+  // [발주자 회수 8/20 밤 A4] 근거 표본 수 상시 병기 — "0.00(표본 있음·미충족)"과 "—(재료 없음)" 구분의 증거를 화면에
+  const badN = series.filter((d) => !d.excluded && d.materialDir === -1 && d.ratio != null).length;
+  const volN = (() => {
+    let dn = 0, up = 0;
+    for (let k = Math.max(1, i - P.volWindow + 1); k <= i; k++) {
+      const r = ret(bars, k);
+      if (r == null) continue;
+      if (r < 0) dn++; else if (r > 0) up++;
+    }
+    return { dn, up };
+  })();
   const s1: PartFill[] = [
     part("S1_1", badMed == null ? null : ramp(0.8 - badMed, 0, 0.8),
-      badMed == null ? "악재일 표본 없음" : `악재일 반응배율 중앙값 ${badMed.toFixed(2)}`),
+      badMed == null ? `악재일 표본 없음 (${MT_CONFIG.c1.window}일 창)` : `악재일 반응배율 중앙값 ${badMed.toFixed(2)} (악재일 ${badN}/${MT_CONFIG.c1.window}일)`),
     part("S1_2", dnUp10 == null ? null : Math.min(1, ramp(1.0 - dnUp10, 0, 0.4) + c5Bonus(1)),
-      dnUp10 == null ? "거래량 표본 없음" : `하락일/상승일 거래량 ${dnUp10.toFixed(2)}${c5Bonus(1) ? ` · 외인 매수 연속 +${W.C5.bonus}` : ""}`),
+      dnUp10 == null ? `거래량 표본 없음 (${P.volWindow}일 창)` : `하락일/상승일 거래량 ${dnUp10.toFixed(2)} (하락 ${volN.dn}·상승 ${volN.up}일/${P.volWindow}일)${c5Bonus(1) ? ` · 외인 매수 연속 +${W.C5.bonus}` : ""}`),
     (() => {
       const f = findFtd(bars, i);
       return part("S1_3", f ? (f.strong ? 1 : 0.5) : 0,

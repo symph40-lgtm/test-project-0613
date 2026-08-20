@@ -12,7 +12,10 @@ export function GlobalNav() {
         <ShieldCheck size={14} className="text-guard-on-dark" />
         <span className="font-semibold">스탁가드</span>
       </Link>
-      <nav className="flex items-center gap-5 text-[13px] md:text-[12px] tracking-[-0.12px] text-white/80">
+      <nav className="flex items-center gap-4 text-[13px] md:text-[12px] tracking-[-0.12px] text-white/80">
+        {/* MT 전역 상단 메뉴 (발주자 확정 8/20 밤) — 시장 알림분석 하위 배치 규약대로 MT가 일봉갭예측 앞 */}
+        <Link href="/mt" className="hover:text-white">MT 시장 톤</Link>
+        <Link href="/g1" className="hover:text-white">일봉 갭 예측</Link>
         <NavAuth />
       </nav>
     </header>
