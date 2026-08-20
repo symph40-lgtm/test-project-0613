@@ -189,6 +189,13 @@ export default async function G1Page() {
           const b = betaOf[s] ?? 1.4;
           return { name: s === "005930" ? "삼" : "하", idxPct: oe != null && b > 0 ? Math.round((oe / b) * 100) / 100 : null };
         });
+        // [발주자 8/20 밤 23시 2차] T2+ v2 예상갭 ◇ 마커 — 최종 예상갭(종목 %) ÷ β, 판정 시각(sv2.t) 위치
+        const v2Marks = (["005930", "000660"] as const).map((s) => {
+          const ar = aRows.find((x) => x.symbol === s && x.date === sessionNight);
+          const sv2 = (ar?.t2 as { shadow_v2?: { t?: string; expected_gap_pct?: number | null } } | null)?.shadow_v2;
+          const b = betaOf[s] ?? 1.4;
+          return { name: s === "005930" ? "삼" : "하", t: sv2?.t ?? "19:45", idxPct: sv2?.expected_gap_pct != null && b > 0 ? Math.round((sv2.expected_gap_pct / b) * 100) / 100 : null };
+        });
         // [발주자 지적 8/20 밤 23시] T2 매시 재판정(v2 시간별 트랙)을 같은 곡선에 — 시간당 1회 방향 마커 (위 삼전·아래 하닉)
         const hOf = (s: string) => ((aRows.find((x) => x.symbol === s && x.date === sessionNight)?.t2 as { shadow_v2?: { hourly?: { t: string; dir?: string; nf_pct?: number | null }[] } } | null)?.shadow_v2?.hourly ?? []);
         const hSs = hOf("005930"), hHx = hOf("000660");
@@ -200,7 +207,7 @@ export default async function G1Page() {
             return { t, dirSs: a?.dir ?? null, dirHx: b?.dir ?? null, nf_pct: a?.nf_pct ?? b?.nf_pct ?? null };
           })
           .sort((p, q) => minOfH(p.t) - minOfH(q.t));
-        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Hourly={v2Hourly} />;
+        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} />;
       })()}
 
       {/* A1: G1A T2 — 맨 위 */}
