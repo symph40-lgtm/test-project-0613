@@ -153,18 +153,23 @@ function DailySvg({ days }: { days: KrxNightDay[] }) {
 
 // [발주자 8/21 새벽] 20일 비교 — 야간선물 마감(실선 기준) vs 당일 삼전·하닉 vs 간밤 SOXX·나스닥.
 // 목적: 삼전·하닉이 밤 재료 대비 어느 정도로 움직이는지 (민감도) 육안 비교. 계열별 색 구별.
-const CMP_SERIES: { key: keyof CompareRow; label: string; color: string; w: number }[] = [
+// [발주자 8/21 수정] SOXX·나스닥 = 삼전·하닉과 같은 날짜(라벨일 당일 밤 미 세션)로 정렬 + 장/단 점선 구별
+const CMP_SERIES: { key: keyof CompareRow; label: string; color: string; w: number; dash?: string }[] = [
   { key: "nf", label: "야간선물 06:00 마감", color: "#1d4ed8", w: 2.4 },
   { key: "ss", label: "삼전 당일", color: "#dc2626", w: 1.6 },
   { key: "hx", label: "하닉 당일", color: "#7c3aed", w: 1.6 },
-  { key: "soxx", label: "SOXX 간밤", color: "#ea580c", w: 1.2 },
-  { key: "ndx", label: "나스닥 간밤", color: "#14b8a6", w: 1.2 },
+  { key: "soxx", label: "SOXX 당일 밤 (긴 점선)", color: "#ea580c", w: 1.3, dash: "7 3" },
+  { key: "ndx", label: "나스닥 당일 밤 (짧은 점선)", color: "#14b8a6", w: 1.3, dash: "2 3" },
 ];
 function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
   const W = 720, H = 180, PL = 40, PR = 10, PT = 12, PB = 22;
   if (rows.length < 2) return <p className="text-[13px] text-ink-48">비교 표본 부족 — 소스 조회 실패 또는 축적 대기</p>;
   const vals = rows.flatMap((r) => [r.nf, r.ss, r.hx, r.soxx, r.ndx]).filter((v): v is number => v != null);
-  const vmax = Math.max(2, ...vals.map(Math.abs)) * 1.1;
+  // [발주자 8/21] 축은 상위 92% 분위 기준 — 극단 대변동일(예: 7/31 삼전 +26.8%)은 가장자리에서 잘리더라도
+  // 나머지 날들의 차이가 보이게 (전체 최댓값 축은 평상일을 뭉갬)
+  const absSorted = vals.map(Math.abs).sort((a, b) => a - b);
+  const q92 = absSorted.length ? absSorted[Math.min(absSorted.length - 1, Math.floor(absSorted.length * 0.92))] : 2;
+  const vmax = Math.max(2, Math.round(q92 * 1.25 * 10) / 10);
   const x = (i: number) => PL + (i / (rows.length - 1)) * (W - PL - PR);
   const y = (v: number) => PT + (1 - (v + vmax) / (2 * vmax)) * (H - PT - PB);
   const path = (get: (r: CompareRow) => number | null) => {
@@ -173,7 +178,8 @@ function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
     rows.forEach((r, i) => {
       const v = get(r);
       if (v == null) { started = false; return; }
-      seg.push(`${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+      const vc = Math.max(-vmax, Math.min(vmax, v));   // 범위 밖은 가장자리에 클램프 (잘림 표시)
+      seg.push(`${started ? "L" : "M"}${x(i).toFixed(1)},${y(vc).toFixed(1)}`);
       started = true;
     });
     return seg.join(" ");
@@ -182,7 +188,7 @@ function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label="야간선물 대비 20일 민감도 비교">
       <line x1={PL} y1={y(0)} x2={W - PR} y2={y(0)} stroke="#ddd" strokeWidth={1} />
       {[vmax, -vmax].map((v) => <text key={v} x={PL - 4} y={y(v) + 4} textAnchor="end" fontSize={9} fill="#888">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>)}
-      {CMP_SERIES.map((s) => <path key={s.key} d={path((r) => r[s.key] as number | null)} fill="none" stroke={s.color} strokeWidth={s.w} strokeLinejoin="round" />)}
+      {CMP_SERIES.map((s) => <path key={s.key} d={path((r) => r[s.key] as number | null)} fill="none" stroke={s.color} strokeWidth={s.w} strokeDasharray={s.dash || undefined} strokeLinejoin="round" />)}
       {rows.map((r, i) => (
         <text key={r.date} x={x(i)} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(r.date.slice(5, 7))}/${Number(r.date.slice(8, 10))}`}</text>
       ))}
@@ -205,10 +211,12 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
     const lastBefore = (arr: { date: string; pct: number }[], d: string) => [...arr].reverse().find((z) => z.date < d)?.pct ?? null;
     // 날짜 축: KRX 정본 우선, 조회 실패 시 삼전 거래일로 폴백 (야간선물 선만 결측 — 나머지 4계열은 유지)
     const spine = daily.length ? daily.slice(-20).map((z) => z.label_date) : ssD.slice(-20).map((z) => z.date);
+    // [발주자 8/21 수정] SOXX·나스닥 = 라벨일과 같은 캘린더 날짜의 미 세션 (그날 밤 22:30 개장분) — 삼전·하닉과 동일 날짜 정렬
+    void lastBefore;
     cmp = spine.map((d) => ({
       date: d, nf: daily.find((z) => z.label_date === d)?.u1_pct ?? null,
       ss: at(ssD, d), hx: at(hxD, d),
-      soxx: lastBefore(sxD, d), ndx: lastBefore(ixD, d),
+      soxx: at(sxD, d), ndx: at(ixD, d),
     }));
   } catch { /* 비교 결측 허용 */ }
   const last = curve.bars.length ? curve.bars[curve.bars.length - 1] : null;
@@ -245,12 +253,12 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       {/* [발주자 8/21 새벽] 20일 민감도 비교 — 삼전·하닉이 밤 재료(야간선물·SOXX·나스닥) 대비 얼마나 움직이나 */}
       <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">20일 비교 — 야간선물 마감 vs 당일 삼전·하닉 vs 간밤 SOXX·나스닥 (일간 %)</p>
       <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] md:text-[11px]">
-        {CMP_SERIES.map((s) => <LegendChip key={s.key} color={s.color} bold={s.key === "nf"} label={s.label} />)}
+        {CMP_SERIES.map((s) => <LegendChip key={s.key} color={s.color} bold={s.key === "nf"} dash={s.dash} label={s.label} />)}
       </div>
       <div className="overflow-x-auto"><DailyCompareSvg rows={cmp} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
-        정렬: 라벨일 기준 — 야간선물·SOXX·나스닥 = 그 라벨일 새벽에 끝난 같은 밤 / 삼전·하닉 = 라벨일 당일 등락.
-        삼전·하닉은 정규 종가 기준 (프리~애프터 확장 등락은 NXT 이력 축적 후 교체 — 명기).
+        정렬: 같은 날짜 — 야간선물 = 그 라벨일 새벽 마감 밤 / 삼전·하닉 = 라벨일 당일 등락 / SOXX·나스닥 = 라벨일 당일 밤(22:30 개장) 미 세션.
+        축은 상위 92% 분위 기준 — 극단 대변동일은 가장자리에서 잘림. 삼전·하닉은 정규 종가 기준 (프리~애프터 확장은 NXT 이력 축적 후 교체 — 명기).
       </p>
     </div>
   );
