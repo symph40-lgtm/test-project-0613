@@ -125,24 +125,37 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { c: NightC
 }
 
 function DailySvg({ days }: { days: KrxNightDay[] }) {
-  const W = 720, H = 120, PL = 44, PR = 10, PT = 8, PB = 20;
+  // [발주자 지시 8/21] 주간(낮) 세션 봉 + 야간 세션 봉을 한 슬롯에 나란히 — 낮 마감 대비 밤이 올랐는지/내렸는지가 그대로 보이게.
+  // 주간 = 채운 봉, 야간 = 테두리 봉. 색은 각 세션의 시가→종가 (적 상승 / 청 하락). 슬롯 라벨 = 세션 밤짜(그날 낮+그날 밤).
+  const W = 720, H = 130, PL = 44, PR = 10, PT = 8, PB = 20;
   if (!days.length) return <p className="text-[13px] text-ink-48">KRX 정본 조회 불가 (KRX_ID 미설정 또는 응답 없음)</p>;
-  const lo = Math.min(...days.map((d) => d.low)), hi = Math.max(...days.map((d) => d.high));
+  const allLo = days.flatMap((d) => [d.low, d.day?.low]).filter((v): v is number => v != null);
+  const allHi = days.flatMap((d) => [d.high, d.day?.high]).filter((v): v is number => v != null);
+  const lo = Math.min(...allLo), hi = Math.max(...allHi);
   const y = (v: number) => PT + (1 - (v - lo) / Math.max(1e-9, hi - lo)) * (H - PT - PB);
   const bw = (W - PL - PR) / days.length;
+  const cw = Math.max(2.5, bw * 0.26);   // 봉 몸통 폭 (슬롯 안에 2개)
+  const candle = (cx: number, o: number, h: number, l: number, c: number, hollow: boolean, key: string) => {
+    const col = c >= o ? "#dc2626" : "#2563eb";
+    return (
+      <g key={key}>
+        <line x1={cx} y1={y(h)} x2={cx} y2={y(l)} stroke={col} strokeWidth={1} />
+        <rect x={cx - cw / 2} y={Math.min(y(o), y(c))} width={cw} height={Math.max(1, Math.abs(y(o) - y(c)))}
+          fill={hollow ? "#fff" : col} stroke={col} strokeWidth={hollow ? 1.2 : 0} opacity={hollow ? 1 : 0.85} />
+      </g>
+    );
+  };
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label="야간선물 일봉 1개월 (KRX 정본)">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label="K200 선물 주간·야간 세션 일봉 1개월 (KRX 정본)">
       {days.map((d, i) => {
-        const cx = PL + bw * i + bw / 2;
-        // [발주자 지적 8/21] 야간 세션 그래프는 세션(18:00~06:00) 안의 값만 — 색 = 야간 시가→종가 (주간 종가 개입 없음)
-        const up = d.close >= d.open;
+        const x0 = PL + bw * i;
+        const cxDay = x0 + bw * 0.3, cxNight = x0 + bw * 0.7;
+        const lab = d.day?.date ?? d.label_date;
         return (
           <g key={d.label_date}>
-            <line x1={cx} y1={y(d.high)} x2={cx} y2={y(d.low)} stroke={up ? "#dc2626" : "#2563eb"} strokeWidth={1} />
-            <rect x={cx - Math.max(1.5, bw * 0.22)} y={Math.min(y(d.open), y(d.close))} width={Math.max(3, bw * 0.44)}
-              height={Math.max(1, Math.abs(y(d.open) - y(d.close)))} fill={up ? "#dc2626" : "#2563eb"} opacity={0.85} />
-            {/* [발주자 8/20 밤] 날짜 전 봉 표기 — 4일 간격 → 매 봉 (라벨 = T+1 규약 그대로) */}
-            <text x={cx} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(d.label_date.slice(5, 7))}/${Number(d.label_date.slice(8, 10))}`}</text>
+            {d.day ? candle(cxDay, d.day.open, d.day.high, d.day.low, d.day.close, false, "d") : null}
+            {candle(cxNight, d.open, d.high, d.low, d.close, true, "n")}
+            <text x={x0 + bw / 2} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(lab.slice(5, 7))}/${Number(lab.slice(8, 10))}`}</text>
           </g>
         );
       })}
@@ -245,8 +258,9 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} /></div>
       {curve.live && !v2Hourly?.length ? <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">T2 매시 재판정 마커는 기준점 섀도(shadow_v2)가 있는 밤부터 — 8/20 밤은 미생성(배포 경위), 첫 표시 8/21 밤. SOXX·나스닥100은 8/20 밤 23시 배포 이후 봉부터.</p> : null}
       <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">
-        과거 1개월 — 야간 세션 일봉 (KRX 정본, 18:00→06:00 세션 값만 · T+1 라벨 · <span style={{ color: "#dc2626" }}>■ 야간 시가→종가 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>)
+        과거 1개월 — K200 선물 <b>주간(낮, 채운 봉) → 야간(밤, 테두리 봉)</b> 세션 일봉 (KRX 정본 · 라벨 = 세션 밤짜: 그날 낮 + 그날 밤 · <span style={{ color: "#dc2626" }}>■ 시가→종가 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>, 세션별)
       </p>
+      <p className="mb-1 text-[13px] md:text-[10px] text-ink-48">채운 봉의 종가(15:45) 옆에 테두리 봉이 어디서 시작해 어디서 끝나는지가 "낮 마감 대비 밤의 움직임"(= 내재갭) — 예: 8/20은 낮 급등 뒤 밤이 낮 종가 살짝 아래(-0.26%)에서 마감.</p>
       <div className="overflow-x-auto"><DailySvg days={daily} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
         1시간 해상도 15일 조회는 야간 크론 축적 개시 후 제공 (10분봉 저장 = 저녁 8/18~ · 밤 구간은 크론 등록부터). 8/12~14 라이브 기록은 KRX 정본 소급 정정본.

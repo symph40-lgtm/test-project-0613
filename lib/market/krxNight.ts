@@ -120,7 +120,9 @@ export async function fetchKrxNightU1(labelDate: string): Promise<KrxNightU1> {
 
 // ── 일봉 시계열 (발주 A §2 — /g1 야간선물 섹션 과거 조회, KRX 정본) ──
 // 최근월 스티칭 없이 현재 최근월 1계약으로 최근 ~1개월 (계약 경계 밤은 만기 주간에만 발생 — 표식).
-export type KrxNightDay = { label_date: string; open: number; high: number; low: number; close: number; day_close_ref: number | null; u1_pct: number | null };
+export type KrxFutSession = { date: string; open: number; high: number; low: number; close: number };
+// [발주자 8/21] day = 야간 개장 직전의 주간(낮) 세션 봉 — 일봉 그래프에서 주간→야간 연속 표시용
+export type KrxNightDay = { label_date: string; open: number; high: number; low: number; close: number; day_close_ref: number | null; u1_pct: number | null; day: KrxFutSession | null };
 let dailyCache: { at: number; data: KrxNightDay[] } | null = null;
 export async function fetchKrxNightDaily(days = 24): Promise<KrxNightDay[]> {
   if (dailyCache && Date.now() - dailyCache.at < 15 * 60_000) return dailyCache.data;   // 15분 캐시 (페이지 로드마다 로그인 방지)
@@ -134,13 +136,16 @@ export async function fetchKrxNightDaily(days = 24): Promise<KrxNightDay[]> {
   const norm = (d: string) => d.replace(/\//g, "-");
   const night = await fetchSeries(cookie, isu, "2", strt, today.replace(/-/g, ""));
   const day = await fetchSeries(cookie, isu, "0", strt, today.replace(/-/g, ""));
-  const dayC = day.map((r) => ({ d: norm(r.TRD_DD), c: num(r.TDD_CLSPRC) })).filter((r) => isFinite(r.c) && r.c > 0).sort((a, b) => a.d.localeCompare(b.d));
+  const dayC = day.map((r) => ({ d: norm(r.TRD_DD), o: num(r.TDD_OPNPRC), h: num((r as unknown as { TDD_HGPRC: string }).TDD_HGPRC), l: num((r as unknown as { TDD_LWPRC: string }).TDD_LWPRC), c: num(r.TDD_CLSPRC) }))
+    .filter((r) => isFinite(r.c) && r.c > 0).sort((a, b) => a.d.localeCompare(b.d));
   const out: KrxNightDay[] = [];
   for (const r of night.map((x) => ({ ...x, d: norm(x.TRD_DD) })).sort((a, b) => a.d.localeCompare(b.d))) {
     const o = num(r.TDD_OPNPRC), h = num((r as unknown as { TDD_HGPRC: string }).TDD_HGPRC), l = num((r as unknown as { TDD_LWPRC: string }).TDD_LWPRC), c = num(r.TDD_CLSPRC);
     if (!isFinite(c) || c <= 0) continue;
-    const ref = dayC.filter((x) => x.d < r.d).pop()?.c ?? null;
-    out.push({ label_date: r.d, open: o, high: h, low: l, close: c, day_close_ref: ref, u1_pct: ref ? Math.round((c / ref - 1) * 10000) / 100 : null });
+    const prevDay = dayC.filter((x) => x.d < r.d).pop() ?? null;
+    const ref = prevDay?.c ?? null;
+    out.push({ label_date: r.d, open: o, high: h, low: l, close: c, day_close_ref: ref, u1_pct: ref ? Math.round((c / ref - 1) * 10000) / 100 : null,
+      day: prevDay ? { date: prevDay.d, open: prevDay.o, high: prevDay.h, low: prevDay.l, close: prevDay.c } : null });
   }
   const sliced = out.slice(-days);
   dailyCache = { at: Date.now(), data: sliced };
