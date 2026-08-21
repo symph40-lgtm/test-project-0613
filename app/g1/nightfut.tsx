@@ -127,23 +127,20 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { c: NightC
 function DailySvg({ days }: { days: KrxNightDay[] }) {
   const W = 720, H = 120, PL = 44, PR = 10, PT = 8, PB = 20;
   if (!days.length) return <p className="text-[13px] text-ink-48">KRX 정본 조회 불가 (KRX_ID 미설정 또는 응답 없음)</p>;
-  const refs = days.map((d) => d.day_close_ref).filter((v): v is number => v != null);
-  const lo = Math.min(...days.map((d) => d.low), ...refs), hi = Math.max(...days.map((d) => d.high), ...refs);
+  const lo = Math.min(...days.map((d) => d.low)), hi = Math.max(...days.map((d) => d.high));
   const y = (v: number) => PT + (1 - (v - lo) / Math.max(1e-9, hi - lo)) * (H - PT - PB);
   const bw = (W - PL - PR) / days.length;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full min-w-[480px]" role="img" aria-label="야간선물 일봉 1개월 (KRX 정본)">
       {days.map((d, i) => {
         const cx = PL + bw * i + bw / 2;
-        const up = (d.u1_pct ?? 0) >= 0;
-        const half = Math.max(3, bw * 0.44) / 2;
+        // [발주자 지적 8/21] 야간 세션 그래프는 세션(18:00~06:00) 안의 값만 — 색 = 야간 시가→종가 (주간 종가 개입 없음)
+        const up = d.close >= d.open;
         return (
           <g key={d.label_date}>
             <line x1={cx} y1={y(d.high)} x2={cx} y2={y(d.low)} stroke={up ? "#dc2626" : "#2563eb"} strokeWidth={1} />
             <rect x={cx - Math.max(1.5, bw * 0.22)} y={Math.min(y(d.open), y(d.close))} width={Math.max(3, bw * 0.44)}
               height={Math.max(1, Math.abs(y(d.open) - y(d.close)))} fill={up ? "#dc2626" : "#2563eb"} opacity={0.85} />
-            {/* [발주자 질문 8/21] u1 기준선 = 주간 종가 — 색(u1 부호)과 몸통(야간 시가→종가)이 어긋나 보이는 밤의 해석 눈금 */}
-            {d.day_close_ref != null ? <line x1={cx - half - 3} y1={y(d.day_close_ref)} x2={cx + half + 3} y2={y(d.day_close_ref)} stroke="#111" strokeWidth={1.2} strokeDasharray="2 1.5" /> : null}
             {/* [발주자 8/20 밤] 날짜 전 봉 표기 — 4일 간격 → 매 봉 (라벨 = T+1 규약 그대로) */}
             <text x={cx} y={H - 6} textAnchor="middle" fontSize={6.5} fill="#888">{`${Number(d.label_date.slice(5, 7))}/${Number(d.label_date.slice(8, 10))}`}</text>
           </g>
@@ -159,7 +156,7 @@ function DailySvg({ days }: { days: KrxNightDay[] }) {
 // 목적: 삼전·하닉이 밤 재료 대비 어느 정도로 움직이는지 (민감도) 육안 비교. 계열별 색 구별.
 // [발주자 8/21 수정] SOXX·나스닥 = 삼전·하닉과 같은 날짜(라벨일 당일 밤 미 세션)로 정렬 + 장/단 점선 구별
 const CMP_SERIES: { key: keyof CompareRow; label: string; color: string; w: number; dash?: string }[] = [
-  { key: "nf", label: "야간선물 06:00 마감", color: "#1d4ed8", w: 2.4 },
+  { key: "nf", label: "야간선물 내재갭 (주간 종가→06:00 마감)", color: "#1d4ed8", w: 2.4 },
   { key: "ss", label: "삼전 당일", color: "#dc2626", w: 1.6 },
   { key: "hx", label: "하닉 당일", color: "#7c3aed", w: 1.6 },
   { key: "soxx", label: "SOXX 당일 밤 (긴 점선)", color: "#ea580c", w: 1.3, dash: "7 3" },
@@ -248,9 +245,8 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} /></div>
       {curve.live && !v2Hourly?.length ? <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">T2 매시 재판정 마커는 기준점 섀도(shadow_v2)가 있는 밤부터 — 8/20 밤은 미생성(배포 경위), 첫 표시 8/21 밤. SOXX·나스닥100은 8/20 밤 23시 배포 이후 봉부터.</p> : null}
       <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">
-        과거 1개월 — 야간 세션 일봉 (KRX 정본, T+1 라벨 · 색 = u1 = 야간 종가 vs 그날 <b>주간 종가</b>: <span style={{ color: "#dc2626" }}>■ 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span> · 몸통 = 야간 시가→종가 · <span style={{ color: "#111" }}>┄ 주간 종가(u1 기준선)</span>)
+        과거 1개월 — 야간 세션 일봉 (KRX 정본, 18:00→06:00 세션 값만 · T+1 라벨 · <span style={{ color: "#dc2626" }}>■ 야간 시가→종가 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>)
       </p>
-      <p className="mb-1 text-[13px] md:text-[10px] text-ink-48">봉의 높이(지수 레벨)는 그날 주간장 등락을 그대로 안고 시작하므로, 전날 봉보다 높아도 u1이 음수(청)일 수 있습니다 — 색과 기준선으로 읽어 주세요.</p>
       <div className="overflow-x-auto"><DailySvg days={daily} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
         1시간 해상도 15일 조회는 야간 크론 축적 개시 후 제공 (10분봉 저장 = 저녁 8/18~ · 밤 구간은 크론 등록부터). 8/12~14 라이브 기록은 KRX 정본 소급 정정본.
@@ -263,6 +259,7 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       <div className="overflow-x-auto"><DailyCompareSvg rows={cmp} /></div>
       <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">
         정렬: 같은 날짜 — 야간선물 = 그 라벨일 새벽 마감 밤 / 삼전·하닉 = 라벨일 당일 등락 / SOXX·나스닥 = 라벨일 당일 밤(22:30 개장) 미 세션.
+        야간선물만 주간 종가 대비(내재갭)로 쓰는 이유: 이 그래프의 질문이 "밤이 다음날 시가에 무엇을 말하나"라서 — 시가갭 비교의 자는 종가 대비여야 함 (위 일봉은 세션 값만).
         축은 상위 92% 분위 기준 — 극단 대변동일은 가장자리에서 잘림. 삼전·하닉은 정규 종가 기준 (프리~애프터 확장은 NXT 이력 축적 후 교체 — 명기).
       </p>
     </div>
