@@ -59,7 +59,16 @@ function MtLine({ day }: { day: MtDay | undefined }) {
 }
 
 // 모바일 반응형 (발주자 8/19 §2): 좁은 화면은 라벨/값 세로 적층 + 값 줄바꿈 허용(break-words), md: 이상은 가로 배치
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value, stack }: { label: string; value: React.ReactNode; stack?: boolean }) {
+  // stack (발주자 지적 8/21 저녁): 라벨이 긴 행은 가로 배치 시 값이 세로로 쥐어짜짐 → 라벨 위·값 아래 전폭
+  if (stack) {
+    return (
+      <div className="flex flex-col gap-0.5 border-b border-hairline/40 py-1.5 text-[16px] md:text-[13px] last:border-b-0">
+        <span className="text-ink-48">{label}</span>
+        <span className="min-w-0 break-words text-ink-80">{value}</span>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-0.5 border-b border-hairline/40 py-1.5 text-[16px] md:flex-row md:items-baseline md:justify-between md:gap-3 md:text-[13px] last:border-b-0">
       <span className="text-ink-48 md:shrink-0">{label}</span>
@@ -281,8 +290,8 @@ export default async function G1Page() {
               const rb = vv.r_basket;
               const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
               {/* [발주자 8/20 밤 §8] "종목 바스켓" 명시 — 종목별 구성(공통 아님) 오독 방지 */}
-              return <Row label="트리거 조건 (DC-PM ≥60% · 종목 바스켓 |수익률|(해당 종목의 미 반도체 프리장 평균 — 종목별 구성) ≥0.5% · 3자 일치 · 경제성)"
-                value={<span className="text-[15px] md:text-[12px]">DC-PM {dc} · 바스켓 {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치" : "불일치"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과" : "미달"}</span>} />;
+              return <Row stack label="트리거 조건 — 점수와 별개의 AND 게이트 (DC-PM ≥60% · 종목 바스켓 |수익률| ≥0.5% · 3자 일치 · 경제성) — 하나라도 ✗면 등급은 점수대로, 베팅만 보류"
+                value={<span className="text-[15px] md:text-[12px]">DC-PM {dc} · 종목 바스켓(해당 종목 미 반도체 프리장 평균) {basketTxt} · 3자 {vv.three_way_agree == null ? "—" : vv.three_way_agree ? "일치 ✓" : "불일치 ✗"} · 경제성 {vv.economics_pass == null ? "—" : vv.economics_pass ? "통과 ✓" : "미달 ✗"}</span>} />;
             })() : null}
             {(() => {
               // §C 야간선물 흐름 줄 (8/18 DC-NF 첫 수집부터) — 미래 예측 서술 금지, 현재 상태·일관성만
