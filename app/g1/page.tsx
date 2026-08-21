@@ -286,8 +286,14 @@ export default async function G1Page() {
             {v ? (() => {
               const vv = v as { dc_pm?: number | null; r_basket?: number | null; three_way_agree?: boolean | null; economics_pass?: boolean | null };
               // [발주자 질문 8/21] DC-PM은 부호 없는 비율 — 어느 방향의 일관성인지는 바스켓 부호가 정한다 → 방향어 병기
-              const dcDir = vv.r_basket == null || Math.abs(vv.r_basket) < 0.05 ? "" : vv.r_basket > 0 ? " 상방 일관성" : " 하방 일관성";
-              const dc = vv.dc_pm != null ? `${Math.round(vv.dc_pm * 100)}%${dcDir}${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}` : "—";
+              // [발주자 8/21 추가] 양쪽 부호 모두 표기 — 동방향(= DC-PM) 먼저, 반대 방향 = 100% − DC-PM (보합 묶음 제외 비율)
+              const dc = (() => {
+                if (vv.dc_pm == null) return "—";
+                const same = Math.round(vv.dc_pm * 100), opp = 100 - same;
+                const up = vv.r_basket != null && vv.r_basket > 0, flat = vv.r_basket == null || Math.abs(vv.r_basket) < 0.05;
+                const pair = flat ? `${same}%` : up ? `상방 ${same}% · 하방 ${opp}%` : `하방 ${same}% · 상방 ${opp}%`;
+                return `${pair}${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}`;
+              })();
               // 용어 (발주자 8/18): 바스켓은 |수익률| 절대값 조건 — "|-1.28%| ≥ 0.5% 통과" 형식으로 표기
               const rb = vv.r_basket;
               const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
