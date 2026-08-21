@@ -285,7 +285,9 @@ export default async function G1Page() {
             {/* 트리거 조건 줄 (사용자 지적 8/15: DC-PM이 화면에 없어 DC-NF와 비대칭) — 저장값 표시만, 판정 무접촉 */}
             {v ? (() => {
               const vv = v as { dc_pm?: number | null; r_basket?: number | null; three_way_agree?: boolean | null; economics_pass?: boolean | null };
-              const dc = vv.dc_pm != null ? `${Math.round(vv.dc_pm * 100)}%${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}` : "—";
+              // [발주자 질문 8/21] DC-PM은 부호 없는 비율 — 어느 방향의 일관성인지는 바스켓 부호가 정한다 → 방향어 병기
+              const dcDir = vv.r_basket == null || Math.abs(vv.r_basket) < 0.05 ? "" : vv.r_basket > 0 ? " 상방 일관성" : " 하방 일관성";
+              const dc = vv.dc_pm != null ? `${Math.round(vv.dc_pm * 100)}%${dcDir}${vv.dc_pm >= 0.6 ? " ✓" : " ✗"}` : "—";
               // 용어 (발주자 8/18): 바스켓은 |수익률| 절대값 조건 — "|-1.28%| ≥ 0.5% 통과" 형식으로 표기
               const rb = vv.r_basket;
               const basketTxt = rb == null ? "—" : `|${pp(rb)}| ${Math.abs(rb) >= 0.5 ? "≥ 0.5% 통과" : "< 0.5% 미달"}`;
