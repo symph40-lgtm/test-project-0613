@@ -134,8 +134,10 @@ export async function fetchKrxNightDaily(days = 24): Promise<KrxNightDay[]> {
   const strt = (s0.getUTCFullYear() < Number(today.slice(0, 4)) ? `${today.slice(0, 4)}0101` : s0.toISOString().slice(0, 10).replace(/-/g, ""));
   const num = (v: string) => parseFloat(String(v).replace(/,/g, ""));
   const norm = (d: string) => d.replace(/\//g, "-");
-  const night = await fetchSeries(cookie, isu, "2", strt, today.replace(/-/g, ""));
-  const day = await fetchSeries(cookie, isu, "0", strt, today.replace(/-/g, ""));
+  // [발주자 지적 8/22] 야간 세션은 T+1 거래일 라벨(금요일 밤 = 월요일) — endDd를 오늘로 두면 직전 밤이 잘린다 → +7일 (KRX는 존재 행만 반환)
+  const endPlus = (() => { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 7); return d.toISOString().slice(0, 10).replace(/-/g, ""); })();
+  const night = await fetchSeries(cookie, isu, "2", strt, endPlus);
+  const day = await fetchSeries(cookie, isu, "0", strt, endPlus);
   const dayC = day.map((r) => ({ d: norm(r.TRD_DD), o: num(r.TDD_OPNPRC), h: num((r as unknown as { TDD_HGPRC: string }).TDD_HGPRC), l: num((r as unknown as { TDD_LWPRC: string }).TDD_LWPRC), c: num(r.TDD_CLSPRC) }))
     .filter((r) => isFinite(r.c) && r.c > 0).sort((a, b) => a.d.localeCompare(b.d));
   const out: KrxNightDay[] = [];
