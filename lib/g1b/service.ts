@@ -577,6 +577,24 @@ async function recordHourlyDriftTrack(hhmm: string, date: string, notes: string[
         exp = Math.round((base + adj) * 100) / 100;
       }
       sv2.hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, adj_pct: adj, expected_gap_pct: exp, reduced: true }];
+      // [v2.1 등재 8/22] 병행 매시 트랙 — 축소 성분 ⓐ' 다창·ⓕ·누적 부호 + ⓔ' 2등급 (shadow_v21.hourly)
+      try {
+        const sv21 = t2.shadow_v21 as Record<string, unknown> | undefined;
+        if (sv21 && !((sv21.hourly ?? []) as { t?: string }[]).some((h) => h.t?.slice(0, 2) === slot)) {
+          const { judgeDriftV21 } = await import("@/lib/g1a/t2plusV21");
+          const { fetchBasketWindows, fetchEventsTiered } = await import("@/lib/g1a/data");
+          const [bw, ev] = await Promise.all([fetchBasketWindows(symbol as "005930" | "000660"), fetchEventsTiered()]);
+          const dj21 = judgeDriftV21({ basket: bw, dcNf: null, nfCumSign: cp.nf_pct != null && Math.abs(cp.nf_pct) >= 0.1 ? Math.sign(cp.nf_pct) : 0, dcPm: null, basketSign: 0, p1: { r30: null, rSess: null }, events: ev, macro });
+          const b21 = sv21.base_stock_pct as number | undefined, be21 = sv21.beta as number | undefined, sg21 = sv21.sigma_used as number | undefined;
+          let a21: number | null = null, e21: number | null = null;
+          if (b21 != null && be21 != null && sg21 != null) {
+            const raw = dj21.dir === "중립" ? 0 : (dj21.dir === "상방" ? 1 : -1) * dj21.conf * V2.CONF_FULL_ADJ_PCT * be21;
+            const cap = V2.DRIFT_CAP_SIGMA * sg21;
+            a21 = Math.round(Math.max(-cap, Math.min(cap, raw)) * 100) / 100; e21 = Math.round((b21 + a21) * 100) / 100;
+          }
+          sv21.hourly = [...((sv21.hourly ?? []) as unknown[]), { t: hhmm, dir: dj21.dir, conf: dj21.conf, nf_pct: cp.nf_pct, adj_pct: a21, expected_gap_pct: e21, reduced: true }];
+        }
+      } catch { /* v2.1 트랙 결측 허용 */ }
       await admin.from("g1a_days").update({ t2 }).eq("date", sessionNight).eq("symbol", symbol);
       notes.push(`${symbol} v2 매시 트랙 ${slot}시 ${dj.dir} conf ${dj.conf} nf ${cp.nf_pct ?? "—"}`);
     } catch { /* 트랙 결측 허용 */ }

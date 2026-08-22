@@ -328,3 +328,77 @@ export async function fetchMacroEveningDelta(): Promise<{ dTnxBp: number | null;
   const [t, f, w] = await Promise.all([delta("^TNX", true), delta("KRW=X", false), delta("CL=F", false)]);
   return { dTnxBp: t, dFxPct: f, dWtiPct: w };
 }
+
+// ── T2+ v2.1 성분 조달 (발주자 등재 지시 8/22 — 변화율·기울기·갭만, 레벨 금지) ──
+// ⓐ' 바스켓 3창(30분/60분/프리마켓 세션) 변화율 + 2차 가속(최근30분 − 직전30분) + 갭(프리 시작가 vs 전일 최종가 — 프리·포스트 포함 차트의 직전 봉 근사, 명기)
+export async function fetchBasketWindows(symbol: G1ASymbol): Promise<{ r30: number | null; r60: number | null; rSess: number | null; gap: number | null; accel2: number | null }> {
+  const cfg = G1A_CONFIG.basket[symbol];
+  const acc = { r30: 0, r60: 0, rSess: 0, r30prev: 0, gap: 0 };
+  let got = 0, gapGot = 0;
+  const anchor = new Date(kstDate() + "T08:00:00Z");   // 미 프리마켓 시작 17:00 KST
+  for (const [tk, w] of Object.entries(cfg.weights)) {
+    const bars = await chart5m(tk, 2, true);
+    if (bars.length < 14) continue;
+    const div = tk === "SOXL" ? cfg.soxlDiv : 1;
+    const last = bars[bars.length - 1];
+    const at = (minAgo: number) => { const cut = last.ts.getTime() - minAgo * 60_000; const win = bars.filter((b) => b.ts.getTime() >= cut); return win.length >= 2 ? win[0].close : null; };
+    const c30 = at(30), c60 = at(60);
+    const sess = bars.filter((b) => b.ts >= anchor);
+    const sessOpen = sess.length >= 2 ? sess[0].close : null;
+    const prevBar = [...bars].reverse().find((b) => b.ts < anchor) ?? null;
+    const pct = (from: number | null, to: number) => (from ? ((to / from - 1) * 100) / div : null);
+    const r30 = pct(c30, last.close), r60 = pct(c60, last.close), rSess = pct(sessOpen, last.close);
+    const r30prev = c60 != null && c30 != null ? ((c30 / c60 - 1) * 100) / div : null;
+    if (r30 == null || r60 == null || rSess == null || r30prev == null) continue;
+    acc.r30 += w * r30; acc.r60 += w * r60; acc.rSess += w * rSess; acc.r30prev += w * r30prev; got += w;
+    const gap = prevBar && sessOpen ? ((sessOpen / prevBar.close - 1) * 100) / div : null;
+    if (gap != null) { acc.gap += w * gap; gapGot += w; }
+  }
+  if (got < 0.5) return { r30: null, r60: null, rSess: null, gap: null, accel2: null };
+  const r2 = (v: number) => Math.round((v / got) * 100) / 100;
+  return { r30: r2(acc.r30), r60: r2(acc.r60), rSess: r2(acc.rSess), gap: gapGot > 0.5 ? Math.round((acc.gap / gapGot) * 100) / 100 : null, accel2: Math.round(((acc.r30 - acc.r30prev) / got) * 100) / 100 };
+}
+
+// ⓓ' P1 유럽 반도체 다창 — 현지 거래소 5분봉(ASML.AS·IFX.DE·STMPA.PA, 8/22 실측 가용): 세션 변화율 + 종반(최근) 30분
+export async function fetchP1Windows(): Promise<{ r30: number | null; rSess: number | null }> {
+  const out: { r30: number; rSess: number }[] = [];
+  const anchor = new Date(kstDate() + "T07:00:00Z");   // 유럽 개장 16:00 KST (CEST 기준 — 동절기 17:00, 명기)
+  for (const tk of ["ASML.AS", "IFX.DE", "STMPA.PA"]) {
+    const bars = await chart5m(tk, 2);
+    if (bars.length < 8) continue;
+    const last = bars[bars.length - 1];
+    const sess = bars.filter((b) => b.ts >= anchor);
+    const cut = last.ts.getTime() - 30 * 60_000;
+    const w30 = bars.filter((b) => b.ts.getTime() >= cut);
+    if (sess.length < 2 || w30.length < 2) continue;
+    out.push({ r30: (last.close / w30[0].close - 1) * 100, rSess: (last.close / sess[0].close - 1) * 100 });
+  }
+  if (!out.length) return { r30: null, rSess: null };
+  const avg = (k: "r30" | "rSess") => Math.round((out.reduce((a, b) => a + b[k], 0) / out.length) * 100) / 100;
+  return { r30: avg("r30"), rSess: avg("rSess") };
+}
+
+// ⓔ' 이벤트 2등급 자동 감지 — 1급: 기존 fetchEventTonight(FOMC·CPI·고용·워치리스트 실적) + 바스켓 구성·삼전·하닉·AAPL·TSM 실적 /
+// 2급: FRED 발표 캘린더 ★3 이상 2차 지표(PCE·GDP·실업수당·ISM 등) — 수동 입력 없음
+export async function fetchEventsTiered(): Promise<{ tier1: string | null; tier2: string[] }> {
+  const today = kstDate();
+  let tier1 = await fetchEventTonight();
+  if (!tier1) {
+    try {
+      const res = await yf.quote(["NVDA", "MU", "AMD", "SOXL", "005930.KS", "000660.KS", "AAPL", "TSM"]) as unknown;
+      for (const x of (Array.isArray(res) ? res : [res]) as Record<string, unknown>[]) {
+        const ts = x.earningsTimestamp ?? x.earningsTimestampStart;
+        const d = ts instanceof Date ? ts : typeof ts === "number" ? new Date(ts * (ts < 1e12 ? 1000 : 1)) : null;
+        if (d && d.toISOString().slice(0, 10) === today) { tier1 = `실적 ${String(x.symbol)}`; break; }
+      }
+    } catch { /* 결측 허용 */ }
+  }
+  const tier2: string[] = [];
+  try {
+    const { fetchUpcomingUsEvents } = await import("@/lib/calendar/fred");
+    for (const e of await fetchUpcomingUsEvents(1)) {
+      if (e.date === today && e.stars >= 3 && !/CPI|소비자물가|고용|FOMC|비농업/.test(e.name)) tier2.push(e.name);
+    }
+  } catch { /* FRED 실패 = 2급 결측 */ }
+  return { tier1, tier2 };
+}

@@ -139,6 +139,23 @@ async function tryShadowV2(symbol: G1ASymbol, t2u: Record<string, unknown>, f: T
   t2u.shadow_v2 = buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma: sigmaV2, volRatio: null, thetaLow: 2.5 });
 }
 
+// [v2.1 등재 8/22] T2+ v2.1 섀도 생성 — v2와 병행(base 동일·drift 성분 개정). 본판정 무접촉, v2 기록과 분리.
+async function tryShadowV21(symbol: G1ASymbol, t2u: Record<string, unknown>, f: T2Features, hhmm: string): Promise<void> {
+  const nfoV2 = t2u.nf as { level?: { pct: number; nf_level: number; beta_mkt: number }; dc_nf?: number | null } | undefined;
+  if (!nfoV2?.level || hhmm < "19:35" || t2u.shadow_v21) return;
+  const { judgeDriftV21 } = await import("./t2plusV21");
+  const { buildShadowV2 } = await import("./t2plusV2");
+  const { fetchBasketWindows, fetchP1Windows, fetchEventsTiered, fetchMacroEveningDelta } = await import("./data");
+  const [basket, p1, events, macro] = await Promise.all([fetchBasketWindows(symbol), fetchP1Windows(), fetchEventsTiered(), fetchMacroEveningDelta()]);
+  const drift = judgeDriftV21({
+    basket, dcNf: nfoV2.dc_nf ?? null, nfCumSign: Math.abs(nfoV2.level.pct) >= 0.1 ? Math.sign(nfoV2.level.pct) : 0,
+    dcPm: f.F21_dcpm, basketSign: Math.abs(f.F21_basket ?? 0) >= 0.1 ? Math.sign(f.F21_basket!) : 0, p1, events, macro,
+  });
+  const { G1B_CONFIG } = await import("@/lib/g1b/config");
+  const sigma = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"][events.tier1 ? "event" : "normal"];
+  t2u.shadow_v21 = { ...buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma, volRatio: null, thetaLow: 2.5 }), version: "v2.1", inputs: { basket, p1, events } };
+}
+
 // ── T2 사이클 (§5) ──
 async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string[]> {
   const notes: string[] = [];
@@ -272,6 +289,7 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
         try {
           await tryShadowV2(symbol, t2u, f, ctx.eventTonight, hhmm);
         } catch { /* v2 결측 허용 — 본판정 무접촉 */ }
+        try { await tryShadowV21(symbol, t2u, f, hhmm); } catch { /* v2.1 결측 허용 */ }
       }
       const { t2Action, phaseTag, gradeLabel } = await import("@/lib/g1/action");
       const { t2Grade } = await import("./score");
@@ -367,12 +385,13 @@ async function runT2(date: string, hhmm: string, hhmmss: string): Promise<string
     }
     // [발주 D — 경위 보완 8/20 밤] v2 캐치업: 배포·일시 오류로 판정 창 내 shadow_v2가 못 만들어진 채
     // T2가 먼저 확정된 경우(8/20 실사례: 확정 19:45:15 < 배포 19:47 → 미생성), t2End 전이면 여기서 생성.
-    if (t2.trigger_type && hhmm <= W.t2End && !(t2 as Record<string, unknown>).shadow_v2) {
+    if (t2.trigger_type && hhmm <= W.t2End && (!(t2 as Record<string, unknown>).shadow_v2 || !(t2 as Record<string, unknown>).shadow_v21)) {
       try {
         const f2 = await collectT2Features(symbol);
         const ctx2 = await buildAbstainCtx(f2);
         await tryShadowV2(symbol, t2 as Record<string, unknown>, f2, ctx2.eventTonight, hhmm);
-        if ((t2 as Record<string, unknown>).shadow_v2) notes.push(`${symbol} v2 캐치업 생성 (${hhmm})`);
+        await tryShadowV21(symbol, t2 as Record<string, unknown>, f2, hhmm);
+        if ((t2 as Record<string, unknown>).shadow_v2) notes.push(`${symbol} v2/v2.1 캐치업 (${hhmm})`);
       } catch { /* 결측 허용 */ }
     }
     row.t2 = t2;
@@ -436,6 +455,22 @@ async function runLabels(): Promise<string[]> {
         };
       }
     } catch { /* v2 채점 결측 허용 */ }
+    // [v2.1 등재 8/22] 동일 이중 채점 — labels.v21 (v2와 분리 집계)
+    try {
+      const sv21 = (row.t2 as unknown as Record<string, unknown>).shadow_v21 as { expected_gap_pct?: number; base_pct?: number; drift?: { dir?: string }; late?: boolean } | undefined;
+      if (sv21?.expected_gap_pct != null && L1 != null) {
+        const { createAdminClient } = await import("@/lib/supabase/admin");
+        const gb = await createAdminClient().from("g1b_days").select("night").eq("date", d1.date).eq("symbol", symbol).maybeSingle();
+        const nfClose = (gb.data?.night as { night_fut?: { v?: number | null; late_arrival?: boolean } } | null)?.night_fut;
+        const path = nfClose?.v != null && !nfClose.late_arrival && sv21.base_pct != null ? nfClose.v * 100 - sv21.base_pct : null;
+        const dd = sv21.drift?.dir ?? "중립";
+        (row.labels as unknown as Record<string, unknown>).v21 = {
+          te_pct: Math.round(Math.abs(L1 - sv21.expected_gap_pct) * 100) / 100,
+          drift_hit: path == null || dd === "중립" ? null : Math.abs(path) < 0.15 ? null : (dd === "상방") === (path > 0),
+          nf_path_pct: path != null ? Math.round(path * 100) / 100 : null, late: sv21.late === true,
+        };
+      }
+    } catch { /* v2.1 채점 결측 허용 */ }
     await upsertDay(row);
     notes.push(`${symbol} ${row.date} 라벨 (L1' ${row.labels.L1p ?? "—"}%)`);
   }

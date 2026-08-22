@@ -232,7 +232,14 @@ export default async function G1Page() {
             };
           })
           .sort((p, q) => minOfH(p.t) - minOfH(q.t));
-        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v2Hourly={v2Hourly} />;
+        // [v2.1 등재 8/22] v2.1 예상갭 마커 (청록 ◇)
+        const v21Marks = (["005930", "000660"] as const).map((s) => {
+          const ar = aRows.find((x) => x.symbol === s && x.date === sessionNight);
+          const sv = (ar?.t2 as { shadow_v21?: { t?: string; expected_gap_pct?: number | null } } | null)?.shadow_v21;
+          const b = betaOf[s] ?? 1.4;
+          return { name: s === "005930" ? "삼" : "하", t: sv?.t ?? "19:45", idxPct: sv?.expected_gap_pct != null && b > 0 ? Math.round((sv.expected_gap_pct / b) * 100) / 100 : null };
+        });
+        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v21Marks={v21Marks} v2Hourly={v2Hourly} />;
       })()}
 
       {/* A1: G1A T2 — 맨 위 */}
@@ -350,6 +357,15 @@ export default async function G1Page() {
               const votes = (dr?.components ?? []).filter((c) => c.vote !== 0).map((c) => `${c.key}${c.vote > 0 ? "↑" : "↓"}`).join(" ");
               return <Row label={`T2+ v2 (챌린저) — ${v2.grade ?? "—"}`}
                 value={<span className="text-[14px] md:text-[11px]">base {pp(v2.base_stock_pct)} + drift {dr?.invalidated ? `무효화(${dr.invalidated})` : `${dr?.dir ?? "중립"}·확신 ${Math.round((dr?.conf ?? 0) * 100)}%`} → 예상갭 {pp(v2.expected_gap_pct)}{votes ? ` (${votes})` : ""}{v2.confidence_vol == null ? " · 거래량 배율 축적 중(강등 미적용)" : ""}</span>} />;
+            })()}
+            {(() => {
+              // [v2.1 등재 8/22] 병행 챌린저 줄 — v2 바로 아래, 성분 개정판 (ⓐ' 다창+갭·ⓓ' 다창·ⓔ' 2등급)
+              const v21 = (r.t2 as { shadow_v21?: { base_stock_pct?: number; drift?: { dir?: string; conf?: number; invalidated?: string | null; components?: { key: string; vote: number }[] }; expected_gap_pct?: number; grade?: string; inputs?: { events?: { tier2?: string[] } } } } | null)?.shadow_v21;
+              if (!v21) return <Row label="T2+ v2.1 (성분 개정 챌린저 — 8/22 등재)" value={r.date <= "2026-08-22" ? "첫 판정 8/24(월) 19:45" : "19:35 판정 대기"} />;
+              const dr = v21.drift;
+              const votes = (dr?.components ?? []).filter((c) => c.vote !== 0).map((c) => `${c.key}${c.vote > 0 ? "↑" : "↓"}`).join(" ");
+              return <Row label={`T2+ v2.1 (챌린저·성분 개정) — ${v21.grade ?? "—"}`}
+                value={<span className="text-[14px] md:text-[11px]">base {pp(v21.base_stock_pct)} + drift {dr?.invalidated ? `무효화(${dr.invalidated})` : `${dr?.dir ?? "중립"}·확신 ${Math.round((dr?.conf ?? 0) * 100)}%`} → 예상갭 {pp(v21.expected_gap_pct)}{votes ? ` (${votes})` : ""}{v21.inputs?.events?.tier2?.length ? ` · 2급 ${v21.inputs.events.tier2.join("·")}` : ""}</span>} />;
             })()}
             {(() => {
               // [발주자 검수 8/20 밤 §2] 화면 정리: v2가 챌린저 정본 줄 — 구 T2+ 섀도(v1)·모자이크는 접힘으로 강등 (기록·집계는 분리 보존)
