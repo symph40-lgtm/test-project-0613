@@ -33,7 +33,8 @@ export type NightCurve = {
 // [발주자 8/22] 같은 화면에 주간 선물 세션(09:00~15:45) 10분 경로 병기 — 각 세션의 **공식 기준**으로:
 //   주간 = 전일 주간 정산가 대비 % (KRX·KIS 공식; 전날 야간 종가 아님) · 야간 = 당일 주간 정산가 대비 % (KIS CM·KRX u1)
 //   기준이 다르므로 주간 구간은 왼쪽에 별도 축(자기 레인지). KIS 선물 10분봉(8/22 실측)
-export type DayPath = { bars: { t: string; pct: number }[]; baseLabel: string };
+// [발주자 8/22 추가] 같은 주간 구간에 두 번째 선: 전날 밤(직전 야간 세션) 종가 대비 % — 두 기준을 나란히
+export type DayPath = { bars: { t: string; pct: number }[]; baseLabel: string; bars2?: { t: string; pct: number }[]; baseLabel2?: string };
 
 // 범례 색 견본 (발주자 지적 8/20 밤: "검정=·주황=" 텍스트만으로는 어떤 선인지 불명 — 실제 선 모양·색을 그대로 표시)
 function LegendChip({ color, label, dash, dot, bold, textColor }: { color: string; label: string; dash?: string; dot?: boolean; bold?: boolean; textColor?: string }) {
@@ -67,7 +68,7 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
   const minDay = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
   const xD = (m: number) => PL + ((m - D0) / (D1 - D0)) * DAY_W;
   // 주간 전용 y축 (자기 레인지) — 기준 = 전일 주간 정산가
-  const vmaxD = hasDay ? Math.max(0.5, ...dayPath!.bars.map((b) => Math.abs(b.pct))) * 1.15 : 1;
+  const vmaxD = hasDay ? Math.max(0.5, ...dayPath!.bars.map((b) => Math.abs(b.pct)), ...(dayPath!.bars2 ?? []).map((b) => Math.abs(b.pct))) * 1.15 : 1;
   const yD = (v: number) => PT + (1 - (v + vmaxD) / (2 * vmaxD)) * (H - PT - PB);
   const pts: { m: number; v: number; kind: string }[] = [
     ...c.bars.map((b) => ({ m: minOf(b.t), v: b.pct, kind: "bar" })),
@@ -103,6 +104,7 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
             {[vmaxD, 0, -vmaxD].map((v) => <text key={"dy" + v} x={PL - 4} y={yD(v) + 3} textAnchor="end" fontSize={8} fill="#7c2d12">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>)}
             <path d={dPath} fill="none" stroke="#7c2d12" strokeWidth={1.5} strokeLinejoin="round" />
             {bs.map((b) => <circle key={"d" + b.t} cx={xD(minDay(b.t))} cy={yD(b.pct)} r={1.5} fill="#7c2d12" />)}
+            {dayPath!.bars2?.length ? <path d={"M" + dayPath!.bars2.map((b) => `${xD(minDay(b.t)).toFixed(1)},${yD(b.pct).toFixed(1)}`).join(" L")} fill="none" stroke="#d97706" strokeWidth={1.4} strokeDasharray="4 2" strokeLinejoin="round" /> : null}
             <text x={PL + 2} y={PT + 8} fontSize={7.5} fill="#7c2d12">주간 축: {dayPath!.baseLabel} 대비</text>
             <text x={PL + 2} y={H - 8} fontSize={8} fill="#888">주간 09:00</text>
             <text x={PL + DAY_W - 2} y={H - 8} textAnchor="end" fontSize={8} fill="#888">15:45 마감</text>
@@ -263,7 +265,14 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
     if (kb.length) {
       const prevDay = daily.map((z) => z.day).filter((d): d is NonNullable<typeof d> => d != null && d.date < curve.sessionNight).sort((a, b) => a.date.localeCompare(b.date)).pop() ?? null;
       const base = prevDay?.close ?? kb[0].px;
-      dayPath = { bars: kb.map((b) => ({ t: b.t, pct: Math.round((b.px / base - 1) * 10000) / 100 })), baseLabel: prevDay ? `전일(${prevDay.date.slice(5)}) 주간 정산가 ${prevDay.close.toFixed(2)}` : "첫 봉(정산가 결측)" };
+      // 두 번째 기준 = 직전 야간 세션 종가 (라벨 = 세션 밤짜 = 그날 새벽 06:00 마감)
+      const prevNight = daily.find((z) => z.label_date === curve.sessionNight) ?? null;
+      dayPath = {
+        bars: kb.map((b) => ({ t: b.t, pct: Math.round((b.px / base - 1) * 10000) / 100 })),
+        baseLabel: prevDay ? `전일(${prevDay.date.slice(5)}) 주간 정산가 ${prevDay.close.toFixed(2)}` : "첫 봉(정산가 결측)",
+        bars2: prevNight ? kb.map((b) => ({ t: b.t, pct: Math.round((b.px / prevNight.close - 1) * 10000) / 100 })) : undefined,
+        baseLabel2: prevNight ? `전날 밤 야간 종가 ${prevNight.close.toFixed(2)}` : undefined,
+      };
     }
   } catch { /* 주간 경로 결측 허용 */ }
   // [발주자 8/21 새벽] 20일 비교 데이터 — 정렬: 라벨일 L 기준. 야간선물 u1(L) = L 새벽에 끝난 밤 /
@@ -299,6 +308,7 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] md:text-[11px] text-ink-48">
         <span>{last ? `최신 ${last.t} ${last.pct >= 0 ? "+" : ""}${last.pct.toFixed(2)}%` : "18:05 첫 봉 대기"}</span>
         {dayPath ? <LegendChip color="#7c2d12" dot label="주간 선물 10분봉 09:00~15:45 (왼쪽 구간 · 전일 주간 정산가 대비 — 별도 축)" /> : null}
+        {dayPath?.bars2 ? <LegendChip color="#d97706" dash="4 2" label={`주간 선물 — ${dayPath.baseLabel2} 대비 (점선, 같은 축)`} /> : null}
         <LegendChip color="#1d4ed8" dot label="10분봉(야간)" />
         <LegendChip color="#059669" dot label="체크포인트 23:40/03:00" />
         <LegendChip color="#dc2626" dot label="06:00 마감" />
