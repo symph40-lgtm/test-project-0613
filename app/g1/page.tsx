@@ -185,7 +185,9 @@ export default async function G1Page() {
         const cand = hhK >= "18:00" ? todayK : hhK < "06:00" ? prevBiz(todayK) : null;
         const candBars = cand ? ((aRows.find((r) => r.date === cand)?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? []) : [];
         const live = cand != null && candBars.length > 0;
-        const sessionNight = live ? cand! : (rows.find((r) => (r.night as Record<string, unknown> | null)?.night_fut)?.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? aLatest ?? todayK;
+        // [발주자 지적 8/22 아침] 폴백 = "10분봉이 있는 최신 세션" — 종전(06:00 마감값이 저장된 행)은 주말(금요일 밤은 토요일 마감 저장 경로 없음)에 한 세션 전으로 밀렸다
+        const latestWithBars = aRows.find((r) => (((r.t2 as { nf?: { bars?: unknown[] } } | null)?.nf?.bars ?? []).length > 0))?.date ?? null;
+        const sessionNight = live ? cand! : latestWithBars ?? (rows.find((r) => (r.night as Record<string, unknown> | null)?.night_fut)?.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? aLatest ?? todayK;
         const bRow = rows.find((r) => ((r.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? "") === sessionNight);
         const bars = live ? candBars : ((aRows.find((r) => r.date === sessionNight)?.t2 as { nf?: { bars?: { t: string; pct: number }[] } } | null)?.nf?.bars ?? []);
         const watch = (bRow?.night as Record<string, unknown> | null)?.watch as { cp?: Record<string, { t: string; nf_pct: number | null }> } | undefined;
@@ -194,7 +196,9 @@ export default async function G1Page() {
         const curve: NightCurve = {
           sessionNight, live,
           bars, cp2340: watch?.cp?.["2340"] ?? null, cp0300: watch?.cp?.["0300"] ?? null,
-          closePct: !live && nfo?.v != null ? nfo.v * 100 : null, closeT: (nfo as { t?: string } | undefined)?.t ?? "06:00",
+          // 마감 폴백: night_fut 미저장 세션(금요일 밤 등)은 06:00 이후 첫 봉을 마감으로 (06:10 수집 창 확장 8/22)
+          closePct: !live ? (nfo?.v != null ? nfo.v * 100 : (bars.find((b) => b.t >= "06:00" && b.t < "12:00")?.pct ?? null)) : null,
+          closeT: nfo?.v != null ? ((nfo as { t?: string } | undefined)?.t ?? "06:00") : (bars.find((b) => b.t >= "06:00" && b.t < "12:00")?.t ?? "06:00"),
           coverage: cov?.kind ?? null,
         };
         // [발주자 검수 8/20 밤 §1] T2 판정값 마커 — 세션 밤의 저녁 번역(잔여갭식 시가 예상) ÷ β → 지수축 병기
@@ -275,9 +279,17 @@ export default async function G1Page() {
                     {dualBasis({ afterPct: v.expected_residual_gap ?? null, closePct: cv.openExp_resid })}
                     {cv.regClose ? <span className="text-ink-48"> · 기준 {cv.regClose.toLocaleString()}(종가)</span> : null}
                     {sig ? <span className="text-ink-48"> ± {sig.toFixed(2)}%{divergent ? " (이견 밤 — 실오차 더 클 수 있음)" : " (G1B σ 준용)"}</span> : null}</>} />
-                <Row label="교차 검증 — 야간선물 β환산" value={<>{cv.openExp_nf != null ? <>
+                {/* [발주자 지적 8/22 아침] 환산 사슬을 드러낸다: 19:35 절단 지수값 × β = 종가比 → 애프터比 (애프터가 종가보다 얼마나 떨어진 채 시작했는지가 둘의 차이) */}
+                <Row label="교차 검증 — 야간선물 β환산 (19:35 절단 × β = 종가比 → 애프터比 환산)" value={<>{cv.openExp_nf != null ? <>
+                    {(() => { const lv = t2x?.nf?.level as { pct?: number; beta_mkt?: number } | undefined; return lv?.pct != null ? <span className="text-ink-48">지수 {pp(lv.pct)} × β{(lv.beta_mkt ?? 0).toFixed(2)} = </span> : null; })()}
                     {dualBasis({ afterPct: toAfterBasis(cv.openExp_nf, r.t2?.entry_px_virtual ?? null, cv.regClose), closePct: cv.openExp_nf })}
                     {cv.divergence_pp != null ? <span className="text-ink-48"> · 괴리 {cv.divergence_pp}%p{divergent ? " — 시장 간 이견, 불확실성 높은 밤" : ""}</span> : null}</> : "야간선물 19:35 절단값 대기"}</>} />
+                {/* [발주자 지시 8/22 아침] 상충이면 상충하는 값을 같은 자(종가比 시가 예상)로 나란히 비교 */}
+                {cv.conflict ? <Row stack label="⚠ 상충 비교 — 같은 자(정규 종가 대비 내일 시가 예상)로 나란히"
+                  value={<span className="text-[15px] md:text-[12px]">
+                    룰 <b>{cv.ruleSign > 0 ? "상방" : cv.ruleSign < 0 ? "하방" : "무방향"}</b> (점수 {v.gap_score ?? "—"}) · NXT 경로 <b>{pp(cv.openExp_resid)}</b> · 야간선물 β환산 <b>{pp(cv.openExp_nf)}</b>
+                    {" → 갈린 쌍: "}{cv.pairs.join(" / ")}{cv.divergence_pp != null ? ` (NXT–야간선물 괴리 ${cv.divergence_pp}%p)` : ""}
+                  </span>} /> : null}
               </>);
             })() : null}
             {/* 기준가 라벨 명시 (발주자 8/18): 주식수 오독 방지 — "기준가(19:40 NXT 주가)" */}

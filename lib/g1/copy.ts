@@ -189,7 +189,10 @@ export function nfSessionMorning(a: { sessionNight: string | null; cutT: string 
 
 // 저녁 T2 카드 흐름 줄 머리: "야간선물(8/19밤 진행중): 19:35 현재 +2.73%" — 전날 밤 값과 혼동 차단
 export function nfSessionEveningHead(a: { sessionNight: string; lastT: string; cumPct: number; closed: boolean }): string {
-  return `야간선물(${mdOf(a.sessionNight)}밤${a.closed ? "" : " 진행중"}): ${a.lastT} 현재 ${sgnP(a.cumPct)}`;
+  // [발주자 질문 8/22] 새벽 시각(00~09시)은 세션 밤짜의 익일 — "8/21밤: 8/22 05:50 현재"로 날짜를 병기해 혼동 차단
+  const dawn = a.lastT < "12:00";
+  const next = (() => { const d = new Date(a.sessionNight + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+  return `야간선물(${mdOf(a.sessionNight)}밤${a.closed ? "" : " 진행중"}): ${dawn ? `${mdOf(next)} ` : ""}${a.lastT} ${a.closed && dawn && a.lastT >= "06:00" ? "마감" : "현재"} ${sgnP(a.cumPct)}`;
 }
 
 // ── 기준점 통일 환산 + 상충 플래그 v2 (발주자 판정 8/19 밤) ──
