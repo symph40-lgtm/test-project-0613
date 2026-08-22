@@ -30,8 +30,10 @@ export type NightCurve = {
   bars: Bar[]; cp2340: Cp; cp0300: Cp; closePct: number | null; closeT: string | null;
   coverage: string | null;
 };
-// [발주자 8/22] 같은 화면에 주간 선물 세션(09:00~15:45) 10분 경로 병기 — 주간 종가 = 0% 기준 (야간 10분봉과 동일 자). KIS 선물 10분봉(8/22 실측)
-export type DayPath = { bars: { t: string; pct: number }[]; close: number };
+// [발주자 8/22] 같은 화면에 주간 선물 세션(09:00~15:45) 10분 경로 병기 — 각 세션의 **공식 기준**으로:
+//   주간 = 전일 주간 정산가 대비 % (KRX·KIS 공식; 전날 야간 종가 아님) · 야간 = 당일 주간 정산가 대비 % (KIS CM·KRX u1)
+//   기준이 다르므로 주간 구간은 왼쪽에 별도 축(자기 레인지). KIS 선물 10분봉(8/22 실측)
+export type DayPath = { bars: { t: string; pct: number }[]; baseLabel: string };
 
 // 범례 색 견본 (발주자 지적 8/20 밤: "검정=·주황=" 텍스트만으로는 어떤 선인지 불명 — 실제 선 모양·색을 그대로 표시)
 function LegendChip({ color, label, dash, dot, bold, textColor }: { color: string; label: string; dash?: string; dot?: boolean; bold?: boolean; textColor?: string }) {
@@ -60,17 +62,20 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
   const W = 720, H = 150, PL = 44, PR = 84, PT = 12, PB = 22;
   // [발주자 8/22] 왼쪽 구간 = 주간 선물 세션(09:00~15:45) 10분 경로 — 시간축이 다르므로 별도 눈금(주간 09:00 / 15:45 마감 / 야간 18:00)
   const hasDay = Boolean(dayPath?.bars.length);
-  const DAY_W = hasDay ? 150 : 0, GAP_W = hasDay ? 12 : 0;
+  const DAY_W = hasDay ? 150 : 0, GAP_W = hasDay ? 40 : 0;   // GAP에 야간 축 눈금이 들어간다
   const D0 = 9 * 60, D1 = 15 * 60 + 45;
   const minDay = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
   const xD = (m: number) => PL + ((m - D0) / (D1 - D0)) * DAY_W;
+  // 주간 전용 y축 (자기 레인지) — 기준 = 전일 주간 정산가
+  const vmaxD = hasDay ? Math.max(0.5, ...dayPath!.bars.map((b) => Math.abs(b.pct))) * 1.15 : 1;
+  const yD = (v: number) => PT + (1 - (v + vmaxD) / (2 * vmaxD)) * (H - PT - PB);
   const pts: { m: number; v: number; kind: string }[] = [
     ...c.bars.map((b) => ({ m: minOf(b.t), v: b.pct, kind: "bar" })),
     ...(c.cp2340?.nf_pct != null ? [{ m: minOf(c.cp2340.t), v: c.cp2340.nf_pct, kind: "cp" }] : []),
     ...(c.cp0300?.nf_pct != null ? [{ m: minOf(c.cp0300.t), v: c.cp0300.nf_pct, kind: "cp" }] : []),
     ...(c.closePct != null ? [{ m: minOf(c.closeT ?? "06:00"), v: c.closePct, kind: "close" }] : []),
   ].sort((a, b) => a.m - b.m);
-  const vs = [...pts.map((p) => p.v), ...c.bars.flatMap((b) => [b.soxx, b.nq]).filter((v): v is number => v != null), ...(dayPath?.bars.map((b) => b.pct) ?? [])];
+  const vs = [...pts.map((p) => p.v), ...c.bars.flatMap((b) => [b.soxx, b.nq]).filter((v): v is number => v != null)];
   const vmax = Math.max(0.5, ...vs.map(Math.abs)) * 1.15;
   const NX0 = PL + DAY_W + GAP_W;   // 야간 구간 시작 x
   const x = (m: number) => NX0 + ((m - X0) / (X1 - X0)) * (W - NX0 - PR);
@@ -90,15 +95,18 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
       <line x1={PL} y1={y(0)} x2={W - PR} y2={y(0)} stroke="#ddd" strokeWidth={1} />
       {hasDay ? (() => {
         const bs = dayPath!.bars;
-        const dPath = "M" + bs.map((b) => `${xD(minDay(b.t)).toFixed(1)},${y(b.pct).toFixed(1)}`).join(" L");
+        const dPath = "M" + bs.map((b) => `${xD(minDay(b.t)).toFixed(1)},${yD(b.pct).toFixed(1)}`).join(" L");
         return (
           <g>
             <rect x={PL} y={PT} width={DAY_W} height={H - PT - PB} fill="#f5f5f4" opacity={0.5} />
+            <line x1={PL} y1={yD(0)} x2={PL + DAY_W} y2={yD(0)} stroke="#ccc" strokeWidth={1} />
+            {[vmaxD, 0, -vmaxD].map((v) => <text key={"dy" + v} x={PL - 4} y={yD(v) + 3} textAnchor="end" fontSize={8} fill="#7c2d12">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>)}
             <path d={dPath} fill="none" stroke="#7c2d12" strokeWidth={1.5} strokeLinejoin="round" />
-            {bs.map((b) => <circle key={"d" + b.t} cx={xD(minDay(b.t))} cy={y(b.pct)} r={1.5} fill="#7c2d12" />)}
+            {bs.map((b) => <circle key={"d" + b.t} cx={xD(minDay(b.t))} cy={yD(b.pct)} r={1.5} fill="#7c2d12" />)}
+            <text x={PL + 2} y={PT + 8} fontSize={7.5} fill="#7c2d12">주간 축: {dayPath!.baseLabel} 대비</text>
             <text x={PL + 2} y={H - 8} fontSize={8} fill="#888">주간 09:00</text>
             <text x={PL + DAY_W - 2} y={H - 8} textAnchor="end" fontSize={8} fill="#888">15:45 마감</text>
-            <line x1={NX0 - GAP_W / 2} y1={PT} x2={NX0 - GAP_W / 2} y2={H - PB} stroke="#999" strokeWidth={1} />
+            <line x1={PL + DAY_W + 2} y1={PT} x2={PL + DAY_W + 2} y2={H - PB} stroke="#999" strokeWidth={1} />
             <text x={NX0 + 2} y={H - 8} fontSize={8} fill="#888">야간 18:00</text>
           </g>
         );
@@ -111,7 +119,7 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
       ))}
       {[vmax, 0, -vmax].map((v) => (
         <g key={v}>
-          <text x={PL - 4} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#888">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>
+          <text x={(hasDay ? NX0 : PL) - 4} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#888">{v > 0 ? "+" : ""}{v.toFixed(1)}%</text>
           <text x={W - PR + 4} y={y(v) + 3} textAnchor="start" fontSize={8} fill="#aaa">삼{(v * betaSs) > 0 ? "+" : ""}{(v * betaSs).toFixed(1)} 하{(v * betaHx) > 0 ? "+" : ""}{(v * betaHx).toFixed(1)}</text>
         </g>
       ))}
@@ -246,14 +254,16 @@ function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
 export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly }: { curve: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v21Marks?: V2Mark[]; v2Hourly?: V2HourMark[] }) {
   let daily: KrxNightDay[] = [];
   try { daily = await fetchKrxNightDaily(24); } catch { /* 정본 조회 실패 — 빈 배열 */ }
-  // [발주자 8/22] 세션 밤짜의 주간 선물 10분 경로 (KIS 선물 10분봉) — 주간 종가(KRX 정본 있으면 정본, 없으면 마지막 봉) = 0% 기준
+  // [발주자 8/22] 세션 밤짜의 주간 선물 10분 경로 (KIS 선물 10분봉) — 기준 = **전일 주간 정산가**(KRX 정본 day 세션 종가, 공식 기준).
+  // 정본 결측 시 첫 봉 시가 기준(0% 출발) — 라벨에 명기
   let dayPath: DayPath | null = null;
   try {
     const { fetchKisFutDayBars10m } = await import("@/lib/market/kis");
     const kb = await fetchKisFutDayBars10m(curve.sessionNight.replace(/-/g, ""));
     if (kb.length) {
-      const refClose = daily.find((z) => z.day?.date === curve.sessionNight)?.day?.close ?? kb[kb.length - 1].px;
-      dayPath = { bars: kb.map((b) => ({ t: b.t, pct: Math.round((b.px / refClose - 1) * 10000) / 100 })), close: refClose };
+      const prevDay = daily.map((z) => z.day).filter((d): d is NonNullable<typeof d> => d != null && d.date < curve.sessionNight).sort((a, b) => a.date.localeCompare(b.date)).pop() ?? null;
+      const base = prevDay?.close ?? kb[0].px;
+      dayPath = { bars: kb.map((b) => ({ t: b.t, pct: Math.round((b.px / base - 1) * 10000) / 100 })), baseLabel: prevDay ? `전일(${prevDay.date.slice(5)}) 주간 정산가 ${prevDay.close.toFixed(2)}` : "첫 봉(정산가 결측)" };
     }
   } catch { /* 주간 경로 결측 허용 */ }
   // [발주자 8/21 새벽] 20일 비교 데이터 — 정렬: 라벨일 L 기준. 야간선물 u1(L) = L 새벽에 끝난 밤 /
@@ -288,7 +298,7 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] md:text-[11px] text-ink-48">
         <span>{last ? `최신 ${last.t} ${last.pct >= 0 ? "+" : ""}${last.pct.toFixed(2)}%` : "18:05 첫 봉 대기"}</span>
-        {dayPath ? <LegendChip color="#7c2d12" dot label="주간 선물 10분봉 09:00~15:45 (왼쪽 구간 · 주간 종가 = 0% 기준)" /> : null}
+        {dayPath ? <LegendChip color="#7c2d12" dot label="주간 선물 10분봉 09:00~15:45 (왼쪽 구간 · 전일 주간 정산가 대비 — 별도 축)" /> : null}
         <LegendChip color="#1d4ed8" dot label="10분봉(야간)" />
         <LegendChip color="#059669" dot label="체크포인트 23:40/03:00" />
         <LegendChip color="#dc2626" dot label="06:00 마감" />
