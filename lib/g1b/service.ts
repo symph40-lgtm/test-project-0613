@@ -579,7 +579,7 @@ async function recordHourlyDriftTrack(hhmm: string, date: string, notes: string[
       sv2.hourly = [...hourly, { t: hhmm, dir: dj.dir, conf: dj.conf, nf_pct: cp.nf_pct, adj_pct: adj, expected_gap_pct: exp, reduced: true }];
       // [v2.1 등재 8/22] 병행 매시 트랙 — 축소 성분 ⓐ' 다창·ⓕ·누적 부호 + ⓔ' 2등급 (shadow_v21.hourly)
       try {
-        const sv21 = t2.shadow_v21 as Record<string, unknown> | undefined;
+        const sv21 = t2?.shadow_v21 as Record<string, unknown> | undefined;
         if (sv21 && !((sv21.hourly ?? []) as { t?: string }[]).some((h) => h.t?.slice(0, 2) === slot)) {
           const { judgeDriftV21 } = await import("@/lib/g1a/t2plusV21");
           const { fetchBasketWindows, fetchEventsTiered } = await import("@/lib/g1a/data");
