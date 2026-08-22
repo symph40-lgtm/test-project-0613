@@ -100,6 +100,29 @@ export async function fetchKisNightFutures(div = "CM"): Promise<KisFutures> {
   }
 }
 
+// ── 주간 코스피200 선물 10분봉 (FHKIF03020200 선물옵션 분봉) — 2026-08-22 실측: FID_HOUR_CLS_CODE "600" = 10분봉,
+// 1회 102행(약 2.5 세션) — 요청 일자의 주간 세션(09:00~15:45) 봉만 걸러 오름차순 반환. 발주자 지시: 야간 10분봉 곡선에 주간 경로 병기.
+export type KisFutBar = { t: string; px: number; high: number; low: number; vol: number | null };
+export async function fetchKisFutDayBars10m(dateYmd: string): Promise<KisFutBar[]> {
+  const appkey = process.env.KIS_APP_KEY, appsecret = process.env.KIS_APP_SECRET;
+  if (!appkey || !appsecret) return [];
+  const token = await getToken();
+  if (!token) return [];
+  try {
+    const url = new URL(`${KIS_BASE}/uapi/domestic-futureoption/v1/quotations/inquire-time-fuopchartprice`);
+    const p: Record<string, string> = { FID_COND_MRKT_DIV_CODE: "F", FID_INPUT_ISCD: process.env.KIS_FUT_CODE || frontMonthNightFutCode(), FID_HOUR_CLS_CODE: "600", FID_PW_DATA_INCU_YN: "Y", FID_FAKE_TICK_INCU_YN: "N", FID_INPUT_DATE_1: dateYmd, FID_INPUT_HOUR_1: "154500" };
+    for (const [k, v] of Object.entries(p)) url.searchParams.set(k, v);
+    const r = await fetch(url, { headers: { authorization: `Bearer ${token}`, appkey, appsecret, tr_id: "FHKIF03020200", custtype: "P" }, next: { revalidate: 300 } });
+    if (!r.ok) { checkKisAuth(r.status); return []; }
+    const j = (await r.json()) as { output2?: Record<string, string>[] };
+    const num = (v: unknown) => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : NaN; };
+    return (j.output2 ?? [])
+      .filter((o) => o.stck_bsop_date === dateYmd && isFinite(num(o.futs_prpr)))
+      .map((o) => ({ t: `${o.stck_cntg_hour.slice(0, 2)}:${o.stck_cntg_hour.slice(2, 4)}`, px: num(o.futs_prpr), high: num(o.futs_hgpr), low: num(o.futs_lwpr), vol: isFinite(num(o.cntg_vol)) ? num(o.cntg_vol) : null }))
+      .sort((a, b) => a.t.localeCompare(b.t));
+  } catch { return []; }
+}
+
 // ── 투자자매매동향 (FHPTJ04030000, HTS [0403] 상단 표) — 당일 누적 순매수 스냅샷.
 // 시장 코드 실측(2026-07-09): 코스피 현물 = KSP/0001, 코스피200 선물 = K2I/F001.
 // tr_pbmn(거래대금)은 백만원 단위 → 억원으로 환산해 반환. 장중 잠정치라 확정치와 오차 존재.
