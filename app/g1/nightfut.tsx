@@ -66,7 +66,9 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { c: NightC
   const vmax = Math.max(0.5, ...vs.map(Math.abs)) * 1.15;
   const x = (m: number) => PL + ((m - X0) / (X1 - X0)) * (W - PL - PR);
   const y = (v: number) => PT + (1 - (v + vmax) / (2 * vmax)) * (H - PT - PB);
-  const cuts: [string, string][] = [["19:35", "T2"], ["06:00", "마감"], ["07:15", "R1"], ["08:52", "R2"]];
+  // [발주자 8/22] T2 시각 = 19:40 (19:35 절단 → 19:40 기준가 → 19:45 발행) — 본판정 ◆·v2 ◇ 둘 다 19:40에 정렬
+  const T2_T = "19:40";
+  const cuts: [string, string][] = [[T2_T, "T2"], ["06:00", "마감"], ["07:15", "R1"], ["08:52", "R2"]];
   const d = pts.length >= 2 ? "M" + pts.map((p) => `${x(p.m).toFixed(1)},${y(p.v).toFixed(1)}`).join(" L") : null;
   // [발주자 8/20 밤 23시] SOXX(미 정규장)·나스닥100 선물(NQ=F, 16:00 KST 이후 변화) 병기 계열
   const linePath = (get: (b: Bar) => number | null | undefined) => {
@@ -94,14 +96,14 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v2Hourly }: { c: NightC
       {d ? <path d={d} fill="none" stroke="#1d4ed8" strokeWidth={1.6} strokeLinejoin="round" /> : null}
       {(t2Marks ?? []).filter((mk) => mk.idxPct != null && Math.abs(mk.idxPct) <= vmax).map((mk) => (
         <g key={mk.name}>
-          <path d={`M${x(minOf("19:35")).toFixed(1)},${(y(mk.idxPct!) - 4).toFixed(1)} l4,4 l-4,4 l-4,-4 z`} fill="#7c3aed" />
-          <text x={x(minOf("19:35")) + 6} y={y(mk.idxPct!) + 3} fontSize={8} fill="#7c3aed">{mk.name}</text>
+          <path d={`M${x(minOf(T2_T)).toFixed(1)},${(y(mk.idxPct!) - 4).toFixed(1)} l4,4 l-4,4 l-4,-4 z`} fill="#7c3aed" />
+          <text x={x(minOf(T2_T)) + 6} y={y(mk.idxPct!) + 3} fontSize={8} fill="#7c3aed">{mk.name}</text>
         </g>
       ))}
       {(v2Marks ?? []).filter((mk) => mk.idxPct != null && Math.abs(mk.idxPct) <= vmax).map((mk) => (
         <g key={"v2m" + mk.name}>
-          <path d={`M${x(minOf(mk.t)).toFixed(1)},${(y(mk.idxPct!) - 4.5).toFixed(1)} l4.5,4.5 l-4.5,4.5 l-4.5,-4.5 z`} fill="none" stroke="#db2777" strokeWidth={1.6} />
-          <text x={x(minOf(mk.t)) - 6} y={y(mk.idxPct!) + 3} textAnchor="end" fontSize={8} fill="#db2777">{mk.name}</text>
+          <path d={`M${x(minOf(T2_T)).toFixed(1)},${(y(mk.idxPct!) - 4.5).toFixed(1)} l4.5,4.5 l-4.5,4.5 l-4.5,-4.5 z`} fill="none" stroke="#db2777" strokeWidth={1.6} />
+          <text x={x(minOf(T2_T)) - 6} y={y(mk.idxPct!) + 3} textAnchor="end" fontSize={8} fill="#db2777">{mk.name}</text>
         </g>
       ))}
       {(v2Hourly ?? []).map((e) => {
@@ -248,8 +250,8 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
         <LegendChip color="#1d4ed8" dot label="10분봉(저녁)" />
         <LegendChip color="#059669" dot label="체크포인트 23:40/03:00" />
         <LegendChip color="#dc2626" dot label="06:00 마감" />
-        {t2Marks?.some((mk) => mk.idxPct != null) ? <LegendChip color="#7c3aed" dot label="T2 판정값 19:35 (잔여갭식÷β)" /> : null}
-        {v2Marks?.some((mk) => mk.idxPct != null) ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={12} aria-hidden="true"><path d="M6,1.5 l4.5,4.5 l-4.5,4.5 l-4.5,-4.5 z" fill="none" stroke="#db2777" strokeWidth={1.6} /></svg><span style={{ color: "#db2777" }} className="font-medium">T2+ v2 예상갭 (판정 시각·÷β)</span></span> : null}
+        {t2Marks?.some((mk) => mk.idxPct != null) ? <LegendChip color="#7c3aed" dot label="T2 판정값 19:40 (잔여갭 경로 시가 예상·종가比÷β)" /> : null}
+        {v2Marks?.some((mk) => mk.idxPct != null) ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={12} height={12} aria-hidden="true"><path d="M6,1.5 l4.5,4.5 l-4.5,4.5 l-4.5,-4.5 z" fill="none" stroke="#db2777" strokeWidth={1.6} /></svg><span style={{ color: "#db2777" }} className="font-medium">T2+ v2 예상갭 19:40 (종가比÷β)</span></span> : null}
         {curve.bars.some((b) => b.soxx != null) ? <LegendChip color="#ea580c" label="SOXX (미 정규장 22:30~05:00)" /> : null}
         {curve.bars.some((b) => b.nq != null) ? <LegendChip color="#14b8a6" label="나스닥100 선물 NQ=F (16시 KST~)" /> : null}
         {v2Hourly?.length ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={22} height={12} aria-hidden="true"><path d="M6,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="#9ca3af" /><path d="M16,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="none" stroke="#9ca3af" strokeWidth={1.4} /></svg><span className="font-medium text-ink-80">v2 매시 예상갭 ◆삼전·◇하닉 (÷β, 색=드리프트: 적 상방·청 하방·회 중립)</span></span> : null}
