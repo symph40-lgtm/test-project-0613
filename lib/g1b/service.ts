@@ -700,6 +700,24 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
   const ga = await admin.from("g1a_days").select("date,symbol,t2,labels").order("date", { ascending: true }).limit(120);
   type GaRow = { date: string; symbol: string; t2: Record<string, unknown> | null; labels: Record<string, unknown> | null };
   const gaRows = (ga.data ?? []) as GaRow[];
+  // [발주자 회수 ② 8/22] 3자 병행 채점 집계 — T2 / v2 / v2.1: 발화율·발화 적중률·침묵 실패율·near-miss (late 밤 제외)
+  const triAgg = (() => {
+    type S = { fired: boolean; hit: boolean | null; silent_fail: boolean; near_miss: boolean; late?: boolean };
+    const acc: Record<string, { n: number; fired: number; hit: number; hitN: number; silent: number; quiet: number; near: number }> = {};
+    for (const r of gaRows) {
+      const tri = (r.labels as { tri?: { t2?: S | null; v2?: S | null; v21?: S | null } } | null)?.tri;
+      if (!tri) continue;
+      for (const k of ["t2", "v2", "v21"] as const) {
+        const s = tri[k]; if (!s || s.late) continue;
+        const a = (acc[k] ??= { n: 0, fired: 0, hit: 0, hitN: 0, silent: 0, quiet: 0, near: 0 });
+        a.n++; if (s.fired) a.fired++; else a.quiet++;
+        if (s.hit != null) { a.hitN++; if (s.hit) a.hit++; }
+        if (s.silent_fail) a.silent++; if (s.near_miss) a.near++;
+      }
+    }
+    const pct = (x: number, n: number) => (n ? Math.round((x / n) * 100) : null);
+    return Object.fromEntries(Object.entries(acc).map(([k, a]) => [k, { n: a.n, fire_rate: pct(a.fired, a.n), hit_rate: pct(a.hit, a.hitN), silent_fail_rate: pct(a.silent, a.quiet), near_miss: a.near }]));
+  })();
   const abst = gaRows.filter((r) => (r.t2?.verdict as { direction?: string } | undefined)?.direction === "NEUTRAL" && r.labels);
   const gaps = abst.map((r) => Math.abs(Number(r.labels?.L1 ?? NaN))).filter((x) => isFinite(x));
   const missed = abst.map((r) => Number(r.labels?.L1p ?? NaN)).filter((x) => isFinite(x));
@@ -829,6 +847,7 @@ async function updateGateDashboard(date: string, notes: string[]): Promise<void>
     g1a_abstain: g1aAbstain, t2plus_compare: t2plus,
     te_r1_median_pct: med, te_r1_by_regime: teByRegime, te_r1_by_symbol: teBySymbol, offline_pred_x15: med != null ? (med <= 1.32 * 1.5 ? "정합(1.5배 이내)" : "초과") : null,
     v11c_early_review: v11cEarly, r2_theory_early_review: r2Early,   // 조기 판정 자동 심사 (적용 가속 §1·§2 8/20 밤)
+    tri_compare: triAgg,   // 3자 병행 채점 (발주자 8/22) — v2.1 핵심 지표 = 침묵 실패율 감소
     cutoff_violations: per.reduce((a, p) => a + p.late_arrival, 0), quarantined_probe: per.reduce((a, p) => a + (p.late_probe ?? 0), 0), late_arrival_total: per.reduce((a, p) => a + p.late_arrival, 0),
     effective_start: { ...effectiveStart, g1a_nf_evening: nfEveStart, p1_eu_semi: p1Start },
     nf_leaderboard: nfLeaderboard, e_system: eSystem, nf_vs_champ: nfVsChamp,

@@ -295,6 +295,16 @@ export async function fetchEventTonight(): Promise<string | null> {
     const tonight = ev.find((e) => e.date === today);
     if (tonight) return `실적 ${tonight.symbol}`;
   } catch { /* 실적 조회 실패는 결측 처리 */ }
+  // [발주자 회수 ① 8/22] 1급 워치리스트 확대 — 공용 인프라: 바스켓 구성(NVDA·MU·AMD·SOXL)·**삼전·하닉 자체**·AAPL·TSM 실적.
+  // 입력 커버리지 교정(판정 규칙 변경 아님) — 본판정 T2·v2·v2.1 이벤트 밤 분류에 동일 적용.
+  try {
+    const res = await yf.quote(["NVDA", "MU", "AMD", "SOXL", "005930.KS", "000660.KS", "AAPL", "TSM"]) as unknown;
+    for (const x of (Array.isArray(res) ? res : [res]) as Record<string, unknown>[]) {
+      const ts = x.earningsTimestamp ?? x.earningsTimestampStart;
+      const d = ts instanceof Date ? ts : typeof ts === "number" ? new Date(ts * (ts < 1e12 ? 1000 : 1)) : null;
+      if (d && d.toISOString().slice(0, 10) === today) return `실적 ${String(x.symbol).replace(".KS", "")}`;
+    }
+  } catch { /* 결측 허용 */ }
   return null;
 }
 
@@ -382,17 +392,7 @@ export async function fetchP1Windows(): Promise<{ r30: number | null; rSess: num
 // 2급: FRED 발표 캘린더 ★3 이상 2차 지표(PCE·GDP·실업수당·ISM 등) — 수동 입력 없음
 export async function fetchEventsTiered(): Promise<{ tier1: string | null; tier2: string[] }> {
   const today = kstDate();
-  let tier1 = await fetchEventTonight();
-  if (!tier1) {
-    try {
-      const res = await yf.quote(["NVDA", "MU", "AMD", "SOXL", "005930.KS", "000660.KS", "AAPL", "TSM"]) as unknown;
-      for (const x of (Array.isArray(res) ? res : [res]) as Record<string, unknown>[]) {
-        const ts = x.earningsTimestamp ?? x.earningsTimestampStart;
-        const d = ts instanceof Date ? ts : typeof ts === "number" ? new Date(ts * (ts < 1e12 ? 1000 : 1)) : null;
-        if (d && d.toISOString().slice(0, 10) === today) { tier1 = `실적 ${String(x.symbol)}`; break; }
-      }
-    } catch { /* 결측 허용 */ }
-  }
+  const tier1 = await fetchEventTonight();   // 1급 = 공용 인프라 (확대분 포함) — 전 트랙 동일
   const tier2: string[] = [];
   try {
     const { fetchUpcomingUsEvents } = await import("@/lib/calendar/fred");

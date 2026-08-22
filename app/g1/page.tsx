@@ -631,6 +631,13 @@ export default async function G1Page() {
             return `${NAME[s] ?? s} w_nf ${first?.w_nf ?? "—"}→${last?.w_nf ?? "—"} (loss ${last?.loss_nf ?? "—"} · TE v1.1c ${last?.te_v11c ?? "—"}% vs 챔피언 ${last?.te_champ ?? "—"}%)`;
           }).join(" / ")}</span>;
         })()} />
+        {/* [발주자 8/22] 3자 병행 채점 — T2 vs v2 vs v2.1 (late 밤 제외). v2.1 핵심 심사 지표 = 침묵 실패율 */}
+        <Row label="3자 병행 채점 — T2 / v2 / v2.1 (발화율 · 발화 적중 · 침묵 실패율 · near-miss)" value={(() => {
+          const t = (m?.tri_compare ?? null) as Record<string, { n: number; fire_rate: number | null; hit_rate: number | null; silent_fail_rate: number | null; near_miss: number }> | null;
+          if (!t || !Object.keys(t).length) return "첫 채점 밤부터 (8/24 아침)";
+          const nm: Record<string, string> = { t2: "T2", v2: "v2", v21: "v2.1" };
+          return <span className="text-[14px] md:text-[11px]">{["t2", "v2", "v21"].filter((k) => t[k]).map((k) => `${nm[k]} n${t[k].n}: 발화 ${t[k].fire_rate ?? "—"}% · 적중 ${t[k].hit_rate ?? "—"}% · 침묵실패 ${t[k].silent_fail_rate ?? "—"}% · near ${t[k].near_miss}`).join(" / ")}</span>;
+        })()} />
         {/* [발주자 '적용 가속' §1·§2 8/20 밤] 조기 심사 자동 표시 — 상신은 발주자 판정 */}
         <Row label="v1.1c 조기 심사 (8밤 시점 — ⓐ승≥7/8 ⓑ개선>0 ⓒ악화=커버리지 공백뿐)" value={(() => {
           const e = (m?.v11c_early_review ?? null) as Record<string, { n: number; verdict: string; wins8?: number; med_improve_pp?: number | null }> | null;

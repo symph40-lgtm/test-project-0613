@@ -153,7 +153,10 @@ async function tryShadowV21(symbol: G1ASymbol, t2u: Record<string, unknown>, f: 
   });
   const { G1B_CONFIG } = await import("@/lib/g1b/config");
   const sigma = G1B_CONFIG.sigmaBase[symbol as "000660" | "005930"][events.tier1 ? "event" : "normal"];
-  t2u.shadow_v21 = { ...buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma, volRatio: null, thetaLow: 2.5 }), version: "v2.1", inputs: { basket, p1, events } };
+  // [발주자 ②③ 8/22] 신규 소스 대사 규약: 야후 현지 5분봉(세션 변화율) vs 기존 세션 근사(pieces.p1_eu_semi_avg) 일일 병행 기록 — 첫 5거래일, 괴리 상습 시 보고
+  const approx = (t2u.pieces as Record<string, number | null> | undefined)?.p1_eu_semi_avg ?? null;
+  const p1_reconcile = { yf5m_sess_pct: p1.rSess, session_approx_pct: approx, diff_pp: p1.rSess != null && approx != null ? Math.round((p1.rSess - approx) * 100) / 100 : null };
+  t2u.shadow_v21 = { ...buildShadowV2({ t: hhmm, nfCutPct: nfoV2.level.pct, beta: nfoV2.level.beta_mkt, drift, sigma, volRatio: null, thetaLow: 2.5 }), version: "v2.1", inputs: { basket, p1, events, p1_reconcile } };
 }
 
 // ── T2 사이클 (§5) ──
@@ -471,6 +474,28 @@ async function runLabels(): Promise<string[]> {
         };
       }
     } catch { /* v2.1 채점 결측 허용 */ }
+    // [발주자 회수 ② 8/22] 3자 병행 채점 — 본판정 T2 vs v2 vs v2.1 매 밤 나란히:
+    //   fired = 방향 선언 / hit = 선언 방향 == 실측 갭 부호(|L1|≥0.3) / silent_fail = 미선언인데 |L1|≥0.5 (침묵 실패)
+    //   near_miss = 선언했으나 실측 보합(|L1|<0.3). v2.1 핵심 심사 지표 = 침묵 실패를 실제로 줄이는가.
+    try {
+      if (L1 != null) {
+        const t2r = row.t2 as unknown as Record<string, unknown>;
+        const dirOf = (d: string | undefined | null) => (d === "UP" || d === "상방" ? 1 : d === "DOWN" || d === "하방" ? -1 : 0);
+        const actS = Math.abs(L1) >= 0.3 ? Math.sign(L1) : 0;
+        const score = (pred: number) => ({
+          fired: pred !== 0, hit: pred !== 0 && actS !== 0 ? pred === actS : null,
+          silent_fail: pred === 0 && Math.abs(L1) >= 0.5, near_miss: pred !== 0 && actS === 0,
+        });
+        const sv2d = (t2r.shadow_v2 as { drift?: { dir?: string }; late?: boolean } | undefined);
+        const sv21d = (t2r.shadow_v21 as { drift?: { dir?: string }; late?: boolean } | undefined);
+        (row.labels as unknown as Record<string, unknown>).tri = {
+          t2: score(dirOf(v?.direction)),
+          v2: sv2d ? { ...score(dirOf(sv2d.drift?.dir)), late: sv2d.late === true } : null,
+          v21: sv21d ? { ...score(dirOf(sv21d.drift?.dir)), late: sv21d.late === true } : null,
+          actual_gap_pct: L1, note: "3자 병행 채점 (발주자 8/22) — 침묵 실패 = 중립 밤 |실측|≥0.5%",
+        };
+      }
+    } catch { /* 3자 채점 결측 허용 */ }
     await upsertDay(row);
     notes.push(`${symbol} ${row.date} 라벨 (L1' ${row.labels.L1p ?? "—"}%)`);
   }
