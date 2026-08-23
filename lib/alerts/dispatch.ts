@@ -34,16 +34,17 @@ function quietDayBlocked(alertKey: string): boolean {
 // 판정 문자 0건. 현행 판정 채널(예측 스트림)의 전환·반전경보·회복·당일청산·공식판정 키를 허용한다.
 // 유지 차단: 상태·유지확인·성능 등 저정보 키(predict_flat_*·predict_hold_*·predict_perf_* 등).
 const PAUSE_ALLOW_KEYS = /^(trend_up|trend_down|vrebound_long|us_trend_up|us_trend_down)(_cancel)?$|^(us)?predict_(tr|rev9|chg|cp|recut|sell|prog5)|^uspredict_v2_(entry|rev|stop|conf|opp|ovn|bed|prot)/;
-let pauseCache: { until: string | null; allowStrong: boolean; at: number } = { until: null, allowStrong: true, at: 0 };
+let pauseCache: { until: string | null; allowStrong: boolean; all: boolean; at: number } = { until: null, allowStrong: true, all: false, at: 0 };
 
 async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, alertKey: string): Promise<boolean> {
   try {
     if (Date.now() - pauseCache.at > 60_000) {
       const { data } = await admin.from("ops_settings").select("value").eq("key", "sms_pause").maybeSingle();
-      const v = (data?.value ?? null) as { until?: string; allowStrong?: boolean } | null;
+      const v = (data?.value ?? null) as { until?: string; allowStrong?: boolean; all?: boolean } | null;
       pauseCache = {
         until: typeof v?.until === "string" ? v.until : null,
         allowStrong: v?.allowStrong !== false,
+        all: v?.all === true,   // [발주자 8/23] 전 채널 정지 — 허용키·predict_now_ 예외 없이 신호 전부 차단
         at: Date.now(),
       };
     }
@@ -53,6 +54,7 @@ async function smsPauseBlocked(admin: ReturnType<typeof createAdminClient>, aler
   if (pauseCache.until === null) return false;
   const kstToday = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   if (kstToday > pauseCache.until) return false;
+  if (pauseCache.all) return true;   // 8/23 전 채널 정지 — 예외 없음 (장애 통지는 dispatch를 타지 않음)
   if (alertKey.startsWith("predict_now_")) return false; // 피셔 실시간 버튼 = 사용자 명시 문의 — 정지 무시 (2026-07-28)
   return pauseCache.allowStrong ? !PAUSE_ALLOW_KEYS.test(alertKey) : true;
 }
@@ -131,7 +133,12 @@ export async function dispatchToChannels(
   }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();
-  if (await smsPauseBlocked(admin, alert.key)) return 0; // 모바일 운영 설정의 일시정지
+  if (await smsPauseBlocked(admin, alert.key)) {
+    // 억제 이력 보존 (발주자 8/23 §3 — suppressed_sms 감사): 파이프는 정상, 발송만 차단
+    const { logSuppressedSms } = await import("@/lib/alerts/pause");
+    await logSuppressedSms({ alertKey: alert.key, subject: alert.smsSubject, text: alert.text, source: "dispatch" });
+    return 0;
+  }
 
   // 중복 창: 기본 = 오늘(KST) 0시부터 / dedupHours 지정 시 = 최근 N시간
   const kstDayStartUtc = opts?.dedupHours

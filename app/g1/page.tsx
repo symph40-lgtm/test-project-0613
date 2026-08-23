@@ -126,6 +126,10 @@ export default async function G1Page() {
     admin.from("g1b_state").select("symbol,state"),
     admin.from("mt_days").select("*").order("date", { ascending: false }).limit(30),
   ]);
+  // [발주자 8/23 §4] 문자 정지 상태 배지 — ops_settings.sms_pause (발송만 차단, 판정·기록·채점 정상)
+  const { smsPauseState } = await import("@/lib/alerts/pause");
+  const smsPause = await smsPauseState();
+  const pauseBadge = smsPause.active ? `문자 정지 중 (—${(smsPause.until ?? "").slice(5).replace("-", "/")})` : null;
   // MT 1단계 = 표시 전용 (판정 무개입). 마이그레이션 037 미적용이면 조용히 비활성.
   const mtLatest = new Map<string, MtDay>();
   for (const r of (mtDays.data ?? []) as MtDay[]) if (!mtLatest.has(r.symbol)) mtLatest.set(r.symbol, r);
@@ -159,6 +163,7 @@ export default async function G1Page() {
     <PageShell title="일봉 갭 예측 (G1A·G1B)" badge="60일 검증" width="default">
       <div className="mb-2 rounded-[14px] border border-red-200 bg-red-50 p-3 text-[15px] md:text-[12px] text-red-700">
         <b>전 판정 가상(log-only)</b> — 60일 검증 완료·게이트 통과 전까지 실행 금지.
+      {pauseBadge ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[13px] md:text-[11px] font-semibold text-amber-800">📵 {pauseBadge} — 발송만 차단, 판정·기록·채점 정상 (장애 통지만 예외)</span> : null}
       </div>
       {/* A5: 운영 순서 고정 안내 */}
       <p className="mb-4 rounded-[10px] bg-pearl/60 px-3 py-2 text-[15px] md:text-[12px] text-ink-48">
@@ -594,6 +599,7 @@ export default async function G1Page() {
 
       {/* 계기판 (A4 기준 병기 + D1 보류 집계) */}
       <Card title="게이트 계기판 (D+15 판정 재료)" badge={String(m?.dryrun ?? "—")}>
+        <Row label="문자 발송" value={pauseBadge ? <span className="text-amber-800 font-semibold">{pauseBadge} · 억제 이력 alerts(sms:suppressed) 보존 · 예외: 시스템 장애 통지</span> : "정상"} />
         <Row label="가동률" value={`${m?.uptime_pct ?? "—"}%`} />
         <Row label="TE 레짐 분리 (평상 / 이벤트)" value={(() => { const t = (m?.te_r1_by_regime ?? null) as { normal?: number | null; event?: number | null; n?: { normal: number; event: number } } | null; return t ? `평상 ${t.normal ?? "—"}% (${t.n?.normal ?? 0}밤) · 이벤트 ${t.event ?? "—"}% (${t.n?.event ?? 0}밤)` : "집계 전"; })()} />
         <Row label="TE_r1 중앙값" value={<>{m?.te_r1_median_pct != null ? `${m.te_r1_median_pct}%` : "—"} <span className="text-[14px] md:text-[11px] text-ink-48">(기준: 오프라인 1.5배 이내 = 삼전 ≤1.58% · 하닉 ≤2.38%)</span></>} />

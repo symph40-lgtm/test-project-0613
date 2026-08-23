@@ -84,6 +84,7 @@ export async function startOtpVerification(
     const { ok, error: smsError } = await sendSms({
       to: normalizedContact,
       text: `[스탁가드] 인증번호 ${otp} (10분 내 입력)`,
+      kind: "verify", // OTP 인증 — 문자 정지 예외 (판정성 아님)
     });
     if (!ok) return { error: smsError ?? "문자 발송에 실패했습니다." };
   }

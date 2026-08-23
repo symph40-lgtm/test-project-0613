@@ -139,7 +139,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       if (sameReason) continue; // 일 1회 원칙
       // 장애 알림 — 보류 기간엔 이메일 대체 (이메일 절충, 사용자 결정 8/10)
       const { sendG1Notify } = await import("@/lib/alerts/g1notify");
-      const hr = await sendG1Notify("[G1B 정지] 시스템 장애", `[G1B 정지] ${date.slice(5)} ${symbol} R1/R2 발행 실패 — 상태 오류: ${msg.slice(0, 50)}`);
+      const hr = await sendG1Notify("[G1B 정지] 시스템 장애", `[G1B 정지] ${date.slice(5)} ${symbol} R1/R2 발행 실패 — 상태 오류: ${msg.slice(0, 50)}`, "fault");
       notes.push(`장애 알림(${hr.via}) ${hr.sent}건`);
       continue;
     }
@@ -405,7 +405,7 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
           notes.push(`${symbol} 야간 대사 ${verdict}${diff != null ? ` (라이브 ${livePct} vs 정본 ${krx.u1_pct})` : ""}`);
           if (verdict.startsWith("불일치")) {
             const { sendG1Notify } = await import("@/lib/alerts/g1notify");
-            await sendG1Notify("[G1B 대사] 야간선물 정본 불일치", `[G1B 대사] ${date.slice(5)} 야간선물 라이브 ${livePct}% vs KRX 정본 ${krx.u1_pct}% (차 ${diff}%p) — 소스 점검 필요`);
+            await sendG1Notify("[G1B 대사] 야간선물 정본 불일치", `[G1B 대사] ${date.slice(5)} 야간선물 라이브 ${livePct}% vs KRX 정본 ${krx.u1_pct}% (차 ${diff}%p) — 소스 점검 필요`, "fault");
           }
           await saveRow(row);
         }

@@ -36,18 +36,34 @@ function krByteLength(s: string): number {
 // 제목(subject) 정책 (사용자 확정 2026-07-08): 본문이 90바이트 이하 단문이면 제목을 무시하고
 // 무제 SMS로 발송한다 — 제목을 붙이면 무조건 LMS(장문 요금)로 전환되기 때문.
 // 제목은 본문이 90바이트를 넘어 어차피 LMS가 되는 경우에만 붙는다.
+// [발주자 지시 2026-08-23] 전 채널 문자 정지(~9/23) 원천 게이트 — kind 기본 "signal"은 정지 중 차단+억제 로그.
+// 예외: "fault"(시스템 장애 통지)·"verify"(OTP 인증). 차단 시 { ok:false, error:"sms_pause", suppressed:true } —
+// 호출부는 sms_pause를 실패로 재시도·이메일 대체하지 않는다 (dispatch는 그 전 단계에서 자체 억제).
+export type SmsKind = "signal" | "fault" | "verify";
 export async function sendSms({
   to,
   text,
   subject,
+  kind = "signal",
 }: {
   to: string;
   text: string;
   subject?: string;
-}): Promise<{ ok: boolean; error?: string }> {
+  kind?: SmsKind;
+}): Promise<{ ok: boolean; error?: string; suppressed?: boolean }> {
   const phone = normalizePhone(to);
   if (!phone) {
     return { ok: false, error: "유효한 휴대폰 번호가 아닙니다." };
+  }
+  if (kind === "signal") {
+    try {
+      const { smsPauseState, logSuppressedSms } = await import("@/lib/alerts/pause");
+      const ps = await smsPauseState();
+      if (ps.active && ps.all) {
+        await logSuppressedSms({ to: phone, alertKey: subject ?? "sms", subject, text, source: "sendSms" });
+        return { ok: false, error: "sms_pause", suppressed: true };
+      }
+    } catch { /* 게이트 조회 실패 시 기존 동작 */ }
   }
 
   if (hasSolapi()) return sendViaSolapi(phone, text, subject);
