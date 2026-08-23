@@ -66,6 +66,11 @@ export async function sendSms({
     } catch { /* 게이트 조회 실패 시 기존 동작 */ }
   }
 
+  // [발주자 판정 8/23 §4] 통신사 지연 자가 판별 — 본문 말미에 발송 시각(초 단위) 명기. 이미 '(발신 ' 표기가 있으면 중복 부착 안 함.
+  if (!/\(발신 /.test(text)) {
+    const k = new Date(Date.now() + 9 * 3600e3).toISOString();
+    text = `${text}\n(발신 ${k.slice(5, 10).replace("-", "/")} ${k.slice(11, 19)})`;
+  }
   if (hasSolapi()) return sendViaSolapi(phone, text, subject);
   if (hasAligo()) return sendViaAligo(phone, text, subject);
 

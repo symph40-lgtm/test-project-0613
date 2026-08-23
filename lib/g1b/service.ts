@@ -101,12 +101,19 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       const t2 = g1a.data?.t2 as { verdict?: { direction?: string }; grade?: { lean_dir?: string | null; grade?: string } } | null;
       const dir = t2?.verdict?.direction && t2.verdict.direction !== "NEUTRAL" ? t2.verdict.direction : (t2?.grade?.grade === "High" || t2?.grade?.grade === "Low" ? t2.grade.lean_dir ?? null : null);
       const rc = reverseCheck(dir ?? null, cp.nf_pct);
+      // [발주자 판정 8/23 ⓐ — 9/23 재개 후 실효] 베팅 없는 밤(보류·Flat·Lean·등급만 NOBET = verdict.direction NEUTRAL)의
+      // 역행은 기록만(발송 제외). 원 지시(8/20 §2 "T2 판정 방향 또는 보유 가상 포지션 대비")의 취지 = 판단이 뒤집히는 조기 통보 —
+      // 개정 사유: 8/21(금·보류2) 밤 등급 방향만으로 23:30 경보 발송 (대조표 WORKORDER_2026-08-23 §5ⓐ), 베팅 없는 밤엔 통보 실익 없음.
+      const betNight = ["UP", "DOWN"].includes(String(t2?.verdict?.direction ?? "NEUTRAL"));
       if (rc.fired && !watch.alert) {
-        watch.alert = { t: hhmm, why: rc.why, nf_pct: cp.nf_pct, t2_dir: dir };
+        watch.alert = { t: hhmm, why: rc.why, nf_pct: cp.nf_pct, t2_dir: dir, bet_night: betNight, sent: betNight };
+        if (!betNight) { notes.push(`${symbol} 야간 역행 — 베팅 없는 밤, 기록만(8/23 ⓐ)`); }
+        else {
         const { sendG1Notify } = await import("@/lib/alerts/g1notify");
         const nm = symbol === "005930" ? "삼전" : "하닉";
         const hr = await sendG1Notify("[G1 야간 역행] 저녁 판단 뒤집히는 중 (가상)", `[G1 야간 역행·${hhmm}] ${nm} ${rc.why} (가상 — 따라 하지 않기)`);
         notes.push(`${symbol} 야간 역행 경보 발송(${hr.via}) ${hr.sent}건`);
+        }
       }
       // [발주 D §5 8/20] 시간별 drift 재판정 트랙은 매시 통합 함수(recordHourlyDriftTrack)가 담당 — 8/20 밤 매시 확장으로 이전.
       night.watch = watch;

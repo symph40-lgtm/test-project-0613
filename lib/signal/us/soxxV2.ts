@@ -317,7 +317,10 @@ export async function runSoxxV2Monitor(): Promise<void> {
             changed = true;
             await send(`uspredict_v2_chg_${hit[2]}`, hot ? "medium" : "low",
               `[SOXX 신모델] 세션 전환 예고 — ${hit[3]}\n${legs.map((l) => `▶${l}`).join("\n")}\n${hot ? `▶⚠급등 상태(${pct(gMax)})에서 세션 전환 — 관찰상 하락 취약 구간(가설·검증 전). 이익을 지키려면 지금 시장가 매도(재량·기록상 규칙 이탈)\n` : ""}무응답=위 규칙대로\n----\n현재 SOXX ${px.toFixed(2)}${gC !== null ? ` · 전일 종가 대비 ${prevC !== null && px >= prevC ? "+" : "-"}${gC.toFixed(2)}%` : ""}. 전환-하락 가설은 밤 분봉(BAQ) 축적 후 실측 판정 — 그 전까지 시가 청산이 검증 사양(1박 기여 +53.3%p/246일).`,
-              `세션 전환 예고 ${hit[2]}`, hit[4]);
+              // [발주자 판정 8/23 ⓑ — 9/23 재개 후 실효] 04:50 예고는 hot(급등 상태 gMax≥5%) 밤만 SMS(8/6 원 지시의 목적 = 급등 상태
+              // 세션 전환 취약 가설의 재량 매도 기회). 그 외 밤은 quiet 강등 → 이메일 + 07:00 합산 통지(8/3 규칙 유지).
+              // 개정 사유: 8/22 새벽 미확정치(+1.14%) 04:50 문자 — 급등 아님에도 발송된 사례 (대조표 WORKORDER_2026-08-23).
+              `세션 전환 예고 ${hit[2]}`, hit[4] && hot);
             await save();
           }
         } catch { /* 시세 실패 — 다음 분에 재시도 (기록 미저장) */ }
