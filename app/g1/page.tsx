@@ -11,6 +11,7 @@ import { BIG_AFTER_BADGE, conflictV2, dualBasis, nfFlowLines, nfSessionEveningHe
 import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
 import type { MtDay } from "@/lib/mt/types";
 import { NightFutSection, ThreePanelChart, type NightCurve, type PanelPoint } from "./nightfut";
+import { SummaryTables, type SumTable, type SumCell } from "./summary";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,11 @@ const KR_HOLI = new Set(["2026-09-24", "2026-09-25", "2026-10-05", "2026-10-09",
 const nextKrxDay = (d: string) => {
   const x = new Date(d + "T00:00:00Z");
   do { x.setUTCDate(x.getUTCDate() + 1); } while ([0, 6].includes(x.getUTCDay()) || KR_HOLI.has(x.toISOString().slice(0, 10)));
+  return x.toISOString().slice(0, 10);
+};
+const prevKrxDay = (d: string) => {
+  const x = new Date(d + "T00:00:00Z");
+  do { x.setUTCDate(x.getUTCDate() - 1); } while ([0, 6].includes(x.getUTCDay()) || KR_HOLI.has(x.toISOString().slice(0, 10)));
   return x.toISOString().slice(0, 10);
 };
 const md = (d: string) => d.slice(5);
@@ -80,9 +86,9 @@ function ActionLine({ line }: { line?: string | null }) {
   if (!line) return null;
   return <p className="mb-2 rounded-[10px] bg-amber-50 px-3 py-2 text-[16px] md:text-[13px] font-semibold text-amber-800">{line}</p>;
 }
-function Card({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) {
+function Card({ title, badge, children, id }: { title: string; badge?: string; children: React.ReactNode; id?: string }) {
   return (
-    <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+    <div id={id} className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5 scroll-mt-4">
       <div className="mb-2 flex items-center gap-2">
         <p className="text-[18px] md:text-[15px] font-semibold">{title}</p>
         {badge ? <span className="rounded-full bg-pearl px-2 py-0.5 text-[14px] md:text-[11px] font-semibold text-ink-48">{badge}</span> : null}
@@ -113,7 +119,7 @@ type G1BRow = {
   labels: { actual_gap_pct?: number; te_r1_pct?: number | null; after_basis?: { actual_gap_after_pct?: number | null } | null } | null;
 };
 
-export default async function G1Page() {
+export default async function G1Page({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -159,12 +165,121 @@ export default async function G1Page() {
     if (typeof b === "number" && b > 0) betaOf[r.symbol] = b;
   }
 
+  // ── 상단 판정 요약표 2종 (발주자 발주 8/24) — 저녁판·아침판 + 실측 행, 날짜 이동(◀ ▶) ──
+  const sp = (await searchParams) ?? {};
+  const dParam = typeof sp.d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.d) ? sp.d : null;
+  const viewNight = dParam ?? aLatest ?? new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const viewLabel = nextKrxDay(viewNight);
+  const isLatestView = viewNight === (aLatest ?? viewNight);
+  // 뷰 밤 행 — 최근 8일 캐시 밖(과거 조회)도 동작하도록 항상 대상 날짜로 재조회 (2건·경량)
+  const [viewA0, viewB0] = await Promise.all([
+    admin.from("g1a_days").select("*").eq("date", viewNight),
+    admin.from("g1b_days").select("date,symbol,night,r1,labels").eq("date", viewLabel),
+  ]);
+  const viewA = ((viewA0.data ?? []) as G1ARow[]).sort(bySymOrder);
+  const viewB = ((viewB0.data ?? []) as G1BRow[]).sort(bySymOrder);
+  const summary = (() => {
+    const SYMS = ["005930", "000660"] as const;
+    type PerSym = {
+      entryPx: number | null; regClose: number | null; rNxt: number | null;
+      cv: ReturnType<typeof conflictV2> | null; t2x: Record<string, unknown> | null; gb: G1BRow | undefined;
+    };
+    const ps: PerSym[] = SYMS.map((s) => {
+      const ga = viewA.find((r) => r.symbol === s);
+      const t2x = (ga?.t2 ?? null) as Record<string, unknown> | null;
+      const v = (t2x?.verdict ?? null) as { gap_score?: number | null; expected_residual_gap?: number | null; r_nxt_pre_entry?: number | null } | null;
+      const entryPx = (t2x?.entry_px_virtual as number | null | undefined) ?? null;
+      const nfl = ((t2x?.nf as { level?: { nf_level?: number } } | undefined)?.level?.nf_level) ?? null;
+      const cv = t2x
+        ? ((t2x.conflict_v2 as ReturnType<typeof conflictV2> | undefined) ?? conflictV2({ gapScore: v?.gap_score ?? null, residGap: v?.expected_residual_gap ?? null, nxtPx: entryPx, rNxt: v?.r_nxt_pre_entry ?? null, nfLevel: nfl }))
+        : null;
+      const gb = viewB.find((r) => r.symbol === s);
+      const regClose = cv?.regClose ?? ((gb?.r1 as { prev_close?: number | null } | null)?.prev_close ?? null);
+      return { entryPx, regClose, rNxt: v?.r_nxt_pre_entry ?? null, cv, t2x, gb };
+    });
+    const cell = (closePct: number | null | undefined, i: number, pxOverride?: number | null): SumCell => {
+      const p = ps[i];
+      if (closePct == null) return null;
+      return {
+        closePct, afterPct: toAfterBasis(closePct, p.entryPx, p.regClose),
+        px: pxOverride ?? (p.regClose ? Math.round(p.regClose * (1 + closePct / 100)) : null),
+      };
+    };
+    // 실측 (라벨일 채점 후 — 저녁·아침 표 공통 부착, ■2-3·■2-5)
+    type ActCell = { open: number | null; gapAfter: number | null; gapClose: number | null } | null;
+    const actualCells = ps.map((p) => {
+      const lab = p.gb?.labels as { actual_gap_pct?: number; actual_open?: number | null; after_basis?: { actual_gap_after_pct?: number | null } | null } | null | undefined;
+      if (lab?.actual_gap_pct == null) return null;
+      return { open: lab.actual_open ?? null, gapAfter: lab.after_basis?.actual_gap_after_pct ?? null, gapClose: lab.actual_gap_pct };
+    }) as [ActCell, ActCell];
+    const actual = actualCells.some(Boolean) ? { cells: actualCells } : null;
+    // 셀 탭 → 해당 종목 카드 앵커 (■3-3). 과거 조회 뷰는 아래 카드가 최신 밤이라 링크 비활성.
+    const anchors = (base: string): [string, string] => (isLatestView ? [`${base}-005930`, `${base}-000660`] : ["", ""]);
+    const fp = (v: number | null | undefined) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
+
+    // ■1 저녁판 — 상단 줄: 발행 시각 + 동시각(19:35) 야간선물 + β환산
+    const nfLv = ps.map((p) => ((p.t2x?.nf as { level?: { pct?: number } } | undefined)?.level?.pct ?? null)).find((x) => x != null) ?? null;
+    const evT = (ps.map((p) => (p.t2x?.trigger_time as string | null | undefined)).find(Boolean) ?? "19:45:00")!.slice(0, 5);
+    const evening: SumTable | null = viewA.length ? {
+      title: `저녁판 종합 (${md(viewNight)} ${evT})`,
+      nfLine: nfLv != null
+        ? `야간선물 19:35: ${fp(nfLv)} (β환산 삼 ${fp(nfLv * betaOf["005930"])} / 하 ${fp(nfLv * betaOf["000660"])})`
+        : "야간선물 19:35 절단값 결측",
+      baseLine: `현재가(19:40 NXT): 삼전 ${ps[0].entryPx != null ? ps[0].entryPx.toLocaleString() + "원" : "—"} (종가 대비 ${fp(ps[0].rNxt)}) · 하닉 ${ps[1].entryPx != null ? ps[1].entryPx.toLocaleString() + "원" : "—"} (${fp(ps[1].rNxt)})`,
+      rows: [
+        { label: "T2 본판정", cut: "절단 19:35", anchors: anchors("t2"), cells: [0, 1].map((i) => {
+          const v = ps[i].t2x?.verdict as { expected_residual_gap?: number | null } | undefined;
+          const c = cell(ps[i].cv?.openExp_resid ?? null, i);
+          // T2의 애프터比 = 예상잔여갭 원값 (환산 아닌 판정 원천 — ■7 규격과 동일)
+          return c ? { ...c, afterPct: v?.expected_residual_gap ?? c.afterPct } : null;
+        }) as [SumCell, SumCell] },
+        { label: "T2+ v2", cut: "절단 19:35", anchors: anchors("t2"), cells: [0, 1].map((i) =>
+          cell(((ps[i].t2x?.shadow_v2 as { expected_gap_pct?: number | null } | undefined)?.expected_gap_pct) ?? null, i)) as [SumCell, SumCell] },
+        { label: "T2+ v2.1", cut: "절단 19:35", anchors: anchors("t2"), cells: [0, 1].map((i) =>
+          cell(((ps[i].t2x?.shadow_v21 as { expected_gap_pct?: number | null } | undefined)?.expected_gap_pct) ?? null, i)) as [SumCell, SumCell] },
+      ],
+      actual,
+      emptyNote: null,
+    } : { title: `저녁판 종합 (${md(viewNight)})`, nfLine: "", baseLine: "", rows: [], actual: null, emptyNote: "세션 밤 행 없음 (휴장 또는 미기록)" };
+
+    // ■2 아침판 — 5행: T2/v2/v2.1 아침판(07:00) + R1 챔피언(07:15) + v1.1c 챌린저(07:15)
+    const m07s = ps.map((p) => (p.t2x?.morning_0700 ?? null) as { t?: string; t2?: { open_exp_pct?: number | null } | null; v2?: { expected_gap_pct?: number | null } | null; v21?: { expected_gap_pct?: number | null } | null } | null);
+    const nfCloseObs = ps.map((p) => (p.gb?.night?.night_fut as { v?: number | null; t?: string } | undefined) ?? null).find((x) => x?.v != null) ?? null;
+    const nfC = nfCloseObs?.v != null ? nfCloseObs.v * 100 : null;
+    const r1T = ps.map((p) => ((p.gb?.r1 as { sent_at?: string } | null)?.sent_at ?? null)).find(Boolean);
+    const r1Tk = r1T ? new Date(new Date(r1T).getTime() + 9 * 3600e3).toISOString().slice(11, 16) : "07:20";
+    const hasMorning = m07s.some(Boolean) || ps.some((p) => p.gb?.r1);
+    const morning: SumTable = {
+      title: `아침판 종합 (${md(viewLabel)} ${hasMorning ? r1Tk : "발행 전"})`,
+      nfLine: nfC != null
+        ? `야간선물 ${nfCloseObs?.t ?? "06:00"} 마감: ${fp(nfC)} (β환산 삼 ${fp(nfC * betaOf["005930"])} / 하 ${fp(nfC * betaOf["000660"])})`
+        : "야간선물 06:00 마감 결측",
+      baseLine: `전일 종가: 삼전 ${ps[0].regClose != null ? ps[0].regClose.toLocaleString() + "원" : "—"} · 하닉 ${ps[1].regClose != null ? ps[1].regClose.toLocaleString() + "원" : "—"} (애프터 기준가 19:40: ${ps[0].entryPx?.toLocaleString() ?? "—"}·${ps[1].entryPx?.toLocaleString() ?? "—"})`,
+      rows: [
+        { label: "T2 아침판", cut: "절단 07:00", anchors: anchors("t2"), cells: [0, 1].map((i) => cell(m07s[i]?.t2?.open_exp_pct ?? null, i)) as [SumCell, SumCell] },
+        { label: "v2 아침판", cut: "절단 07:00", anchors: anchors("t2"), cells: [0, 1].map((i) => cell(m07s[i]?.v2?.expected_gap_pct ?? null, i)) as [SumCell, SumCell] },
+        { label: "v2.1 아침판", cut: "절단 07:00", anchors: anchors("t2"), cells: [0, 1].map((i) => cell(m07s[i]?.v21?.expected_gap_pct ?? null, i)) as [SumCell, SumCell] },
+        { label: "R1 챔피언", cut: "절단 07:15", anchors: anchors("r1"), cells: [0, 1].map((i) =>
+          cell((ps[i].gb?.r1?.fair_gap_pct as number | null | undefined) ?? null, i, (ps[i].gb?.r1?.expected_open as number | null | undefined) ?? undefined)) as [SumCell, SumCell] },
+        { label: "v1.1c 챌린저", cut: "절단 07:15", anchors: anchors("r1"), cells: [0, 1].map((i) =>
+          cell(((ps[i].gb?.r1 as { challenger_v11c?: { fair_gap_pct?: number | null } } | null)?.challenger_v11c?.fair_gap_pct) ?? null, i)) as [SumCell, SumCell] },
+      ],
+      actual,
+      emptyNote: `${md(viewLabel)} 아침 발행 전 — 아침판 07:00 · 공식 발행 07:15 (기록 후 자동 표시)`,
+    };
+    return { evening, morning };
+  })();
+
   return (
     <PageShell title="일봉 갭 예측 (G1A·G1B)" badge="60일 검증" width="default">
       <div className="mb-2 rounded-[14px] border border-red-200 bg-red-50 p-3 text-[15px] md:text-[12px] text-red-700">
         <b>전 판정 가상(log-only)</b> — 60일 검증 완료·게이트 통과 전까지 실행 금지.
       {pauseBadge ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[13px] md:text-[11px] font-semibold text-amber-800">📵 {pauseBadge} — 발송만 차단, 판정·기록·채점 정상 (장애 통지만 예외)</span> : null}
       </div>
+      {/* [발주자 발주 8/24] 상단 판정 요약표 2종 — 저녁판·아침판 + 실측 행, 날짜 이동. 상세는 아래 카드(셀 탭 이동) */}
+      <SummaryTables evening={summary.evening} morning={summary.morning}
+        nav={{ night: viewNight, prevHref: `/g1?d=${prevKrxDay(viewNight)}`, nextHref: isLatestView ? null : `/g1?d=${nextKrxDay(viewNight)}` }} />
+
       {/* A5: 운영 순서 고정 안내 */}
       <p className="mb-4 rounded-[10px] bg-pearl/60 px-3 py-2 text-[15px] md:text-[12px] text-ink-48">
         운영 순서: <b>T2(저녁 결정) → R1(아침 재판·오판 시 프리장 청산) → R2(시가 확인)</b>
@@ -260,7 +375,7 @@ export default async function G1Page() {
         const v = r.t2?.verdict;
         const sig = sigmaOf[r.symbol];
         return (
-          <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 저녁 결정${r.t2?.trigger_time ? ` · ${r.t2.trigger_time.slice(0, 5)} 발행` : ""} (채점: ${md(nextKrxDay(r.date))} 아침)`} badge="G1A T2">
+          <Card key={r.symbol} id={`t2-${r.symbol}`} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 저녁 결정${r.t2?.trigger_time ? ` · ${r.t2.trigger_time.slice(0, 5)} 발행` : ""} (채점: ${md(nextKrxDay(r.date))} 아침)`} badge="G1A T2">
             <ActionLine line={r.t2?.action?.line} />
             {/* 방향+등급 복합 표기 (발주자 용어 확정판 8/13): ▲▼갭상승/갭하락, △▽ Lean, ─ Flat, [E] 접두.
                 색 규약: 갭상승 적색·갭하락 청색·Lean 연한 톤·Flat 회색 */}
@@ -437,7 +552,7 @@ export default async function G1Page() {
         const fair2 = (r.r2 as { fair_gap_r2_pct?: number | null } | null)?.fair_gap_r2_pct ?? null;
         const expOpen2 = fair2 != null && prevClose ? Math.round(prevClose * (1 + fair2 / 100)) : null;
         return (
-        <Card key={r.symbol} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 아침${(r.labels as { big_after_night?: boolean } | null)?.big_after_night ? " ⚡애프터 대변동 밤" : ""}${(r.r1 as { g1a_ref?: { date?: string } | null } | null)?.g1a_ref?.date ? ` (← ${md((r.r1 as { g1a_ref?: { date?: string } }).g1a_ref!.date!)} 저녁 T2의 밤)` : ""}`} badge="G1B R1·R2">
+        <Card key={r.symbol} id={`r1-${r.symbol}`} title={`${NAME[r.symbol] ?? r.symbol} — ${md(r.date)} 아침${(r.labels as { big_after_night?: boolean } | null)?.big_after_night ? " ⚡애프터 대변동 밤" : ""}${(r.r1 as { g1a_ref?: { date?: string } | null } | null)?.g1a_ref?.date ? ` (← ${md((r.r1 as { g1a_ref?: { date?: string } }).g1a_ref!.date!)} 저녁 T2의 밤)` : ""}`} badge="G1B R1·R2">
           <ActionLine line={r.r1?.action?.line} />
           <Row label="R1 공정 갭 (07:20)" value={r.r1 ? <>{pp(r.r1.fair_gap_pct)} ± {r.r1.sigma_pct?.toFixed(2)}% · 예상시가 {won(r.r1.expected_open)}</> : "발행 전"} />
           {/* 미편입 전문가 신분 명기 (발주자 표기 지시 8/15 §2) — 리스트 부재 ≠ 누락 */}
