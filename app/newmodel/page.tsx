@@ -89,21 +89,24 @@ export default async function NewModelPage() {
   const kstToday = kstNow.toISOString().slice(0, 10);
 
   const usNm = (d?: "up" | "down" | 1 | -1) => (d === "up" || d === 1 ? "SOXL" : "SOXS");
+  // 전환(rev) 반영 현재 방향 — 최초 진입 방향을 그대로 쓰면 전환 후 표기가 반대가 된다 (사용자 지적 8/24)
+  const flipDir = (d?: "up" | "down") => (d === "up" ? "down" : d === "down" ? "up" : undefined);
+  const usCurDir = usSt?.revT ? flipDir(usSt.entryDir) : usSt?.entryDir;
+  const ssCurDir = ssSt?.revT ? flipDir(ssSt.entryDir) : ssSt?.entryDir;
   let soxxAction = "판정 대기 — 진입 문자가 오면 그대로 실행 (F 창은 한국 20:00 개시)";
   if (usSt?.ovn) {
     const dis = (usSt.ovn.px * (usSt.ovn.dir === 1 ? 0.95 : 1.05)).toFixed(2);
-    soxxAction = `1박 보유 중 (${usNm(usSt.ovn.dir)}) → 22:30 개장 시가에 전량 매도 (문자 예정) · 그때까지 자동감시 재난선 SOXX ${dis}`;
+    soxxAction = `1박 보유 중 (${usNm(usSt.ovn.dir)}) → 22:30 개장 시가에 전량 매도 (문자 예정) · 그때까지 자동스탑설정 재난선 SOXX ${dis}`;
   } else if (usSt?.entryT && (usSt.stopT || usSt.protT)) {
     soxxAction = `오늘 세션 매매 종료 (${usSt.protT ? "이익 보호 청산" : "스탑"}) — 행동 없음, 다음 세션 문자 대기`;
   } else if (usSt?.entryT && usSt.entryPx) {
-    const dir = usSt.revT ? undefined : usSt.entryDir;
     const px = usSt.revPx ?? usSt.entryPx;
-    const stop = (px * (dir === "up" ? 0.98 : 1.02)).toFixed(2);
+    const stop = (px * (usCurDir === "up" ? 0.98 : 1.02)).toFixed(2);
     const tail = usSt.confT ? "1박 자격 — 취침 시 무행동, 재난선으로 전환은 취침 문자 참조" : usSt.oppT ? "1박 금지 — 취침 전 MOC(또는 LOC 저가) 매도 예약" : "동의/이견 문자 대기";
-    soxxAction = `보유 ${usNm(usSt.entryDir)} 유지 — 자동감시 SOXX ${stop} · ${tail}`;
+    soxxAction = `보유 ${usNm(usCurDir)} 유지${usSt.revT ? ` (${usSt.revT} ET 전환분)` : ""} — 자동스탑설정 SOXX ${stop} · ${tail}`;
   }
 
-  const krAction = (st: { date?: string; entryT?: string; entryDir?: "up" | "down" } | null, cutT?: string, ovn: KrOvn[] = []): string => {
+  const krAction = (st: { date?: string; entryT?: string; entryDir?: "up" | "down" } | null, cutT?: string, ovn: KrOvn[] = [], curDir?: "up" | "down"): string => {
     // 전 거래일 1박분이 아직 안 팔린 상태 (오늘 09:00 시가 청산 대상)
     const carry = ovn.find((r) => r.raw === undefined && r.date < kstToday);
     if (carry && kstMin < 9 * 60 + 10) return `어젯밤 1박 보유 중 (비중 ${carry.w * 100}%·기준가 ${won(carry.px)}원) — 09:00 시가에 전량 매도`;
@@ -115,10 +118,10 @@ export default async function NewModelPage() {
         ? `1박 보유 중 (비중 ${tonight.w * 100}%) — 내일 09:00 시가 전량 매도 · 밤 구간은 스탑 설정만(갭이면 미체결 — 시가 청산)`
         : "장 마감(종가 청산) — 행동 없음, 내일 문자 대기";
     }
-    return `${st.entryDir === "up" ? "레버" : "인버"} 보유 유지 — 15:30 종가 전량 매도, 1박 자격이면 결산 문자로 유지 지시 (전환·스탑 문자 오면 그 지침 우선)`;
+    return `${(curDir ?? st.entryDir) === "up" ? "레버" : "인버"} 보유 유지 — 15:30 종가 전량 매도, 1박 자격이면 결산 문자로 유지 지시 (전환·스탑 문자 오면 그 지침 우선)`;
   };
   const hxAction = krAction(cwSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (cwSt as { cutT?: string })?.cutT, hxOvn);
-  const ssAction = krAction(ssSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (ssSt as { stop1T?: string })?.stop1T, ssOvn);
+  const ssAction = krAction(ssSt as { date?: string; entryT?: string; entryDir?: "up" | "down" }, (ssSt as { stop1T?: string })?.stop1T, ssOvn, ssCurDir);
   // 카드에 병기할 1박 누적 (원값 = 전부 100% 환산 · 비중반영 = 확정 배분)
   const ovnLine = (arr: KrOvn[]): string => {
     const done = arr.filter((r) => r.raw !== undefined);
@@ -250,7 +253,8 @@ export default async function NewModelPage() {
       <Card title="SOXX 신모델 v2" badge="시범 중 (8/4~)">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[12px] text-ink-48">세션 {usSt?.date ?? "—"} (ET)</span>
-          <DirBadge dir={usSt?.entryDir} />
+          <DirBadge dir={usCurDir} />
+          {usSt?.revT ? <span className="text-[11px] text-ink-48">({usSt.revT} ET 전환 — 진입은 {usSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
         </div>
         {usTimeline.map((t) => (
           <p key={t} className="py-0.5 text-[13px] text-ink-80">· {t}</p>
@@ -305,7 +309,8 @@ export default async function NewModelPage() {
       <Card title="삼성전자 신모델 v2" badge="지침 문자 8/6~">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[12px] text-ink-48">오늘 {ssSt?.date ?? "—"}</span>
-          <DirBadge dir={ssSt?.entryDir} />
+          <DirBadge dir={ssCurDir} />
+          {ssSt?.revT ? <span className="text-[11px] text-ink-48">({ssSt.revT} 전환 — 진입은 {ssSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
         </div>
         <Row label="창 판정 진입" value={ssSt?.entryT ? `${ssSt.entryT} @ ${won(ssSt.entryPx)}원` : "판정 없음(관망)"} />
         {ssSt?.confT ? <Row label="F 동의 확인" value={ssSt.confT} /> : null}
