@@ -150,7 +150,8 @@ export default async function NewModelPage() {
     [/^nm_audit/, "발송 점검"], [/^morning_/, "아침 브리핑"],
   ];
   const seen = new Set<string>();
-  const timeline: { t: string; label: string; head: string }[] = [];
+  // result = 문자 첫 줄에서 [제목] 뗀 판정 결과 · dir = 인버(파랑)/레버(빨강) 색 구분 (발주자 표기 지시 8/24 밤)
+  const timeline: { t: string; label: string; head: string; result: string; dir: "up" | "down" | null }[] = [];
   for (const r of todayAlerts ?? []) {
     const m = r.message as { alertKey?: string; text?: string } | null;
     const k = m?.alertKey ?? "";
@@ -159,14 +160,20 @@ export default async function NewModelPage() {
     if (!lab) continue; // 신모델·점검 계열만
     seen.add(k);
     const kst = new Date(new Date(r.created_at as string).getTime() + 9 * 3600e3).toISOString().slice(11, 16);
-    const head = (m?.text ?? "").split("\n").slice(0, 2).join(" ").slice(0, 90);
-    timeline.push({ t: kst, label: lab[1], head });
+    const text = m?.text ?? "";
+    const head = text.split("\n").slice(0, 2).join(" ").slice(0, 90);
+    const line1 = text.split("\n")[0] ?? "";
+    const result = (line1.replace(/^\[[^\]]*\]\s*/, "") || line1).slice(0, 72);
+    const kd = `${k} ${line1}`;
+    const dir: "up" | "down" | null = /inverse|인버|하락|SOXS/.test(kd) ? "down" : /leverage|레버|상승|SOXL/.test(kd) ? "up" : null;
+    timeline.push({ t: kst, label: lab[1], head, result, dir });
   }
 
-  // 카드별 오늘 판정 타임라인 (발주자 확인 8/24) — "창판정 진입: 판정 없음"이어도
-  // 피셔 트랙(F/M/본)·진행성·1박·청산 등 그날 진행된 판정 전부를 시각과 함께 카드 안에 표기
+  // 판정 결과 통합 섹션 (발주자 지시 8/24 밤 — '지금 할 액션' 바로 아래): 창판정 무판정일에도
+  // 피셔 트랙(F/M/본)·진행성·1박·청산·매도매수 판정 전부. 문자 발송(기록)마다 자동 반영 — 애프터장 마감까지.
   const hxTimeline = timeline.filter((x) => x.label.startsWith("하이닉스"));
   const ssTimeline = timeline.filter((x) => x.label.startsWith("삼성전자"));
+  const usTl = timeline.filter((x) => x.label.startsWith("SOXX"));
 
   // SOXX 오늘 타임라인 문자열 (ET 표기 — 문자와 동일)
   const usTimeline: string[] = [];
@@ -193,6 +200,30 @@ export default async function NewModelPage() {
         <Row label="삼성전자" value={ssAction} />
         <p className="mt-2 text-[11px] text-ink-48">새 문자가 오면 항상 문자 지침이 이 화면보다 우선입니다.</p>
       </div>
+
+      {/* ⓪a 판정 결과 (발주자 지시 8/24 밤 — 액션 바로 아래) : 한 줄 1판정 · 시각/판정결과 볼드 · 인버스 파랑·레버 빨강.
+          문자 기록마다 반영(애프터장 마감까지, 매도매수 판정 포함) — 60초 자동 새로고침 */}
+      <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
+        <p className="mb-2 text-[14px] font-semibold">판정 결과 (오늘 — 문자 기준·자동 갱신)</p>
+        {([["삼성전자", ssTimeline], ["하이닉스", hxTimeline], ["SOXX", usTl]] as const).map(([nm, arr]) => (
+          <div key={nm} className="mb-2 last:mb-0">
+            <p className="text-[12px] font-semibold text-ink-48">■ {nm}</p>
+            {arr.length === 0 ? (
+              <p className="py-0.5 text-[13px] text-ink-48">오늘 판정 없음</p>
+            ) : (
+              arr.map((x) => (
+                <p key={`${x.t}${x.label}${x.result}`} className="py-0.5 text-[13px] leading-snug">
+                  <b className="font-mono text-[12px]">{x.t}</b>{" "}
+                  <span className="text-[12px] text-ink-48">{x.label.replace(new RegExp(`^${nm} `), "")}</span>{" "}
+                  <b className={x.dir === "down" ? "text-blue-600" : x.dir === "up" ? "text-red-600" : "text-ink-80"}>{x.result}</b>
+                </p>
+              ))
+            )}
+          </div>
+        ))}
+        <p className="mt-1 text-[11px] text-ink-48">인버스 = <b className="text-blue-600">파랑</b> · 레버 = <b className="text-red-600">빨강</b>. 애프터장 마감까지 새 판정이 이 목록에 계속 쌓입니다 (60초 자동 새로고침).</p>
+      </div>
+      <script dangerouslySetInnerHTML={{ __html: "setTimeout(function(){location.reload()},60000)" }} />
 
       {/* ⓪b 오늘 문자 타임라인 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
@@ -250,14 +281,6 @@ export default async function NewModelPage() {
         <Row label="창판정 진입" value={cwSt?.entryT ? `${cwSt.entryT} @ ${won(cwSt.entryPx)}원` : "판정 없음"} />
         {cwSt?.cutT ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
         {cwSt?.flipT ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
-        {hxTimeline.length ? (
-          <div className="mt-2 rounded-[10px] bg-pearl/50 px-3 py-2">
-            <p className="mb-1 text-[12px] font-semibold text-ink-48">오늘 판정 타임라인 (피셔 트랙 포함 — 창판정과 별개)</p>
-            {hxTimeline.map((x) => (
-              <p key={`${x.t}${x.label}`} className="py-0.5 text-[12px] text-ink-80">· {x.t} <b>{x.label.replace(/^하이닉스 /, "")}</b> — {x.head}</p>
-            ))}
-          </div>
-        ) : null}
         <div className="mt-3">
           <Row label={`창판정 누적 ${cwSc.length}일 (종가보유 기준)`} value={<b>{pp(sum(cwSc, (s) => s.holdPnl))}</b>} />
           <Row label="가상 사다리 채점 누적" value={`${pp(sum(ladder, (s) => s.pnl))} (${ladder.length}일)`} />
@@ -286,14 +309,6 @@ export default async function NewModelPage() {
         {ssSt?.revT ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
         {ssSt?.stop1T ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
         {ssSt?.stop2T ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
-        {ssTimeline.length ? (
-          <div className="mt-2 rounded-[10px] bg-pearl/50 px-3 py-2">
-            <p className="mb-1 text-[12px] font-semibold text-ink-48">오늘 판정 타임라인 (피셔 트랙 포함)</p>
-            {ssTimeline.map((x) => (
-              <p key={`${x.t}${x.label}`} className="py-0.5 text-[12px] text-ink-80">· {x.t} <b>{x.label.replace(/^삼성전자 /, "")}</b> — {x.head}</p>
-            ))}
-          </div>
-        ) : null}
         <div className="mt-3">
           <Row label={`누적 ${ssSc.length}일 (6봉 주기준)`} value={<b>{pp(sum(ssSc, (s) => s.p))}</b>} />
           <Row label="5봉 / 4봉 / 1.2판 (대조)" value={`${pp(sum(ssSc, (s) => s.p5))} / ${pp(sum(ssSc, (s) => s.p4))} / ${pp(sum(ssSc, (s) => s.p12))}`} />
