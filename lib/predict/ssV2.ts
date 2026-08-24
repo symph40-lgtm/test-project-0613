@@ -307,7 +307,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const sum = (f: (s: Score) => number) => kept.reduce((a, s) => a + f(s), 0);
         const phase = live ? "시범" : "검증(페이퍼)";
         await send("predict_ssv2_eod", "low",
-          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.${v5L ? ` ${v5L}.` : ""}${ovnLine}`);
+          `[예측·삼전 신모델 결산] ${phase} — 오늘 ${NM.ssV2.win}봉(주기준) ${pct(rMain.pnl)} · 6봉(대조) ${pct(r5.pnl)} · 4봉 ${pct(r4.pnl)}${st.entryT ? ` (진입 ${st.entryT}·수익률 ${st.revT ? "판정 방향 반영(전환일 — 두 레그 합산)" : (st as { entryDir?: string }).entryDir === "down" ? "인버스 포지션 기준" : "레버 포지션 기준"}${st.revT ? `·전환 ${st.revT}` : ""}${st.stop1T ? `·스탑 ${st.stop1T}` : ""})` : fFirstDay ? " (F선행 — 관망일)" : " (판정 없음)"}\n----\n누적 ${kept.length}일: 주기준 ${pct(sum((s) => s.p))} · 대조칸 ${pct(sum((s) => s.p5))} · 4봉 ${pct(sum((s) => s.p4))} · 1.2판 ${pct(sum((s) => s.p12))} (주기준 8/5까지 6봉·이후 5봉 — 사용자 전환 지시). 백테스트 rebox판: 5봉 +115.4·6봉 +112.8 — 60일 채점이 최종 판정. 산식: 창 판정가 기준·스탑 -1.5%·종가청산.${v5L ? ` ${v5L}.` : ""}${ovnLine}`);
       } catch { /* 채점 실패는 상태 저장 무관 */ }
     }
 

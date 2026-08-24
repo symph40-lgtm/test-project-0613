@@ -141,6 +141,12 @@ export default async function NewModelPage() {
     [/^predict_tr_hxF/, "하이닉스 F 판정"], [/^predict_prog5_hxF/, "하이닉스 진행성"],
     [/^predict_ssv2_entry/, "삼성전자 진입"], [/^predict_ssv2_rev/, "삼성전자 전환"], [/^predict_ssv2_stop/, "삼성전자 스탑"],
     [/^predict_ssv2_conf/, "삼성전자 동의"], [/^predict_ssv2_eod/, "삼성전자 결산"], [/^predict_ssv2_start/, "삼성전자 시범 시작"],
+    // [발주자 확인 8/24] 미표기 누락 보강 — 피셔 M/본(하닉·삼전)·삼전 진입결정(10시)·1박 청산·당일청산 지시:
+    // 로그(alerts)엔 전수 기록되는데 이 필터에 없어 화면 타임라인에서 빠졌던 8건 계열
+    [/^predict_tr_hx/, "하이닉스 피셔 판정"], [/^predict_tr_ss/, "삼성전자 피셔 판정"],
+    [/^predict_prog5_hx/, "하이닉스 진행성"], [/^predict_prog5_ss/, "삼성전자 진행성"],
+    [/^predict_ss_delay/, "삼성전자 진입결정(10시)"], [/^predict_ssv2_ovn/, "삼성전자 1박"], [/^predict_cw_ovn/, "하이닉스 1박"],
+    [/^predict_sell/, "하이닉스 당일청산 지시(15:10)"],
     [/^nm_audit/, "발송 점검"], [/^morning_/, "아침 브리핑"],
   ];
   const seen = new Set<string>();
@@ -156,6 +162,11 @@ export default async function NewModelPage() {
     const head = (m?.text ?? "").split("\n").slice(0, 2).join(" ").slice(0, 90);
     timeline.push({ t: kst, label: lab[1], head });
   }
+
+  // 카드별 오늘 판정 타임라인 (발주자 확인 8/24) — "창판정 진입: 판정 없음"이어도
+  // 피셔 트랙(F/M/본)·진행성·1박·청산 등 그날 진행된 판정 전부를 시각과 함께 카드 안에 표기
+  const hxTimeline = timeline.filter((x) => x.label.startsWith("하이닉스"));
+  const ssTimeline = timeline.filter((x) => x.label.startsWith("삼성전자"));
 
   // SOXX 오늘 타임라인 문자열 (ET 표기 — 문자와 동일)
   const usTimeline: string[] = [];
@@ -225,6 +236,7 @@ export default async function NewModelPage() {
         <p className="mt-2 text-[11px] leading-relaxed text-ink-48">
           규칙: 창1(1분 6봉)·F(07시창) 중 먼저 온 신호 100% 진입(프리장 확인가 직접 매수) · F선행일 창1 반대 시 전환 ·
           비이견일 1박(다음 세션 시가 청산) · 스탑 -2%(밤 재난선 -5%) · 인버스 +1% 후 0.9% 반등 시 이익 보호. 근거 246일 +141.6%p.
+          표의 일별·누적 %는 <b>판정 방향을 반영한 SOXX 지수 기준 가상 수익률</b>(하락 판정일은 하락분이 +) — SOXL/SOXS 배율·수수료 미반영.
           {usUpdated ? ` · 갱신 ${new Date(new Date(usUpdated).getTime() + 9 * 3600e3).toISOString().slice(5, 16).replace("T", " ")} KST` : ""}
         </p>
       </Card>
@@ -238,6 +250,14 @@ export default async function NewModelPage() {
         <Row label="창판정 진입" value={cwSt?.entryT ? `${cwSt.entryT} @ ${won(cwSt.entryPx)}원` : "판정 없음"} />
         {cwSt?.cutT ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
         {cwSt?.flipT ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
+        {hxTimeline.length ? (
+          <div className="mt-2 rounded-[10px] bg-pearl/50 px-3 py-2">
+            <p className="mb-1 text-[12px] font-semibold text-ink-48">오늘 판정 타임라인 (피셔 트랙 포함 — 창판정과 별개)</p>
+            {hxTimeline.map((x) => (
+              <p key={`${x.t}${x.label}`} className="py-0.5 text-[12px] text-ink-80">· {x.t} <b>{x.label.replace(/^하이닉스 /, "")}</b> — {x.head}</p>
+            ))}
+          </div>
+        ) : null}
         <div className="mt-3">
           <Row label={`창판정 누적 ${cwSc.length}일 (종가보유 기준)`} value={<b>{pp(sum(cwSc, (s) => s.holdPnl))}</b>} />
           <Row label="가상 사다리 채점 누적" value={`${pp(sum(ladder, (s) => s.pnl))} (${ladder.length}일)`} />
@@ -250,6 +270,8 @@ export default async function NewModelPage() {
           규칙: F 30%(방어일 15%) → 진행성 충족 70% → 전진 0.3/창동의 100% · 이견 청산+재진입 · 스탑 -2.5%(ETF -5%) ·
           당일 종가 청산 · 서킷 K3M2. 227일 +120.7%p. 사다리 증액 지침 문자는 8/6 시범부터.
           1박(8/8~ 페이퍼): 창·F 동의일은 종가 보유 → 익일 09:00 시가 청산, 비중은 창 확인 ≤10:00·비갭이면 100%·나머지 50% (217일 +192.2%p).
+          표의 일별·누적 %는 <b>판정 방향(레버/인버)을 반영한 본주 가격 기준 가상 수익률</b>(인버 판정일은 하락분이 +) — ETF 배율·수수료 미반영.
+          일별 행은 <b>창판정 진입일만</b> 기록 — 무판정일(피셔 트랙만 진행한 날 포함)은 표본 제외라 날짜가 빕니다(0% 아님).
         </p>
       </Card>
 
@@ -264,6 +286,14 @@ export default async function NewModelPage() {
         {ssSt?.revT ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
         {ssSt?.stop1T ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
         {ssSt?.stop2T ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
+        {ssTimeline.length ? (
+          <div className="mt-2 rounded-[10px] bg-pearl/50 px-3 py-2">
+            <p className="mb-1 text-[12px] font-semibold text-ink-48">오늘 판정 타임라인 (피셔 트랙 포함)</p>
+            {ssTimeline.map((x) => (
+              <p key={`${x.t}${x.label}`} className="py-0.5 text-[12px] text-ink-80">· {x.t} <b>{x.label.replace(/^삼성전자 /, "")}</b> — {x.head}</p>
+            ))}
+          </div>
+        ) : null}
         <div className="mt-3">
           <Row label={`누적 ${ssSc.length}일 (6봉 주기준)`} value={<b>{pp(sum(ssSc, (s) => s.p))}</b>} />
           <Row label="5봉 / 4봉 / 1.2판 (대조)" value={`${pp(sum(ssSc, (s) => s.p5))} / ${pp(sum(ssSc, (s) => s.p4))} / ${pp(sum(ssSc, (s) => s.p12))}`} />
@@ -276,6 +306,7 @@ export default async function NewModelPage() {
           규칙: 창(6봉 누적 순전진 1.0) 100% 진입 → 피셔F 반대 확인 시 전량 전환 → 종가 청산 · 스탑 ETF -3% ·
           F 선행일 관망 · 창 전환 무시. 232일 +112.8%p(F 0930 rebox판). 진입/전환 지침 문자는 8/6 시범부터.
           1박(8/8~ 페이퍼): 창·F 동의일은 종가 보유 → 익일 09:00 시가 청산, 비중은 창 확인 ≤10:00·비갭이면 100%·나머지 50% (217일 +198.5%p).
+          표의 일별·누적 %는 <b>판정 방향(레버/인버)을 반영한 본주 가격 기준 가상 수익률</b>(인버 판정일은 하락분이 + — 예: 8/24 +5.69% = 인버스 기준) — ETF 배율·수수료 미반영.
         </p>
       </Card>
 

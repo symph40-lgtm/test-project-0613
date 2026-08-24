@@ -714,7 +714,7 @@ async function checkpointStream(
             // 상단=액션만·하단=부연 (사용자 지시 2026-08-01 2차)
             text: ok
               ? `[예측·${pc.symKo} ${pc.tierKo} 진행확인]\n${pc.key === "hxF" && nmLive ? "▶같은 ETF를 계좌의 40%p 추가 매수 → 누적 70% (상한 엄수·초과 금지 — 신모델 2단. 추가분도 자동스탑설정 동일 설정)" : "▶유지 (비중 변경 없음)"}\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${dirKo} 방향으로 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%) 전진 → 기준(전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 충족, 정상. 과거 이 경우 ${st.ok}.`
-              : `[예측·${pc.symKo} ${pc.tierKo} 진행경보]\n▶해당 단계 비중 축소 검토\n무응답=유지\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad}.`,
+              : `[예측·${pc.symKo} ${pc.tierKo} 진행경보]\n▶해당 단계 ${pc.v === "leverage" ? "레버리지" : "인버스"} 매수분 축소 검토\n무응답=유지\n----\n${dirKo} 판정(${progConfT} ${confBar.close.toLocaleString()}원) 후 5분 — ${prog < 0 ? `판정 방향 반대로 ${Math.round(-prog).toLocaleString()}원(${pct(-prog)}%) 역행` : `전진 ${Math.round(prog).toLocaleString()}원(${pct(prog)}%)뿐`} → 기준(판정 방향으로 전진 ${Math.round(need).toLocaleString()}원=10일평균폭 ${Math.round(pc.r10).toLocaleString()}원의 10%) 미달, 힘없는 판정. 과거 이 경우 ${st.bad}.`,
             smsSubject: ok ? "예측 진행확인" : "예측 진행경보",
           });
         }
