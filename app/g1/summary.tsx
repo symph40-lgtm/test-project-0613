@@ -25,8 +25,14 @@ export type SumTable = {
   baseLine: string;          // 현재가(19:40 NXT) / 전일 종가·기준가 줄 (■1-5·■2-2)
   rows: SumRow[];
   actual: SumActual | null;
+  comments?: [string | null, string | null]; // 승인(勝因) 코멘트 (■5) — 실측 행 아래, 템플릿 자동 생성
   emptyNote?: string | null; // 행 전부 결측일 때 사유 (아침판 발행 전 등)
 };
+
+// ■4 누적 승률판 — 공식 심사 장부와 별개의 '전광판 집계' (열람용)
+export type BoardCell = { wins: number; coWins: number; med: number | null; n: number } | null; // n = 산입 밤수(트랙별)
+export type BoardRow = { key: string; ss: BoardCell; hx: BoardCell };
+export type BoardSection = { title: string; nightsSs: number; nightsHx: number; rows: BoardRow[] };
 
 const f2 = (v: number | null | undefined, sign = true) =>
   v == null ? "—" : `${sign && v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
@@ -105,6 +111,13 @@ function Table({ t }: { t: SumTable }) {
               })}
             </div>
           ) : null}
+          {/* ■5 승인 코멘트 — 실측 행 아래 1~2줄 (템플릿 자동 생성 · 자유 서술 금지) */}
+          {t.actual && t.comments?.some(Boolean) ? (
+            <div className="col-span-3 border-t border-hairline/40 px-1.5 py-1">
+              {t.comments[0] ? <p className="text-[13px] md:text-[11px] leading-snug text-ink-80"><b className="text-ink-48">삼전</b> {t.comments[0]}</p> : null}
+              {t.comments[1] ? <p className="text-[13px] md:text-[11px] leading-snug text-ink-80"><b className="text-ink-48">하닉</b> {t.comments[1]}</p> : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="rounded-[8px] bg-pearl/60 px-2 py-1.5 text-[13px] md:text-[11px] text-ink-48">{t.emptyNote ?? "발행 전"}</p>
@@ -113,9 +126,41 @@ function Table({ t }: { t: SumTable }) {
   );
 }
 
-export function SummaryTables({ evening, morning, nav }: {
+// ■4 누적 승률판 — 승수·공동승 + 오차 중앙값 병기 (승수만으론 "한 번 크게 맞는" 트랙을 못 가림)
+export function ScoreBoard({ sections }: { sections: BoardSection[] }) {
+  if (!sections.some((s) => s.rows.length)) return null;
+  const cellTxt = (c: BoardCell) => c == null || c.n === 0 ? <span className="text-ink-48">—</span> : (
+    <span>{c.wins}승{c.coWins ? <span className="text-ink-48">(공동 {c.coWins})</span> : null} · <span className="text-ink-48">중앙값 {c.med != null ? c.med.toFixed(2) + "pp" : "—"} ({c.n}밤)</span></span>
+  );
+  return (
+    <div className="mb-2 rounded-[14px] border border-hairline bg-canvas p-3">
+      <p className="mb-1 text-[15px] md:text-[13px] font-semibold text-ink-80">누적 전적 (공식 채점 기준 · 최근접 판정 = 승, 동률 공동승)</p>
+      {sections.map((s) => (
+        <div key={s.title} className="mb-1.5">
+          <p className="text-[13px] md:text-[11px] font-semibold text-ink-48">{s.title} — 삼전 {s.nightsSs}밤 · 하닉 {s.nightsHx}밤</p>
+          <div className="grid grid-cols-[minmax(64px,auto)_1fr_1fr] border-t border-hairline/60">
+            <div className="px-1.5 py-0.5 text-[12px] md:text-[10px] font-semibold text-ink-48">트랙</div>
+            <div className="px-1.5 py-0.5 text-[12px] md:text-[10px] font-semibold text-ink-48">삼전</div>
+            <div className="px-1.5 py-0.5 text-[12px] md:text-[10px] font-semibold text-ink-48">하닉</div>
+            {s.rows.map((r) => (
+              <div key={r.key} className="contents">
+                <div className="border-t border-hairline/40 px-1.5 py-0.5 text-[13px] md:text-[11px] text-ink-80">{r.key}</div>
+                <div className="border-t border-hairline/40 px-1.5 py-0.5 text-[13px] md:text-[11px] text-ink-80">{cellTxt(r.ss)}</div>
+                <div className="border-t border-hairline/40 px-1.5 py-0.5 text-[13px] md:text-[11px] text-ink-80">{cellTxt(r.hx)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="text-[12px] md:text-[10px] text-ink-48">전광판 집계(열람용) — v2·v2.1 공식 심사 장부와 별개 (심사는 기존 규정). 집계 시작 8/18(정본 리셋) · late 표본·미 휴장 밤 제외 · 밤 산입 = 값 있는 트랙 ≥2.</p>
+    </div>
+  );
+}
+
+export function SummaryTables({ evening, morning, nav, board }: {
   evening: SumTable | null; morning: SumTable | null;
   nav: { night: string; prevHref: string; nextHref: string | null };
+  board?: BoardSection[];
 }) {
   const mdOf = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   return (
@@ -128,6 +173,7 @@ export function SummaryTables({ evening, morning, nav }: {
       </div>
       {evening ? <Table t={evening} /> : null}
       {morning ? <Table t={morning} /> : null}
+      {board ? <ScoreBoard sections={board} /> : null}
       <p className="text-[12px] md:text-[10px] text-ink-48">표기: 애프터比(T2 19:40 기준가) 우선 · 종가比 소자 병기 — 오차·굵게(최근접)는 종가比 자. 아침판 = T2 계열 재실행(07:00) · R1/v1.1c = 번역 엔진 공식 발행(07:15) — 별개 엔진.</p>
     </div>
   );

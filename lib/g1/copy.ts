@@ -241,3 +241,69 @@ export function toAfterBasis(closeBasisPct: number | null, entryPx: number | nul
 }
 export const BIG_AFTER_BADGE = (closePct: number | null, afterPct: number | null) =>
   closePct != null && afterPct != null && Math.abs(closePct - afterPct) >= 3 ? "⚡애프터 대변동 밤" : null;
+
+// ── 승인(勝因) 코멘트 (발주자 발주 보강 8/24 ■5) — 템플릿 자동 생성, 자유 서술 금지 ──
+// 조립 규칙: ①승자(실측 최근접)의 거리를 가장 줄인 성분 특정 ②패자(최대 오차)의 원인 성분+빗나간 방향
+// ③고정 템플릿 ④특수 밤 태그는 호출부가 tags로 병기 ⑤1·2위 오차차 <0.3pp = "혼전" 정직 표기 (억지 서사 금지).
+export type TrackObs = {
+  key: string;                    // 표기명: T2 / v2 / v2.1 / T2아침 / R1 / v1.1c ...
+  pct: number | null;             // 최종 예상갭 (종가比)
+  basePct?: number | null;        // v2 계열: 야간선물 base(β환산 종목 종가比) — base vs drift 기여 분해용
+  nxtPct?: number | null;         // T2 계열: NXT 기반영(애프터 유지 시 종가比) — 잔여갭 차감항 분해용
+  experts?: Record<string, number> | null; // R1/v1.1c: 전문가별 예측치 (nf 포함 가능) — 기여 분해용
+};
+const fpp = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+function winnerReason(t: TrackObs, actual: number): string {
+  const finalErr = Math.abs((t.pct ?? 0) - actual);
+  if (t.basePct != null) {
+    // v2 계열: drift 조정이 base보다 실측에 다가갔으면 drift 주역, 아니면 base 주역
+    const baseErr = Math.abs(t.basePct - actual);
+    return finalErr <= baseErr - 0.05
+      ? `drift 조정(${fpp(t.basePct)}→${fpp(t.pct!)})이 거리 축소`
+      : `야간선물 base(${fpp(t.basePct)})가 실측(${fpp(actual)})에 근접`;
+  }
+  if (t.nxtPct != null) {
+    const nxtErr = Math.abs(t.nxtPct - actual);
+    return finalErr <= nxtErr - 0.05
+      ? `잔여갭 차감항(${fpp(t.nxtPct)}→${fpp(t.pct!)})이 거리 축소`
+      : `NXT 기반영(${fpp(t.nxtPct)})이 실측에 근접`;
+  }
+  if (t.experts) {
+    const best = Object.entries(t.experts).sort((a, b) => Math.abs(a[1] - actual) - Math.abs(b[1] - actual))[0];
+    if (best) return `${best[0]} 전문가(${fpp(best[1])})가 실측에 근접`;
+  }
+  return `결합 추정(${fpp(t.pct!)})이 실측에 근접`;
+}
+function loserReason(t: TrackObs, actual: number): string {
+  const miss = (t.pct ?? 0) - actual;
+  const dir = miss > 0 ? "상방 과대" : "하방 과대";
+  const finalErr = Math.abs(miss);
+  if (t.basePct != null) {
+    const baseErr = Math.abs(t.basePct - actual);
+    return finalErr > baseErr + 0.05
+      ? `drift 조정이 악화(${fpp(t.basePct)}→${fpp(t.pct!)})`
+      : `base(β 경유)가 ${dir}`;
+  }
+  if (t.nxtPct != null) {
+    const nxtErr = Math.abs(t.nxtPct - actual);
+    return finalErr > nxtErr + 0.05
+      ? `잔여갭 차감항이 애프터 경로를 놓침(${fpp(t.nxtPct)}→${fpp(t.pct!)})`
+      : `NXT 경로 자체가 ${dir}`;
+  }
+  if (t.experts) {
+    const worst = Object.entries(t.experts).sort((a, b) => Math.abs(b[1] - actual) - Math.abs(a[1] - actual))[0];
+    if (worst) return `${worst[0]} 전문가(${fpp(worst[1])})가 ${dir}`;
+  }
+  return `결합 추정이 ${dir}`;
+}
+export function winComment(a: { actual: number | null; tracks: TrackObs[]; tags: string[] }): string | null {
+  if (a.actual == null) return null;
+  const valid = a.tracks.filter((t) => t.pct != null);
+  if (valid.length < 2) return null; // 단독 트랙 밤 — 대결 서사 없음
+  const sorted = [...valid].sort((x, y) => Math.abs(x.pct! - a.actual!) - Math.abs(y.pct! - a.actual!));
+  const tag = a.tags.length ? a.tags.join(" ") + " " : "";
+  const w = sorted[0], second = sorted[1], l = sorted[sorted.length - 1];
+  const wErr = Math.abs(w.pct! - a.actual), sErr = Math.abs(second.pct! - a.actual);
+  if (sErr - wErr < 0.3) return `${tag}혼전 — 단일 승인 특정 불가 (1·2위 오차차 ${(sErr - wErr).toFixed(2)}pp)`;
+  return `${tag}${w.key} 승 — ${winnerReason(w, a.actual)} (오차 ${wErr.toFixed(2)}pp). ${l.key}는 ${loserReason(l, a.actual)} (${fpp(l.pct!)} 예상, 오차 ${Math.abs(l.pct! - a.actual).toFixed(2)}pp).`;
+}

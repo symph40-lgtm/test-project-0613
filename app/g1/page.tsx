@@ -11,7 +11,8 @@ import { BIG_AFTER_BADGE, conflictV2, dualBasis, nfFlowLines, nfSessionEveningHe
 import { mtCardLines, MT_DISCLAIMER } from "@/lib/mt/report";
 import type { MtDay } from "@/lib/mt/types";
 import { NightFutSection, ThreePanelChart, type NightCurve, type PanelPoint } from "./nightfut";
-import { SummaryTables, type SumTable, type SumCell } from "./summary";
+import { SummaryTables, type SumTable, type SumCell, type BoardSection, type BoardCell } from "./summary";
+import { winComment, type TrackObs } from "@/lib/g1/copy";
 
 export const dynamic = "force-dynamic";
 
@@ -171,13 +172,91 @@ export default async function G1Page({ searchParams }: { searchParams?: Promise<
   const viewNight = dParam ?? aLatest ?? new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const viewLabel = nextKrxDay(viewNight);
   const isLatestView = viewNight === (aLatest ?? viewNight);
-  // 뷰 밤 행 — 최근 8일 캐시 밖(과거 조회)도 동작하도록 항상 대상 날짜로 재조회 (2건·경량)
-  const [viewA0, viewB0] = await Promise.all([
+  // 뷰 밤 행 — 최근 8일 캐시 밖(과거 조회)도 동작하도록 항상 대상 날짜로 재조회 (경량)
+  // + 전광판 누적 이력 (■4): 집계 시작 8/18 = effective_start 리셋 (오염 이전 제외, 기존 규약)
+  const BOARD_START = "2026-08-18";
+  const [viewA0, viewB0, histA0, histB0] = await Promise.all([
     admin.from("g1a_days").select("*").eq("date", viewNight),
     admin.from("g1b_days").select("date,symbol,night,r1,labels").eq("date", viewLabel),
+    admin.from("g1a_days").select("date,symbol,t2").gte("date", BOARD_START),
+    admin.from("g1b_days").select("date,symbol,night,r1,labels").gte("date", BOARD_START),
   ]);
   const viewA = ((viewA0.data ?? []) as G1ARow[]).sort(bySymOrder);
   const viewB = ((viewB0.data ?? []) as G1BRow[]).sort(bySymOrder);
+  const histA = (histA0.data ?? []) as { date: string; symbol: string; t2: Record<string, unknown> | null }[];
+  const histB = (histB0.data ?? []) as G1BRow[];
+  // 트랙 관측치 추출 (■4 전광판·■5 승인 코멘트 공용) — 성분 분해 재료: v2 계열 base, T2 NXT 기반영, R1/v1.1c 전문가
+  const trackObsOf = (t2x: Record<string, unknown> | null, gb: G1BRow | undefined): { evening: TrackObs[]; morning: TrackObs[] } => {
+    const cv0 = t2x?.conflict_v2 as { openExp_resid?: number | null } | undefined;
+    const vd = t2x?.verdict as { r_nxt_pre_entry?: number | null } | undefined;
+    const sv2 = t2x?.shadow_v2 as { expected_gap_pct?: number | null; base_stock_pct?: number | null; late?: boolean } | undefined;
+    const sv21 = t2x?.shadow_v21 as { expected_gap_pct?: number | null; base_stock_pct?: number | null; late?: boolean } | undefined;
+    const m07 = t2x?.morning_0700 as { t2?: { open_exp_pct?: number | null } | null; v2?: { expected_gap_pct?: number | null; base_stock_pct?: number | null } | null; v21?: { expected_gap_pct?: number | null; base_stock_pct?: number | null } | null } | null | undefined;
+    const r1x = gb?.r1 as Record<string, unknown> | null | undefined;
+    const experts = (r1x?.experts ?? null) as Record<string, number> | null;
+    const champExperts = experts ? Object.fromEntries(Object.entries(experts).filter(([k]) => k !== "night_fut_ref")) : null;
+    const v11cExperts = experts ? Object.fromEntries(Object.entries(experts).map(([k, val]) => [k === "night_fut_ref" ? "nf" : k, val])) : null;
+    const nxtClose = ((gb?.night as Record<string, unknown> | null)?.nxt_close_pct as number | null | undefined) ?? null;
+    return {
+      // late 표본은 공식 집계 제외 (기존 회계 규약 — ■4-5)
+      evening: [
+        { key: "T2", pct: cv0?.openExp_resid ?? null, nxtPct: vd?.r_nxt_pre_entry ?? null },
+        ...(sv2?.late ? [] : [{ key: "v2", pct: sv2?.expected_gap_pct ?? null, basePct: sv2?.base_stock_pct ?? null }]),
+        ...(sv21?.late ? [] : [{ key: "v2.1", pct: sv21?.expected_gap_pct ?? null, basePct: sv21?.base_stock_pct ?? null }]),
+      ],
+      morning: [
+        { key: "T2아침", pct: m07?.t2?.open_exp_pct ?? null, nxtPct: nxtClose },
+        { key: "v2아침", pct: m07?.v2?.expected_gap_pct ?? null, basePct: m07?.v2?.base_stock_pct ?? null },
+        { key: "v2.1아침", pct: m07?.v21?.expected_gap_pct ?? null, basePct: m07?.v21?.base_stock_pct ?? null },
+        { key: "R1", pct: (r1x?.fair_gap_pct as number | null | undefined) ?? null, experts: champExperts },
+        { key: "v1.1c", pct: ((r1x?.challenger_v11c as { fair_gap_pct?: number | null } | undefined)?.fair_gap_pct) ?? null, experts: v11cExperts },
+      ],
+    };
+  };
+  // ■4 누적 승률판 — 전광판 집계 (공식 심사 장부와 별개·열람용). 승=최근접(동률 0.005pp 공동승), 밤 산입=값 있는 트랙 ≥2
+  const board: BoardSection[] = (() => {
+    const KEYS_E = ["T2", "v2", "v2.1"], KEYS_M = ["T2아침", "v2아침", "v2.1아침", "R1", "v1.1c"];
+    type T = { wins: number; coWins: number; errs: number[] };
+    const tal: Record<"E" | "M", Record<string, Record<string, T>>> = { E: {}, M: {} };
+    const nights: Record<"E" | "M", Record<string, number>> = { E: { "005930": 0, "000660": 0 }, M: { "005930": 0, "000660": 0 } };
+    for (const gb of histB) {
+      const actual = (gb.labels as { actual_gap_pct?: number } | null)?.actual_gap_pct;
+      if (actual == null) continue;
+      const cov = (gb.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string } | undefined;
+      if (cov?.kind === "none") continue; // 커버리지 공백 밤(미 휴장) 제외 — ■4-5
+      const sess = (gb.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? prevKrxDay(gb.date);
+      const t2x = histA.find((x) => x.symbol === gb.symbol && x.date === sess)?.t2 ?? null;
+      const obs = trackObsOf(t2x, gb);
+      for (const [pan, list] of [["E", obs.evening], ["M", obs.morning]] as const) {
+        const valid = list.filter((t) => t.pct != null);
+        if (valid.length < 2) continue;
+        nights[pan][gb.symbol] = (nights[pan][gb.symbol] ?? 0) + 1;
+        const errs = valid.map((t) => ({ key: t.key, err: Math.abs(t.pct! - actual) }));
+        const min = Math.min(...errs.map((e) => e.err));
+        const winners = errs.filter((e) => e.err <= min + 0.005);
+        for (const e of errs) {
+          const bySym = (tal[pan][gb.symbol] ??= {});
+          const cellT = (bySym[e.key] ??= { wins: 0, coWins: 0, errs: [] });
+          cellT.errs.push(e.err);
+          if (e.err <= min + 0.005) { cellT.wins++; if (winners.length > 1) cellT.coWins++; }
+        }
+      }
+    }
+    const medOf = (xs: number[]) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
+    const mkRows = (pan: "E" | "M", keys: string[]) => keys.map((k) => {
+      const c = (sym: string): BoardCell => {
+        const t = tal[pan][sym]?.[k];
+        if (!t) return null;
+        const mv = medOf(t.errs);
+        return { wins: t.wins, coWins: t.coWins, med: mv != null ? Math.round(mv * 100) / 100 : null, n: t.errs.length };
+      };
+      return { key: k, ss: c("005930"), hx: c("000660") };
+    });
+    return [
+      { title: "저녁판 (절단 19:35)", nightsSs: nights.E["005930"], nightsHx: nights.E["000660"], rows: mkRows("E", KEYS_E) },
+      { title: "아침판 (절단 07:00 / R1·v1.1c 07:15)", nightsSs: nights.M["005930"], nightsHx: nights.M["000660"], rows: mkRows("M", KEYS_M) },
+    ];
+  })();
   const summary = (() => {
     const SYMS = ["005930", "000660"] as const;
     type PerSym = {
@@ -267,6 +346,21 @@ export default async function G1Page({ searchParams }: { searchParams?: Promise<
       actual,
       emptyNote: `${md(viewLabel)} 아침 발행 전 — 아침판 07:00 · 공식 발행 07:15 (기록 후 자동 표시)`,
     };
+    // ■5 승인(勝因) 코멘트 — 실측 있는 밤만, 템플릿 자동 생성 (특수 밤 태그 병기)
+    if (actual) {
+      const tagsOf = (i: number): string[] => {
+        const tags: string[] = [];
+        if (ps[i].cv?.conflict) tags.push("⚠시장 간 이견 밤");
+        if ((ps[i].t2x?.e_record as { grade?: string | null } | undefined)?.grade) tags.push("[E]");
+        const cov = (ps[i].gb?.night as Record<string, unknown> | null)?.nf_coverage as { kind?: string } | undefined;
+        if (cov?.kind === "partial" || cov?.kind === "none") tags.push("연휴 공백");
+        return tags;
+      };
+      const cm = (kind: "evening" | "morning") => [0, 1].map((i) =>
+        winComment({ actual: actual.cells[i]?.gapClose ?? null, tracks: trackObsOf(ps[i].t2x, ps[i].gb)[kind], tags: tagsOf(i) })) as [string | null, string | null];
+      if (evening) evening.comments = cm("evening");
+      morning.comments = cm("morning");
+    }
     return { evening, morning };
   })();
 
@@ -277,7 +371,7 @@ export default async function G1Page({ searchParams }: { searchParams?: Promise<
       {pauseBadge ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[13px] md:text-[11px] font-semibold text-amber-800">📵 {pauseBadge} — 발송만 차단, 판정·기록·채점 정상 (장애 통지만 예외)</span> : null}
       </div>
       {/* [발주자 발주 8/24] 상단 판정 요약표 2종 — 저녁판·아침판 + 실측 행, 날짜 이동. 상세는 아래 카드(셀 탭 이동) */}
-      <SummaryTables evening={summary.evening} morning={summary.morning}
+      <SummaryTables evening={summary.evening} morning={summary.morning} board={board}
         nav={{ night: viewNight, prevHref: `/g1?d=${prevKrxDay(viewNight)}`, nextHref: isLatestView ? null : `/g1?d=${nextKrxDay(viewNight)}` }} />
 
       {/* A5: 운영 순서 고정 안내 */}
