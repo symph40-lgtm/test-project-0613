@@ -151,7 +151,7 @@ export default async function NewModelPage() {
   ];
   const seen = new Set<string>();
   // result = 문자 첫 줄에서 [제목] 뗀 판정 결과 · dir = 인버(파랑)/레버(빨강) 색 구분 (발주자 표기 지시 8/24 밤)
-  const timeline: { t: string; label: string; head: string; result: string; dir: "up" | "down" | null }[] = [];
+  const timeline: { t: string; label: string; head: string; result: string; dir: "up" | "down" | null; action: string | null }[] = [];
   for (const r of todayAlerts ?? []) {
     const m = r.message as { alertKey?: string; text?: string } | null;
     const k = m?.alertKey ?? "";
@@ -166,7 +166,9 @@ export default async function NewModelPage() {
     const result = (line1.replace(/^\[[^\]]*\]\s*/, "") || line1).slice(0, 72);
     const kd = `${k} ${line1}`;
     const dir: "up" | "down" | null = /inverse|인버|하락|SOXS/.test(kd) ? "down" : /leverage|레버|상승|SOXL/.test(kd) ? "up" : null;
-    timeline.push({ t: kst, label: lab[1], head, result, dir });
+    // 액션 병기 (발주자 지시 8/24 밤 2차): 문자 본문의 첫 ▶줄 = 그 판정에서 해야 할 매도·매수·비율
+    const action = (text.split("\n").find((l) => l.trim().startsWith("▶")) ?? "").replace(/^▶\s*/, "").slice(0, 96) || null;
+    timeline.push({ t: kst, label: lab[1], head, result, dir, action });
   }
 
   // 판정 결과 통합 섹션 (발주자 지시 8/24 밤 — '지금 할 액션' 바로 아래): 창판정 무판정일에도
@@ -216,6 +218,7 @@ export default async function NewModelPage() {
                   <b className="font-mono text-[12px]">{x.t}</b>{" "}
                   <span className="text-[12px] text-ink-48">{x.label.replace(new RegExp(`^${nm} `), "")}</span>{" "}
                   <b className={x.dir === "down" ? "text-blue-600" : x.dir === "up" ? "text-red-600" : "text-ink-80"}>{x.result}</b>
+                  {x.action ? <span className="block pl-4 text-[12px] font-semibold text-amber-700">→ 할 일: {x.action}</span> : null}
                 </p>
               ))
             )}
