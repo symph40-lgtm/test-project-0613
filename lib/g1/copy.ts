@@ -150,11 +150,14 @@ export function nfFlowLines(nf: {
   bars: { t: string; pct: number }[]; level?: { pct: number } | null; dc_nf?: number | null;
 }, betaSs: number, betaHx: number): string[] {
   if (!nf.bars.length) return [];
-  const cum = nf.level?.pct ?? nf.bars[nf.bars.length - 1].pct;
+  // [발주자 지적 8/25 아침 — 표기 버그 정정] 흐름 줄의 현재/마감값 = 마지막 봉 (level.pct는 19:35 절단
+  // 동결값 — 판정·교차 검증 줄 전용). 종전엔 동결값을 '06:00 마감'으로 오표기 (+0.48 vs 실제 -1.77).
+  // 일관성도 동결 dc_nf 대신 봉 전체에서 라이브 산출 — 동결값은 계기판·판정 기록에 그대로 남는다.
+  const cum = nf.bars[nf.bars.length - 1].pct;
   const lastT = nf.bars[nf.bars.length - 1].t;
   const deltas = nf.bars.map((b, i) => (i === 0 ? b.pct : b.pct - nf.bars[i - 1].pct)).filter((d) => d !== 0);
   const agree = deltas.filter((d) => Math.sign(d) === Math.sign(cum)).length;
-  const cons = nf.dc_nf != null ? Math.round(nf.dc_nf * 100) : null;
+  const cons = deltas.length >= 3 ? Math.round((100 * agree) / deltas.length) : null;
   const line1 = `야간선물 흐름: 18:00 개장 → ${lastT} 현재 ${sgn(cum)} (${cum >= 0 ? "상승" : "하락"} 흐름, 10분봉 ${agree}/${deltas.length}개 동방향${cons != null ? ` = 일관성 ${cons}%` : ""})`;
   const line2 = cons == null
     ? `봉 ${deltas.length}개 — 일관성 산출 대기 (3개부터)`
