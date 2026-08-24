@@ -563,7 +563,8 @@ async function recordNightBars(hhmm: string, date: string, notes: string[]): Pro
         const pct = (q as { changePercent?: number | null })?.changePercent;
         if (typeof pct !== "number") return;      // 세션 없음·결측 — 다음 틱 재시도
         const vol = (q as { volume?: number | null })?.volume;
-        // [발주자 8/20 밤 23시] SOXX·나스닥100(NQ=F)도 같은 봉에 병기 — SOXX는 미 정규장(22:30~05:00)만 값이 있음(그 외 null)
+        // [발주자 8/20 밤 23시] SOXX·나스닥100(NQ=F)도 같은 봉에 병기 — SOXX는 프리장(17:00 KST~)·정규장(22:30~05:00) 라이브,
+        // 그 외 null (8/24 교정: 프리장 중 정규장 정체값을 기록하던 결함 — dayChange가 marketState로 분기)
         const { dayChange, nqSince16kst } = await import("./nightwatch");
         const [soxx, nq] = await Promise.all([dayChange("SOXX"), nqSince16kst()]);
         snap = { pct, vol: typeof vol === "number" ? vol : null, soxx, nq };

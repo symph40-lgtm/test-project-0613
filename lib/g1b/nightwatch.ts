@@ -23,6 +23,12 @@ export type Checkpoint = {
 export async function dayChange(sym: string): Promise<number | null> {
   try {
     const q = await yf.quote(sym) as { regularMarketChangePercent?: number; preMarketChangePercent?: number; marketState?: string };
+    // [발주자 지적 8/24 20:06] 프리마켓 중(marketState PRE)엔 regular 등락률이 '직전 정규장 마감값'으로 정체 —
+    // 그 정체값을 당일 값처럼 기록하던 결함 교정: PRE엔 프리장 라이브(전일 종가 대비, 같은 기준)만 쓰고, 없으면 null.
+    if (q.marketState === "PRE") {
+      const p = q.preMarketChangePercent;
+      return typeof p === "number" ? Math.round(p * 100) / 100 : null;
+    }
     const v = q.regularMarketChangePercent;
     return typeof v === "number" ? Math.round(v * 100) / 100 : null;
   } catch { return null; }
