@@ -23,6 +23,9 @@ export async function runMorning0700(symbol: G1ASymbol, sessionNight: string, hh
     admin.from("g1a_days").select("t2").eq("date", sessionNight).eq("symbol", symbol).maybeSingle(),
     admin.from("g1b_days").select("night,r1").eq("date", today).eq("symbol", symbol).maybeSingle(),
   ]);
+  // [사고 8/24] 첫 판정 무음 미기록 — 조회·저장 실패를 삼키지 않는다 (무음 실패 금지, 8/10 교훈)
+  if (ga.error) throw new Error(`g1a 조회 실패: ${ga.error.message}`);
+  if (gb.error) throw new Error(`g1b 조회 실패: ${gb.error.message}`);
   const t2e = (ga.data?.t2 ?? null) as Record<string, unknown> | null;
   if (!t2e) return null;
   if ((t2e as { morning_0700?: unknown }).morning_0700) return (t2e as { morning_0700?: Morning0700 }).morning_0700 ?? null; // 1회
@@ -89,6 +92,7 @@ export async function runMorning0700(symbol: G1ASymbol, sessionNight: string, hh
   }
   const out: Morning0700 = { t: hhmm, session_night: sessionNight, t2: mT2, v2: mV2, v21: mV21 };
   (t2e as Record<string, unknown>).morning_0700 = out;
-  await admin.from("g1a_days").update({ t2: t2e }).eq("date", sessionNight).eq("symbol", symbol);
+  const up = await admin.from("g1a_days").update({ t2: t2e }).eq("date", sessionNight).eq("symbol", symbol);
+  if (up.error) throw new Error(`morning_0700 저장 실패: ${up.error.message}`);
   return out;
 }

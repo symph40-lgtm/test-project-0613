@@ -183,13 +183,27 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
     }
     // [발주자 발주 8/23 — 3트랙 아침 07:00 판정] 기존 */10 크론의 07:00 슬롯 재사용. 문자 없음(웹 전용).
     // 채점 정본 = 저녁 19:45 불변 — morning_0700 별도 장부 (공식 심사 미산입).
+    // [사고 8/24 — 첫 판정 무음 미기록] 시도·실패를 night.m07_log에 영속 기록 (notes는 휘발 — 사후 규명 불가였음).
+    // 실패 시 다음 틱 재시도 허용 (ok=true일 때만 1회 가드). 본판정·R1 무접촉 원칙 유지 — 예외는 삼키되 기록.
     if (hhmm >= "07:00" && hhmm < "07:15") {
-      try {
-        const sessionNight0700 = (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
-        const { runMorning0700 } = await import("@/lib/g1a/morning0700");
-        const m = await runMorning0700(symbol as "005930" | "000660", sessionNight0700, hhmm);
-        if (m) notes.push(`${symbol} 아침판 07:00 — T2 ${m.t2?.open_exp_pct ?? "—"} / v2 ${m.v2?.expected_gap_pct ?? "—"} / v2.1 ${m.v21?.expected_gap_pct ?? "—"}`);
-      } catch { /* 아침판 결측 허용 — 본판정·R1 무접촉 */ }
+      const nlog = (row.night ?? {}) as Record<string, unknown>;
+      const prevLog = nlog.m07_log as { ok?: boolean } | undefined;
+      if (!prevLog?.ok) {
+        let logEntry: Record<string, unknown>;
+        try {
+          const sessionNight0700 = (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+          const { runMorning0700 } = await import("@/lib/g1a/morning0700");
+          const m = await runMorning0700(symbol as "005930" | "000660", sessionNight0700, hhmm);
+          logEntry = { t: hhmm, ok: m != null, ...(m ? {} : { note: "세션 밤 t2 없음(휴장 등)" }) };
+          if (m) notes.push(`${symbol} 아침판 07:00 — T2 ${m.t2?.open_exp_pct ?? "—"} / v2 ${m.v2?.expected_gap_pct ?? "—"} / v2.1 ${m.v21?.expected_gap_pct ?? "—"}`);
+        } catch (e) {
+          logEntry = { t: hhmm, ok: false, err: (e instanceof Error ? e.message : String(e)).slice(0, 160) };
+          notes.push(`${symbol} 아침판 실패 — ${String(logEntry.err)}`);
+        }
+        nlog.m07_log = logEntry;
+        row.night = nlog as Record<string, Obs>;
+        await saveRow(row);
+      }
     }
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
     // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
