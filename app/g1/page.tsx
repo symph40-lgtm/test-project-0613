@@ -244,7 +244,15 @@ export default async function G1Page() {
           const b = betaOf[s] ?? 1.4;
           return { name: s === "005930" ? "삼" : "하", t: sv?.t ?? "19:45", idxPct: sv?.expected_gap_pct != null && b > 0 ? Math.round((sv.expected_gap_pct / b) * 100) / 100 : null };
         });
-        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v21Marks={v21Marks} v2Hourly={v2Hourly} />;
+        // [발주 8/23] 아침판 3마커 — 세션 밤 행의 morning_0700 (지수축 = ÷β, 두 종목 평균 대신 삼전 기준 표기·범례 명기)
+        const m07 = (aRows.find((x) => x.symbol === "005930" && x.date === curve.sessionNight)?.t2 as { morning_0700?: { t2?: { open_exp_pct?: number | null } | null; v2?: { expected_gap_pct?: number | null } | null; v21?: { expected_gap_pct?: number | null } | null } } | null)?.morning_0700;
+        const bSs = betaOf["005930"] || 1.316;
+        const morningMarks = m07 ? [
+          { track: "T2" as const, idxPct: m07.t2?.open_exp_pct != null ? Math.round((m07.t2.open_exp_pct / bSs) * 100) / 100 : null },
+          { track: "v2" as const, idxPct: m07.v2?.expected_gap_pct != null ? Math.round((m07.v2.expected_gap_pct / bSs) * 100) / 100 : null },
+          { track: "v2.1" as const, idxPct: m07.v21?.expected_gap_pct != null ? Math.round((m07.v21.expected_gap_pct / bSs) * 100) / 100 : null },
+        ] : [];
+        return <NightFutSection curve={curve} betaSs={betaOf["005930"]} betaHx={betaOf["000660"]} t2Marks={t2Marks} v2Marks={v2Marks} v21Marks={v21Marks} v2Hourly={v2Hourly} morningMarks={morningMarks} />;
       })()}
 
       {/* A1: G1A T2 — 맨 위 */}
@@ -373,6 +381,13 @@ export default async function G1Page() {
                 value={<span className="text-[14px] md:text-[11px]">base {pp(v21.base_stock_pct)} + drift {dr?.invalidated ? `무효화(${dr.invalidated})` : `${dr?.dir ?? "중립"}·확신 ${Math.round((dr?.conf ?? 0) * 100)}%`} → 예상갭 {pp(v21.expected_gap_pct)}{votes ? ` (${votes})` : ""}{v21.inputs?.events?.tier2?.length ? ` · 2급 ${v21.inputs.events.tier2.join("·")}` : ""}</span>} />;
             })()}
             {(() => {
+              // [발주 8/23] 아침 07:00 갱신판 (3트랙) — 세션 밤 행 morning_0700. 채점 정본은 저녁 판정(별도 장부).
+              const m07c = (r.t2 as { morning_0700?: { t?: string; t2?: { score?: number | null; open_exp_pct?: number | null; grade?: string } | null; v2?: { expected_gap_pct?: number | null; drift_dir?: string } | null; v21?: { expected_gap_pct?: number | null; drift_dir?: string } | null } } | null)?.morning_0700;
+              if (!m07c) return <Row label="아침 07:00 갱신판 (3트랙·별도 장부)" value="첫 판정 8/24(월) 07:00 — 저녁 판정과 구분" />;
+              return <Row label={`아침 07:00 갱신판 (${m07c.t ?? "07:00"} 절단·별도 장부 — 채점 정본은 저녁)`}
+                value={<span className="text-[14px] md:text-[11px]">T2 점수 {m07c.t2?.score ?? "—"}·시가예상 {pp(m07c.t2?.open_exp_pct)} · v2 {pp(m07c.v2?.expected_gap_pct)}({m07c.v2?.drift_dir ?? "—"}) · v2.1 {pp(m07c.v21?.expected_gap_pct)}({m07c.v21?.drift_dir ?? "—"})</span>} />;
+            })()}
+            {(() => {
               // [발주자 검수 8/20 밤 §2] 화면 정리: v2가 챌린저 정본 줄 — 구 T2+ 섀도(v1)·모자이크는 접힘으로 강등 (기록·집계는 분리 보존)
               const p = (r.t2 as { pieces?: Record<string, number | null> })?.pieces;
               const mo = (r.t2 as { mosaic?: { last?: { dir?: string; score?: number } } })?.mosaic;
@@ -488,7 +503,15 @@ export default async function G1Page() {
             const ev = fwx.evening, mo = fwx.morning;
             return (<>
               <Row label="저녁판 대조 (19:35 동일 절단)" value={<span className="text-[15px] md:text-[12px]">룰 {fw.rule_score ?? "—"}{mk(fw.hit?.rule)} · 야간선물 {pp(fw.nf_cut1935_pct)}{mk(fw.hit?.nf)} · 저녁 번역(NXT 경로) {ev?.resid_open_exp != null ? <>{pp(ev.resid_open_exp)}{mk(ev.hit_resid)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
-              <Row label="아침판 대조 (07:15 절단)" value={<span className="text-[15px] md:text-[12px]">챔피언 R1 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · 챌린저 v1.1c {mo?.v11c_pct != null ? <>{pp(mo.v11c_pct)}{mk(mo.hit_v11c)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
+              {(() => {
+                // [발주 8/23 §3] 아침판(07:00) 행 — 3트랙·별도 장부. (참고) 07:15 = 공식 발행(별개 엔진), 절단 시각 차 명기
+                const sess = (r.r1 as { g1a_ref?: { date?: string } } | null)?.g1a_ref?.date ?? "";
+                const a07 = (aRows.find((x) => x.symbol === r.symbol && x.date === sess)?.t2 as { morning_0700?: { t2?: { open_exp_pct?: number | null } | null; v2?: { expected_gap_pct?: number | null } | null; v21?: { expected_gap_pct?: number | null } | null } } | null)?.morning_0700;
+                if (!a07) return null;
+                const e07 = (x: number | null | undefined) => (x == null || fw.actual_gap_pct == null ? "—" : Math.abs(x - fw.actual_gap_pct).toFixed(2));
+                return <Row label="아침판 대조 (07:00 절단 — T2 계열 재판정·별도 장부)" value={<span className="text-[15px] md:text-[12px]">T2 {pp(a07.t2?.open_exp_pct)} (오차 {e07(a07.t2?.open_exp_pct)}) · v2 {pp(a07.v2?.expected_gap_pct)} (오차 {e07(a07.v2?.expected_gap_pct)}) · v2.1 {pp(a07.v21?.expected_gap_pct)} (오차 {e07(a07.v21?.expected_gap_pct)}) · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />;
+              })()}
+              <Row label="(참고) 공식 발행 대조 (07:15 절단 — 별개 엔진)" value={<span className="text-[15px] md:text-[12px]">챔피언 R1 {pp(fw.fair_r1_pct)}{mk(fw.hit?.fair)} · 챌린저 v1.1c {mo?.v11c_pct != null ? <>{pp(mo.v11c_pct)}{mk(mo.hit_v11c)}</> : "—"} · <b>실측 {pp(fw.actual_gap_pct)}</b></span>} />
             </>);
           })()}
           {/* [발주자 8/20 §3·§4] 밤의 궤적 한 줄 + 시장 간 리그전 (애프터 최종가 vs 야간선물 마감) */}
@@ -544,7 +567,7 @@ export default async function G1Page() {
 
       {/* 발주 B 8/20: 동시각 3판 비교표 — 라벨별 누적. 각 판의 절단 시각 명기. 오염 밤(8/15 이전 저녁값)은 비교 불가 */}
       <Card title="동시각 3판 비교 (라벨별 누적)" badge="절단 시각 통일">
-        <p className="mb-1 text-[13px] md:text-[10px] text-ink-48">저녁판(19:35 동일 절단): 룰(GapScore 방향)·야간선물(19:35 β환산)·저녁 번역(NXT경로 시가 예상) vs 실측 / 아침판(07:15): 챔피언 R1·챌린저 v1.1c·야간선물(06:00 마감 β환산) vs 실측 / R2판(08:52): 챔피언 vs v1.1c 잔차 판정</p>
+        <p className="mb-1 text-[13px] md:text-[10px] text-ink-48">저녁판(19:35 동일 절단): 룰·야간선물·저녁 번역 vs 실측 / 아침판(07:00): T2·v2·v2.1 재판정 — 별도 장부 / (참고 07:15): 챔피언 R1·챌린저 v1.1c / R2판(08:52). ※구분: 아침판 = T2 계열 판정식의 아침 재실행(07:00) · R1 = 챔피언 번역 엔진의 공식 발행(07:15) — 별개 엔진</p>
         {(() => {
           // 그래프 (발주 B — T2 값과 야간선물값을 같은 그래프에): 라벨별 누적, 세션 밤짜 = g1a_ref.date
           const build = (sym: string): PanelPoint[] => rows

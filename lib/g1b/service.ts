@@ -181,6 +181,16 @@ export async function runG1BService(): Promise<{ ok: boolean; window: string; no
       }
       await saveRow(row);
     }
+    // [발주자 발주 8/23 — 3트랙 아침 07:00 판정] 기존 */10 크론의 07:00 슬롯 재사용. 문자 없음(웹 전용).
+    // 채점 정본 = 저녁 19:45 불변 — morning_0700 별도 장부 (공식 심사 미산입).
+    if (hhmm >= "07:00" && hhmm < "07:15") {
+      try {
+        const sessionNight0700 = (() => { const d = new Date(date + "T00:00:00Z"); do { d.setUTCDate(d.getUTCDate() - 1); } while ([0, 6].includes(d.getUTCDay())); return d.toISOString().slice(0, 10); })();
+        const { runMorning0700 } = await import("@/lib/g1a/morning0700");
+        const m = await runMorning0700(symbol as "005930" | "000660", sessionNight0700, hhmm);
+        if (m) notes.push(`${symbol} 아침판 07:00 — T2 ${m.t2?.open_exp_pct ?? "—"} / v2 ${m.v2?.expected_gap_pct ?? "—"} / v2.1 ${m.v21?.expected_gap_pct ?? "—"}`);
+      } catch { /* 아침판 결측 허용 — 본판정·R1 무접촉 */ }
+    }
     // 수집 재시도 (발주자 KIS 리스크 §2): 절단 전이면 핵심 결측(r_spx·r_soxx) 시 재수집 —
     // 크론 5분 간격 자체가 재시도 주기. 성공값은 유지, 결측만 갱신 (fetch_ts 최신).
     const coreMissing = (n: Record<string, Obs> | null) => !n || n.r_spx?.v == null || n.r_soxx?.v == null;

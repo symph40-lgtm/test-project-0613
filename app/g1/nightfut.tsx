@@ -59,7 +59,8 @@ export type V2HourMark = { t: string; dirSs: string | null; dirHx: string | null
 // [발주자 8/20 밤 23시 2차] T2+ v2 예상갭 마커 — base+drift 최종 예상갭(종목 %)을 ÷β로 지수축 환산, 판정 시각 위치에 ◇
 export type V2Mark = { name: string; t: string; idxPct: number | null };
 
-function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, dayPath }: { c: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v21Marks?: V2Mark[]; v2Hourly?: V2HourMark[]; dayPath?: DayPath | null }) {
+export type MorningMark = { track: "T2" | "v2" | "v2.1"; idxPct: number | null };
+function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, dayPath, morningMarks }: { c: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v21Marks?: V2Mark[]; v2Hourly?: V2HourMark[]; dayPath?: DayPath | null; morningMarks?: MorningMark[] }) {
   const W = 720, H = 150, PL = 44, PR = 84, PT = 12, PB = 22;
   // [발주자 8/22] 왼쪽 구간 = 주간 선물 세션(09:00~15:45) 10분 경로 — 시간축이 다르므로 별도 눈금(주간 09:00 / 15:45 마감 / 야간 18:00)
   const hasDay = Boolean(dayPath?.bars.length);
@@ -83,7 +84,7 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
   const y = (v: number) => PT + (1 - (v + vmax) / (2 * vmax)) * (H - PT - PB);
   // [발주자 8/22] T2 시각 = 19:40 (19:35 절단 → 19:40 기준가 → 19:45 발행) — 본판정 ◆·v2 ◇ 둘 다 19:40에 정렬
   const T2_T = "19:40";
-  const cuts: [string, string][] = [[T2_T, "T2"], ["06:00", "마감"], ["07:15", "R1"], ["08:52", "R2"]];
+  const cuts: [string, string][] = [[T2_T, "T2"], ["06:00", "마감"], ["07:00", "아침판"], ["07:15", "R1"], ["08:52", "R2"]];
   const d = pts.length >= 2 ? "M" + pts.map((p) => `${x(p.m).toFixed(1)},${y(p.v).toFixed(1)}`).join(" L") : null;
   // [발주자 8/20 밤 23시] SOXX(미 정규장)·나스닥100 선물(NQ=F, 16:00 KST 이후 변화) 병기 계열
   const linePath = (get: (b: Bar) => number | null | undefined) => {
@@ -163,7 +164,16 @@ function CurveSvg({ c, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, day
           fill={p.kind === "close" ? "#dc2626" : p.kind === "cp" ? "#059669" : "#1d4ed8"} />
       ))}
       {!pts.length ? <text x={W / 2} y={H / 2} textAnchor="middle" fontSize={11} fill="#888">오늘 밤 데이터 대기 (18:05 첫 봉부터)</text> : null}
-    </svg>
+          {/* [발주 8/23] 아침판 07:00 3마커 — 보라◆ T2 본판정(잔여갭 경로)·분홍◇ v2·청록◇ v2.1 (÷β 지수축, morning_0700 별도 장부) */}
+      {(morningMarks ?? []).filter((m) => m.idxPct != null).map((m) => {
+        const mx = x(minOf("07:00")) + (m.track === "T2" ? -7 : m.track === "v2" ? 0 : 7);
+        const my = y(m.idxPct!);
+        const color = m.track === "T2" ? "#7c3aed" : m.track === "v2" ? "#ec4899" : "#0d9488";
+        return m.track === "T2"
+          ? <path key={`m07-${m.track}`} d={`M${mx},${my - 4} l4,4 l-4,4 l-4,-4 z`} fill={color} />
+          : <path key={`m07-${m.track}`} d={`M${mx},${my - 4} l4,4 l-4,4 l-4,-4 z`} fill="none" stroke={color} strokeWidth={1.6} />;
+      })}
+      </svg>
   );
 }
 
@@ -253,7 +263,7 @@ function DailyCompareSvg({ rows }: { rows: CompareRow[] }) {
   );
 }
 
-export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly }: { curve: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v21Marks?: V2Mark[]; v2Hourly?: V2HourMark[] }) {
+export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks, v21Marks, v2Hourly, morningMarks }: { curve: NightCurve; betaSs: number; betaHx: number; t2Marks?: T2Mark[]; v2Marks?: V2Mark[]; v21Marks?: V2Mark[]; v2Hourly?: V2HourMark[]; morningMarks?: MorningMark[] }) {
   let daily: KrxNightDay[] = [];
   try { daily = await fetchKrxNightDaily(24); } catch { /* 정본 조회 실패 — 빈 배열 */ }
   // [발주자 8/22] 세션 밤짜의 주간 선물 10분 경로 (KIS 선물 10분봉) — 기준 = **전일 주간 정산가**(KRX 정본 day 세션 종가, 공식 기준).
@@ -320,7 +330,7 @@ export async function NightFutSection({ curve, betaSs, betaHx, t2Marks, v2Marks,
         {v2Hourly?.length ? <span className="inline-flex items-center gap-1 whitespace-nowrap"><svg width={22} height={12} aria-hidden="true"><path d="M6,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="#9ca3af" /><path d="M16,2.8 l3.2,3.2 l-3.2,3.2 l-3.2,-3.2 z" fill="none" stroke="#9ca3af" strokeWidth={1.4} /></svg><span className="font-medium text-ink-80">v2 매시 예상갭 ◆삼전·◇하닉 (÷β, 색=드리프트: 적 상방·청 하방·회 중립)</span></span> : null}
         <span>우측 축 = β환산(삼전·하닉)</span>
       </div>
-      <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} v2Marks={v2Marks} v21Marks={v21Marks} v2Hourly={v2Hourly} dayPath={dayPath} /></div>
+      <div className="overflow-x-auto"><CurveSvg c={curve} betaSs={betaSs} betaHx={betaHx} t2Marks={t2Marks} v2Marks={v2Marks} v21Marks={v21Marks} v2Hourly={v2Hourly} dayPath={dayPath} morningMarks={morningMarks} /></div>
       {curve.live && !v2Hourly?.length ? <p className="mt-1 text-[13px] md:text-[10px] text-ink-48">T2 매시 재판정 마커는 기준점 섀도(shadow_v2)가 있는 밤부터 — 8/20 밤은 미생성(배포 경위), 첫 표시 8/21 밤. SOXX·나스닥100은 8/20 밤 23시 배포 이후 봉부터.</p> : null}
       <p className="mt-3 mb-1 text-[14px] md:text-[11px] font-semibold text-ink-48">
         과거 1개월 — K200 선물 <b>주간(낮, 채운 봉) → 야간(밤, 테두리 봉)</b> 세션 일봉 (KRX 정본 · 라벨 = 세션 밤짜: 그날 낮 + 그날 밤 · <span style={{ color: "#dc2626" }}>■ 시가→종가 상승</span> / <span style={{ color: "#2563eb" }}>■ 하락</span>, 세션별)

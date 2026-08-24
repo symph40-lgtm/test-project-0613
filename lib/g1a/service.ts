@@ -438,6 +438,26 @@ async function runLabels(): Promise<string[]> {
     const hit = v && v.direction !== "NEUTRAL" && L1p != null
       ? (v.direction === "UP" ? L1p >= G1A_CONFIG.label.flatBand : L1p <= -G1A_CONFIG.label.flatBand)
       : null;
+    // [발주자 발주 8/23 §2] 아침판 morning_0700 채점 — 별도 장부 (공식 심사 미산입).
+    // ⓐ 아침판 예상갭 vs 실측(L1) ⓑ 저녁판 대비 개선폭 = |저녁 오차| − |아침 오차| (양수 = 밤 정보로 개선)
+    try {
+      const m07 = (row.t2 as unknown as Record<string, unknown>).morning_0700 as import("./morning0700").Morning0700 | undefined;
+      if (m07 && L1 != null) {
+        const t2u2 = row.t2 as unknown as Record<string, unknown>;
+        const eveT2 = (t2u2.conflict_v2 as { openExp_resid?: number | null } | undefined)?.openExp_resid ?? null;
+        const eveV2 = (t2u2.shadow_v2 as { expected_gap_pct?: number | null } | undefined)?.expected_gap_pct ?? null;
+        const eveV21 = (t2u2.shadow_v21 as { expected_gap_pct?: number | null } | undefined)?.expected_gap_pct ?? null;
+        const sc = (m: number | null | undefined, e: number | null) => {
+          const teM = m != null ? Math.round(Math.abs(L1 - m) * 100) / 100 : null;
+          const imp = teM != null && e != null ? Math.round((Math.abs(L1 - e) - teM) * 100) / 100 : null;
+          return { te_pct: teM, improve_pp: imp };
+        };
+        (row.labels as unknown as Record<string, unknown>).morning_0700 = {
+          t2: sc(m07.t2?.open_exp_pct, eveT2), v2: sc(m07.v2?.expected_gap_pct, eveV2), v21: sc(m07.v21?.expected_gap_pct, eveV21),
+          note: "별도 장부 — 공식 심사 미산입 (발주 8/23 §2). improve_pp>0 = 밤 정보로 개선",
+        };
+      }
+    } catch { /* 아침판 채점 결측 허용 */ }
     row.outcome = { hit, luck_flag: false, postmortem: "" };
     // [발주 D §4 8/20] T2+ v2 이중 채점: ⓐ 최종 예상갭 vs 실측(L1) ⓑ drift 방향 vs 실제 야간 궤적(19:35→06:00)
     try {
