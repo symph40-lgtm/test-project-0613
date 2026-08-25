@@ -1075,6 +1075,15 @@ export async function runPredictService(): Promise<PredictRunResult> {
     console.error("[predict] 삼전 신모델 스트림 실패 (본 흐름 무관):", e);
   }
 
+  // ⑰ 국장 신모델 10시 개시 요약 (발주자 지시 2026-08-25 — **'10시 이전에는 불확실성으로 웹사이트 표시
+  // 및 문자발송 차단 요청'**): dispatch가 10시 이전에 억제한 하이닉스·삼성전자 신모델 문자를 합산 전달
+  try {
+    const { runKrQuiet10Flush } = await import("./krQuiet10");
+    await runKrQuiet10Flush();
+  } catch (e) {
+    console.error("[predict] 10시 개시 요약 실패 (본 흐름 무관):", e);
+  }
+
   // ⑯ 신모델 vs 기존 피셔 10일 평가 (사용자 지시 2026-08-06 — 8/17 11시 1회 보고)
   try {
     const { runPerf10Report } = await import("./perf10");

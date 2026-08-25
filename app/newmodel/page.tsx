@@ -5,6 +5,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PREDICT_CONFIG } from "@/lib/predict/config";
 import { PageShell, Disclaimer } from "../_components/Shell";
 
 export const dynamic = "force-dynamic";
@@ -88,6 +89,13 @@ export default async function NewModelPage() {
   const kstMin = kstNow.getUTCHours() * 60 + kstNow.getUTCMinutes();
   const kstToday = kstNow.toISOString().slice(0, 10);
 
+  // **'10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청'** (발주자 지시 2026-08-25 —
+  // 당분간, 별도 해제 지시까지): 10:00 KST 이전에는 하이닉스·삼성전자 신모델의 오늘 판정·액션·타임라인을
+  // 표시하지 않는다 (문자도 dispatch에서 동일 게이트 — 10시 개시 요약 1건으로 대체). SOXX·누적 성적은 무관.
+  const NMQ = PREDICT_CONFIG.newModel.krQuietUntil;
+  const preQuiet = !!NMQ && kstMin < Number(NMQ.slice(0, 2)) * 60 + Number(NMQ.slice(3, 5));
+  const quietBlockedMsg = `${NMQ} 이전 표시 차단 — ${NMQ}부터 이 화면과 요약 문자로 확인`;
+
   const usNm = (d?: "up" | "down" | 1 | -1) => (d === "up" || d === 1 ? "SOXL" : "SOXS");
   // 전환(rev) 반영 현재 방향 — 최초 진입 방향을 그대로 쓰면 전환 후 표기가 반대가 된다 (사용자 지적 8/24)
   const flipDir = (d?: "up" | "down") => (d === "up" ? "down" : d === "down" ? "up" : undefined);
@@ -154,9 +162,10 @@ export default async function NewModelPage() {
   ];
   const seen = new Set<string>();
   // result = 문자 첫 줄에서 [제목] 뗀 판정 결과 · dir = 인버(파랑)/레버(빨강) 색 구분 (발주자 표기 지시 8/24 밤)
-  const timeline: { t: string; label: string; head: string; result: string; dir: "up" | "down" | null; action: string | null }[] = [];
+  // sup = 10시 이전 차단으로 문자 미발송(기록만) — 10시 이후 표시에 '미발송' 표기 (발주자 지시 8/25)
+  const timeline: { t: string; label: string; head: string; result: string; dir: "up" | "down" | null; action: string | null; sup: boolean }[] = [];
   for (const r of todayAlerts ?? []) {
-    const m = r.message as { alertKey?: string; text?: string } | null;
+    const m = r.message as { alertKey?: string; text?: string; channels?: string[] } | null;
     const k = m?.alertKey ?? "";
     if (!k || seen.has(k)) continue;
     const lab = LABELS.find(([re]) => re.test(k));
@@ -171,14 +180,17 @@ export default async function NewModelPage() {
     const dir: "up" | "down" | null = /inverse|인버|하락|SOXS/.test(kd) ? "down" : /leverage|레버|상승|SOXL/.test(kd) ? "up" : null;
     // 액션 병기 (발주자 지시 8/24 밤 2차): 문자 본문의 첫 ▶줄 = 그 판정에서 해야 할 매도·매수·비율
     const action = (text.split("\n").find((l) => l.trim().startsWith("▶")) ?? "").replace(/^▶\s*/, "").slice(0, 96) || null;
-    timeline.push({ t: kst, label: lab[1], head, result, dir, action });
+    timeline.push({ t: kst, label: lab[1], head, result, dir, action, sup: (m?.channels ?? []).includes("sms:suppressed") });
   }
+
+  // **10시 이전 표시 차단** (발주자 지시 8/25): 10시 전에는 하이닉스·삼성전자 항목을 화면에서 제외
+  const timelineView = preQuiet ? timeline.filter((x) => !/^(하이닉스|삼성전자)/.test(x.label)) : timeline;
 
   // 판정 결과 통합 섹션 (발주자 지시 8/24 밤 — '지금 할 액션' 바로 아래): 창판정 무판정일에도
   // 피셔 트랙(F/M/본)·진행성·1박·청산·매도매수 판정 전부. 문자 발송(기록)마다 자동 반영 — 애프터장 마감까지.
-  const hxTimeline = timeline.filter((x) => x.label.startsWith("하이닉스"));
-  const ssTimeline = timeline.filter((x) => x.label.startsWith("삼성전자"));
-  const usTl = timeline.filter((x) => x.label.startsWith("SOXX"));
+  const hxTimeline = timelineView.filter((x) => x.label.startsWith("하이닉스"));
+  const ssTimeline = timelineView.filter((x) => x.label.startsWith("삼성전자"));
+  const usTl = timelineView.filter((x) => x.label.startsWith("SOXX"));
 
   // SOXX 오늘 타임라인 문자열 (ET 표기 — 문자와 동일)
   const usTimeline: string[] = [];
@@ -197,12 +209,24 @@ export default async function NewModelPage() {
         <b>실전(신모델) 문자</b>이고, 이 화면은 확인용입니다.
       </p>
 
+      {/* 발주자 지시 2026-08-25 — 요청 문구 원문을 굵은 글씨로 상시 게시 (해제 = config.newModel.krQuietUntil "") */}
+      {NMQ ? (
+        <div className="mb-4 rounded-[12px] border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-[13px] font-bold text-amber-800">10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+            발주자 지시 2026-08-25 (별도 해제 지시까지): 하이닉스·삼성전자 신모델의 {NMQ}(KST) 이전 판정은
+            화면 표시·문자 발송을 하지 않고, {NMQ}에 요약 문자 1건으로 전달합니다. 판정·기록·채점은 계속 —
+            기존계층(30%)·SOXX 문자는 종전대로.
+          </p>
+        </div>
+      ) : null}
+
       {/* ⓪ 지금 할 액션 (최상단 — 사용자 지시 8/5 밤) */}
       <div className="mb-4 rounded-[18px] border-2 border-guard/40 bg-canvas p-5">
         <p className="mb-2 text-[15px] font-semibold">지금 할 액션 <span className="text-[11px] font-normal text-ink-48">({kstToday} {`${String(Math.floor(kstMin / 60)).padStart(2, "0")}:${String(kstMin % 60).padStart(2, "0")}`} KST 기준)</span></p>
         <Row label="SOXX" value={<b>{soxxAction}</b>} />
-        <Row label="하이닉스" value={hxAction} />
-        <Row label="삼성전자" value={ssAction} />
+        <Row label="하이닉스" value={preQuiet ? <b>{quietBlockedMsg}</b> : hxAction} />
+        <Row label="삼성전자" value={preQuiet ? <b>{quietBlockedMsg}</b> : ssAction} />
         <p className="mt-2 text-[11px] text-ink-48">새 문자가 오면 항상 문자 지침이 이 화면보다 우선입니다.</p>
       </div>
 
@@ -214,13 +238,18 @@ export default async function NewModelPage() {
           <div key={nm} className="mb-2 last:mb-0">
             <p className="text-[12px] font-semibold text-ink-48">■ {nm}</p>
             {arr.length === 0 ? (
-              <p className="py-0.5 text-[13px] text-ink-48">오늘 판정 없음</p>
+              preQuiet && nm !== "SOXX" ? (
+                <p className="py-0.5 text-[13px] font-bold">{quietBlockedMsg}</p>
+              ) : (
+                <p className="py-0.5 text-[13px] text-ink-48">오늘 판정 없음</p>
+              )
             ) : (
               arr.map((x) => (
                 <p key={`${x.t}${x.label}${x.result}`} className="py-0.5 text-[13px] leading-snug">
                   <b className="font-mono text-[12px]">{x.t}</b>{" "}
                   <span className="text-[12px] text-ink-48">{x.label.replace(new RegExp(`^${nm} `), "")}</span>{" "}
                   <b className={x.dir === "down" ? "text-blue-600" : x.dir === "up" ? "text-red-600" : "text-ink-80"}>{x.result}</b>
+                  {x.sup ? <span className="ml-1 text-[11px] text-ink-48">(문자 미발송 — 10시 이전 차단분)</span> : null}
                   {x.action ? <span className="block pl-4 text-[12px] font-semibold text-amber-700">→ 할 일: {x.action}</span> : null}
                 </p>
               ))
@@ -233,15 +262,16 @@ export default async function NewModelPage() {
 
       {/* ⓪b 오늘 문자 타임라인 */}
       <div className="mb-4 rounded-[18px] border border-hairline bg-canvas p-5">
-        <p className="mb-2 text-[14px] font-semibold">오늘 발송된 문자 ({timeline.length}건)</p>
-        {timeline.length === 0 ? (
+        <p className="mb-2 text-[14px] font-semibold">오늘 발송된 문자 ({timelineView.length}건)</p>
+        {timelineView.length === 0 ? (
           <p className="text-[13px] text-ink-48">아직 없음</p>
         ) : (
           <ul className="space-y-1.5">
-            {timeline.map((x) => (
+            {timelineView.map((x) => (
               <li key={`${x.t}${x.label}`} className="text-[13px]">
                 <span className="mr-2 font-mono text-[12px] text-ink-48">{x.t}</span>
                 <b>{x.label}</b>
+                {x.sup ? <span className="ml-1 text-[11px] text-ink-48">(미발송 — 10시 이전 차단분)</span> : null}
                 <span className="ml-2 text-[12px] text-ink-48">{x.head}</span>
               </li>
             ))}
@@ -281,13 +311,19 @@ export default async function NewModelPage() {
 
       {/* 하이닉스 */}
       <Card title="하이닉스 신모델 (창판정 + 4단 사다리)" badge="창판정 가동 · 사다리 지침 8/6~">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-[12px] text-ink-48">오늘 {cwSt?.date ?? "—"}</span>
-          <DirBadge dir={cwSt?.dir} />
-        </div>
-        <Row label="창판정 진입" value={cwSt?.entryT ? `${cwSt.entryT} @ ${won(cwSt.entryPx)}원` : "판정 없음"} />
-        {cwSt?.cutT ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
-        {cwSt?.flipT ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
+        {preQuiet ? (
+          <p className="py-1 text-[13px] font-bold">{quietBlockedMsg}</p>
+        ) : (
+          <>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[12px] text-ink-48">오늘 {cwSt?.date ?? "—"}</span>
+              <DirBadge dir={cwSt?.dir} />
+            </div>
+            <Row label="창판정 진입" value={cwSt?.entryT ? `${cwSt.entryT} @ ${won(cwSt.entryPx)}원` : "판정 없음"} />
+            {cwSt?.cutT ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
+            {cwSt?.flipT ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
+          </>
+        )}
         <div className="mt-3">
           <Row label={`창판정 누적 ${cwSc.length}일 (종가보유 기준)`} value={<b>{pp(sum(cwSc, (s) => s.holdPnl))}</b>} />
           <Row label="가상 사다리 채점 누적" value={`${pp(sum(ladder, (s) => s.pnl))} (${ladder.length}일)`} />
@@ -307,16 +343,22 @@ export default async function NewModelPage() {
 
       {/* 삼성전자 */}
       <Card title="삼성전자 신모델 v2" badge="지침 문자 8/6~">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-[12px] text-ink-48">오늘 {ssSt?.date ?? "—"}</span>
-          <DirBadge dir={ssCurDir} />
-          {ssSt?.revT ? <span className="text-[11px] text-ink-48">({ssSt.revT} 전환 — 진입은 {ssSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
-        </div>
-        <Row label="창 판정 진입" value={ssSt?.entryT ? `${ssSt.entryT} @ ${won(ssSt.entryPx)}원` : "판정 없음(관망)"} />
-        {ssSt?.confT ? <Row label="F 동의 확인" value={ssSt.confT} /> : null}
-        {ssSt?.revT ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
-        {ssSt?.stop1T ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
-        {ssSt?.stop2T ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
+        {preQuiet ? (
+          <p className="py-1 text-[13px] font-bold">{quietBlockedMsg}</p>
+        ) : (
+          <>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[12px] text-ink-48">오늘 {ssSt?.date ?? "—"}</span>
+              <DirBadge dir={ssCurDir} />
+              {ssSt?.revT ? <span className="text-[11px] text-ink-48">({ssSt.revT} 전환 — 진입은 {ssSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
+            </div>
+            <Row label="창 판정 진입" value={ssSt?.entryT ? `${ssSt.entryT} @ ${won(ssSt.entryPx)}원` : "판정 없음(관망)"} />
+            {ssSt?.confT ? <Row label="F 동의 확인" value={ssSt.confT} /> : null}
+            {ssSt?.revT ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
+            {ssSt?.stop1T ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
+            {ssSt?.stop2T ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
+          </>
+        )}
         <div className="mt-3">
           <Row label={`누적 ${ssSc.length}일 (6봉 주기준)`} value={<b>{pp(sum(ssSc, (s) => s.p))}</b>} />
           <Row label="5봉 / 4봉 / 1.2판 (대조)" value={`${pp(sum(ssSc, (s) => s.p5))} / ${pp(sum(ssSc, (s) => s.p4))} / ${pp(sum(ssSc, (s) => s.p12))}`} />

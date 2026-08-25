@@ -9,7 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchToChannels } from "@/lib/alerts/dispatch";
 import { PREDICT_CONFIG } from "@/lib/predict/config";
 
-type AlertRow = { created_at: string; message: { alertKey?: string; channels?: string[] } | null };
+type AlertRow = { created_at: string; message: { alertKey?: string; channels?: string[]; source?: string } | null };
 
 function findAlert(rows: AlertRow[], prefix: string): AlertRow | null {
   return rows.find((r) => (r.message?.alertKey ?? "").startsWith(prefix)) ?? null;
@@ -23,6 +23,9 @@ function judge(rows: AlertRow[], prefix: string, label: string): [boolean, strin
   if (ch.some((c) => c === "sms:ok")) return [true, `✓${label}`];
   if (ch.some((c) => c === "sms:retry-ok")) return [true, `✓${label} (1차 실패 → 재시도 성공)`];
   if (ch.some((c) => c === "sms:quiet")) return [true, `✓${label} (00~07시 정책 — 이메일·아침요약 대체)`];
+  // **'10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청'** (발주자 지시 8/25) — 억제분은 정상
+  if (ch.some((c) => c === "sms:suppressed"))
+    return [true, `✓${label} (${a.message?.source === "kr_quiet10" ? "10시 이전 차단 — 10시 개시 요약 대체" : "문자 정지 정책으로 억제 — 기록 정상"})`];
   if (ch.some((c) => c === "sms:fail")) return [false, `⚠${label}: SMS 발송 실패 (Solapi 오류 — 잔액·번호 확인)`];
   return [true, `✓${label} (이메일)`];
 }

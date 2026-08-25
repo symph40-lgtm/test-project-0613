@@ -117,7 +117,7 @@ export async function dispatchToChannels(
   // G1A/G1B는 dispatch를 거치지 않는 직접 발송(발주자 승인 예외)이라 영향 없음. 해제 = strict를 false로.
   if (PREDICT_CONFIG.smsNewModelStrict) {
     // morning_ 추가 (사용자 지시 2026-08-08 "브리핑은 보내야지") — 아침브리핑 시장/지표/레짐/이슈/갭경고
-    const NM_STRICT_ALLOW = /^(morning_|predict_cw_|predict_gap_hx|predict_nm_|predict_ssv2_|uspredict_v2_|predict_tr_(hxF|hxM|hxB|ssF|ssM|ssB)_|predict_prog5_hxF_|predict_ss_delay_entry|uspredict_dipbuy|predict_sell_1510|predict_promote_|predict_now_|nm_audit$|nm_perf10$)/;
+    const NM_STRICT_ALLOW = /^(morning_|predict_cw_|predict_gap_hx|predict_nm_|predict_ssv2_|predict_kr_g10$|uspredict_v2_|predict_tr_(hxF|hxM|hxB|ssF|ssM|ssB)_|predict_prog5_hxF_|predict_ss_delay_entry|uspredict_dipbuy|predict_sell_1510|predict_promote_|predict_now_|nm_audit$|nm_perf10$)/;
     if (!NM_STRICT_ALLOW.test(alert.key)) return 0;
   }
   if (PREDICT_CONFIG.smsNewModelOnly) {
@@ -134,6 +134,24 @@ export async function dispatchToChannels(
       else alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     } else if (NM_REF_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     else if (NM_LIVE_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `실전(신모델${LT.live ? ` ${100 - LT.pct}%` : ""})·${nmInstrument(alert.key)}` };
+  }
+  // ── **'10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청'** (발주자 지시 2026-08-25 —
+  // 당분간, 별도 해제 지시까지): 국장 신모델(하이닉스·삼성전자) 계열 문자는 10:00 KST 이후에만 발송.
+  // 이른 판정은 sms:suppressed(source kr_quiet10)로 alerts에 기록만 남기고, 10시 개시 요약 문자
+  // (predict_kr_g10 — lib/predict/krQuiet10.ts)가 1건으로 합산 전달. SOXX(uspredict_*)·기존계층 30%
+  // (predict_tr_hxM 등)·아침브리핑·실시간 버튼(predict_now_)은 대상 아님. 웹 /newmodel도 같은 게이트로
+  // 10시 이전 오늘 표시를 숨긴다. 해제 = config.newModel.krQuietUntil을 ""로.
+  {
+    const KR_NM_Q10 = /^predict_(cw_|nm_|ssv2_|tr_hxF_|prog5_hxF_|gap_hx)/;
+    const qU = PREDICT_CONFIG.newModel.krQuietUntil;
+    if (qU && KR_NM_Q10.test(alert.key)) {
+      const kq = new Date(Date.now() + 9 * 3600e3);
+      if (kq.getUTCHours() * 60 + kq.getUTCMinutes() < Number(qU.slice(0, 2)) * 60 + Number(qU.slice(3, 5))) {
+        const { logSuppressedSms } = await import("@/lib/alerts/pause");
+        await logSuppressedSms({ alertKey: alert.key, subject: alert.smsSubject, text: alert.text, source: "kr_quiet10" });
+        return 0;
+      }
+    }
   }
   if (quietDayBlocked(alert.key)) return 0; // 조용일 — 강한 판정 문자 외 전부 억제
   const admin = createAdminClient();

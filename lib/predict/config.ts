@@ -35,6 +35,11 @@ export const PREDICT_CONFIG = {
   newModel: {
     cmpFrom: "2026-08-03", cmpTo: "2026-08-05",
     applyFrom: "2026-08-06" as string, // ""로 바꾸면 시범 중단·전부 현행 복귀
+    // ── **'10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청'** (발주자 지시 2026-08-25 —
+    //    당분간, 별도 해제 지시까지): 국장 신모델(하이닉스·삼성전자) 문자 발송과 웹(/newmodel) 오늘 표시를
+    //    10:00 KST 이후로 제한. 이른 판정은 10시 개시 요약 문자 1건(predict_kr_g10, lib/predict/krQuiet10.ts)
+    //    으로 합산 전달 — 판정·기록·채점·SOXX·기존계층(30%) 문자는 그대로. 해제 = ""로.
+    krQuietUntil: "10:00" as string,
     rebox: { reboxHHMM: "09:30", reboxMinutes: 15 },
     // 삼전 신모델 v2 (사용자 확정 2026-08-02 밤 — lib/predict/ssV2.ts): 창(누적 순전진) 정찰 +
     // 피셔F 반대 확인 시 전량 전환. 주 기준 4봉 (사용자 채택 2026-08-06 — 7월 파라미터 재도출
