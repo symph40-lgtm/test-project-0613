@@ -191,7 +191,7 @@ export async function runSsV2Monitor(): Promise<void> {
             if (hxSt?.date === today && hxSt.dir) hxLine = `\n참고: 하이닉스 신모델은 현재 ${hxSt.dir === "up" ? "상승(레버)" : "하락(인버)"} — 종목별 독립 판정이라 방향이 다를 수 있음`;
           } catch { /* 교차 표기 실패 무시 */ }
           await send(`predict_ssv2_entry_${st.entryT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입 (판정 ${st.entryT} ${cw.px.toLocaleString()}원)\n▶① ${nm}를 계좌 배정액의 100%로 ${when} (초과 금지)\n▶② 매수 직후 자동스탑설정 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${slipNote}${lagNote}\n무응답=진입\n----\n직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 이 문자 = 신모델(배정 70%). 기존계층(30%)은 10:00 진입 별도 문자.${hxLine} 시범: 232일 +115.4%p(5봉 rebox판).`);
+            `[예측·삼전 신모델] ${DIR_KO[st.entryDir]} 진입 (판정 ${st.entryT} ${cw.px.toLocaleString()}원)\n▶① ${nm}를 신모델 몫(계좌의 70%) 전량으로 ${when} (초과 금지 — 나머지 30%는 기존계층 문자가 따로 지시)\n▶② 매수 직후 자동스탑설정 설정: ETF -3% = 본주 ${Math.round(stopPx).toLocaleString()}원 이탈 시 자동매도\n▶③ 이후 행동은 문자가 지시: F 동의 → 보유 확인 / F 반대 → 전환. 매도는 15:30 종가${slipNote}${lagNote}\n무응답=진입\n----\n직전 ${NM.ssV2.win}봉 누적 전진이 평소 흔들림 기준 초과(모멘텀 판정). 이 문자 = 신모델(배정 70%). 기존계층(30%)은 10:00 진입 별도 문자.${hxLine} 시범: 232일 +115.4%p(5봉 rebox판).`);
         }
       }
       // ② 정찰 레그 스탑
@@ -225,7 +225,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const newNm = fJ.dir === 1 ? "삼전 레버리지 ETF" : "삼전 인버스 ETF";
           const lagNote = lag >= 30 ? `\n⚠지연 통지(확인 ${st.revT}, ${lag}분 경과) — 위 ①~③ 실행 금지, 관망` : "";
           await send(`predict_ssv2_rev_${st.revT.replace(":", "")}`, "high",
-            `[예측·삼전 신모델] 전환 — 피셔F 반대 확인\n▶① 보유 중인 ${oldNm} ETF 전량 즉시 매도 (이미 스탑으로 매도됐다면 ②로)\n▶② 곧바로 ${newNm}를 계좌 배정액의 100% 매수 (초과 금지)\n▶③ 새 자동스탑설정 설정: 매수가 기준 ETF -3%. 매도는 15:30 종가${lagNote}\n무응답=전환\n----\n${st.revT} ${fJ.px.toLocaleString()}원 — 신중한 피셔F가 반대를 확인. 이견일 74일 실측: 창 방향 전패·F 방향 +18.2%p 회수.`);
+            `[예측·삼전 신모델] 전환 — 피셔F 반대 확인\n▶① 보유 중인 ${oldNm} ETF 전량 즉시 매도 (이미 스탑으로 매도됐다면 ②로)\n▶② 곧바로 ${newNm}를 신모델 몫(계좌의 70%) 전량 매수 (초과 금지 — 기존계층 30% 몫은 별도 문자)\n▶③ 새 자동스탑설정 설정: 매수가 기준 ETF -3%. 매도는 15:30 종가${lagNote}\n무응답=전환\n----\n${st.revT} ${fJ.px.toLocaleString()}원 — 신중한 피셔F가 반대를 확인. 이견일 74일 실측: 창 방향 전패·F 방향 +18.2%p 회수.`);
         }
       }
       // ④ 역진입 레그 스탑
@@ -255,7 +255,7 @@ export async function runSsV2Monitor(): Promise<void> {
         const w = cw ? ovnWeight(cw.t, gapBig) : 0;
         // 지침 문자는 ssOvnAdvise 게이트 (8/8 사용자 확정 — 삼전 1박은 채점만, 근거는 config 주석)
         if (live && NM.ssOvnAdvise) await send("predict_ssv2_ovnpre", "medium", ok
-          ? `[예측·삼성전자 신모델 1박] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 배정액의 ${w * 100}%를 ${d === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, d, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소).`
+          ? `[예측·삼성전자 신모델 1박] 오늘 밤 1박 예정 — 종가에 비중 ${w * 100}% 맞추세요\n▶① 15:30 종가 기준 신모델 몫(계좌 70%)의 ${w * 100}%를 ${d === 1 ? "레버리지" : "인버스"} ETF로 보유 (부족하면 종가 매수·초과면 매도)\n▶② 스탑설정: ${ovnStopLine(px, d, ovnStopPct(hist))}\n▶③ 내일 09:00 시가 전량 매도\n무응답=1박 유지\n----\n창·피셔F 동의일. 15:31 결산 문자로 최종 확정합니다(막판 스탑 시 취소).`
           : `[예측·삼성전자 신모델 1박] 오늘은 1박 없음 — 15:30 종가에 전량 매도\n▶보유분 전량 종가 매도 (밤 보유 없음)\n무응답=종가 매도\n----\n${!cw ? "창 판정 없음" : fFirstDay ? "F 선행 관망일" : bothStopped ? "양쪽 레그 스탑 종료" : "피셔F 무판정 또는 이견 — 동의일 아님"}. 1박은 창·F가 같은 방향인 날만. 드물게 15:15 이후 판정이 성립하면 15:31 결산 문자로 다시 안내합니다(217일 중 1일).`);
       } catch { /* 사전 통지 실패는 본 흐름 무관 */ }
     }
@@ -286,7 +286,7 @@ export async function runSsV2Monitor(): Promise<void> {
           const done = arr.filter((r) => r.raw !== undefined);
           ovnLine = ` 1박${NM.ssOvnAdvise ? "" : "(채점 전용 — 지침 중단)"}: 오늘 자격(비중 ${w * 100}%) — 내일 시가 확정 · 누적 ${done.length}일 비중반영 ${pct(done.reduce((a, r) => a + (r.wtd ?? 0), 0))}(원값 ${pct(done.reduce((a, r) => a + (r.raw ?? 0), 0))}).`;
           if (NM.ssOvnAdvise) await send("predict_ssv2_ovn", "medium",
-            `[예측·삼성전자 신모델 1박] 오늘 밤 1박 유지, 다음날 09:00 시가매도\n▶① 종가 기준 배정액의 ${w * 100}%를 ${cw.dir === 1 ? "레버리지" : "인버스"} ETF로 보유 (남은 게 적으면 종가에 채우고, 많으면 줄입니다)\n▶② 스탑설정: ${ovnStopLine(close, cw.dir, stopPct)}\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[cw.dir === 1 ? "up" : "down"]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${cw.t > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${cw.t > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. 스탑은 규칙이 아니라 밤 재난선(최근 3일 평균 일중폭×0.75) — ⚠갭이 스탑 밖에서 시작하면 미체결이고 그 경우 09:00 시가 청산으로 처리합니다. 근거 217일 +182.9%p(비중 반영 +198.5).`);
+            `[예측·삼성전자 신모델 1박] 오늘 밤 1박 유지, 다음날 09:00 시가매도\n▶① 종가 기준 신모델 몫(계좌 70%)의 ${w * 100}%를 ${cw.dir === 1 ? "레버리지" : "인버스"} ETF로 보유 (남은 게 적으면 종가에 채우고, 많으면 줄입니다)\n▶② 스탑설정: ${ovnStopLine(close, cw.dir, stopPct)}\n▶③ 내일 09:00 시가에 전량 매도\n무응답=1박 유지\n----\n자격: 창 첫판정(${t1} ${DIR_KO[cw.dir === 1 ? "up" : "down"]})과 피셔F가 같은 방향 = 동의일. 비중 ${w === 1 ? "100%(조기 확인·비갭)" : `50%(${cw.t > OVN_FULL_BY ? "창 확인 10시 이후" : ""}${cw.t > OVN_FULL_BY && gapBig ? "·" : ""}${gapBig ? "갭 4%+ 시작일" : ""})`}. 스탑은 규칙이 아니라 밤 재난선(최근 3일 평균 일중폭×0.75) — ⚠갭이 스탑 밖에서 시작하면 미체결이고 그 경우 09:00 시가 청산으로 처리합니다. 근거 217일 +182.9%p(비중 반영 +198.5).`);
         } catch { /* 1박 판정 실패는 본 흐름 무관 */ }
       }
 

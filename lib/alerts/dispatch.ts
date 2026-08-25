@@ -124,8 +124,12 @@ export async function dispatchToChannels(
     // 기존 계층 30% 실전 승격 (사용자 확정 2026-08-07 — config.legacyTier): 신모델 70%와 고정 배합으로
     // 병행하므로 대체 채널을 차단하지 않고 '실전(기존계층 30%)' 제목으로 발송한다. live: false면 종전대로.
     const LT = PREDICT_CONFIG.legacyTier;
-    if (NM_REPLACED.test(alert.key)) {
-      if (LT.live) alert = { ...alert, smsSubject: `실전(기존계층 ${LT.pct}%)·${nmInstrument(alert.key)}` };
+    // 계층 문자 몫 각주 (사용자 지적 2026-08-25 — 8/25 아침 실사례: 신모델 "100% 매수" 문자 뒤에
+    // 계층 "F 20%·M +30%p" 문자가 와서 합산 혼동): 계층 채널의 %는 전부 '기존계층 몫(계좌 30%)
+    // 안에서의 비율'임을 본문에 일괄 명시. 템플릿마다 넣지 않고 여기 한 곳에서 붙인다 — 누락 방지.
+    const SLEEVE_NOTE = `\n※ 위 %는 기존계층 몫(계좌의 ${LT.pct}%) 안에서의 비율 — 신모델(${100 - LT.pct}%) 문자와 별도 트랙, 합산 금지`;
+    if (NM_REPLACED.test(alert.key) || alert.key === "predict_ss_delay_entry") {
+      if (LT.live) alert = { ...alert, smsSubject: `실전(기존계층 ${LT.pct}%)·${nmInstrument(alert.key)}`, text: alert.text + SLEEVE_NOTE };
       else if (!PREDICT_CONFIG.smsLegacyRef) return 0; // 신모델 대체 채널 차단 (2026-08-06 정정 범위)
       else alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
     } else if (NM_REF_SUBJECT.test(alert.key)) alert = { ...alert, smsSubject: `참고(기존모델)·${nmInstrument(alert.key)}` };
