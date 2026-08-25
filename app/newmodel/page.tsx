@@ -95,6 +95,8 @@ export default async function NewModelPage() {
   const NMQ = PREDICT_CONFIG.newModel.krQuietUntil;
   const preQuiet = !!NMQ && kstMin < Number(NMQ.slice(0, 2)) * 60 + Number(NMQ.slice(3, 5));
   const quietBlockedMsg = `${NMQ} 이전 표시 차단 — ${NMQ}부터 이 화면과 요약 문자로 확인`;
+  // 이벤트 시각이 10시 이전인 개별 기록 — 조회 시각과 무관하게 미표시 (2차 지시 8/25 저녁)
+  const preT = (t?: string): boolean => !!NMQ && !!t && t < NMQ;
 
   const usNm = (d?: "up" | "down" | 1 | -1) => (d === "up" || d === 1 ? "SOXL" : "SOXS");
   // 전환(rev) 반영 현재 방향 — 최초 진입 방향을 그대로 쓰면 전환 후 표기가 반대가 된다 (사용자 지적 8/24)
@@ -119,7 +121,7 @@ export default async function NewModelPage() {
     const carry = ovn.find((r) => r.raw === undefined && r.date < kstToday);
     if (carry && kstMin < 9 * 60 + 10) return `어젯밤 1박 보유 중 (비중 ${carry.w * 100}%·기준가 ${won(carry.px)}원) — 09:00 시가에 전량 매도`;
     if (!st || st.date !== kstToday || !st.entryT) return "오늘 판정 없음 — 행동 없음";
-    if (cutT) return `스탑 종료(${cutT}) — 행동 없음, 내일 문자 대기`;
+    if (cutT) return `스탑 종료(${preT(cutT) ? "10시 이전" : cutT}) — 행동 없음, 내일 문자 대기`;
     const tonight = ovn.find((r) => r.date === kstToday && r.raw === undefined);
     if (kstMin >= 15 * 60 + 30) {
       return tonight
@@ -183,8 +185,10 @@ export default async function NewModelPage() {
     timeline.push({ t: kst, label: lab[1], head, result, dir, action, sup: (m?.channels ?? []).includes("sms:suppressed") });
   }
 
-  // **10시 이전 표시 차단** (발주자 지시 8/25): 10시 전에는 하이닉스·삼성전자 항목을 화면에서 제외
-  const timelineView = preQuiet ? timeline.filter((x) => !/^(하이닉스|삼성전자)/.test(x.label)) : timeline;
+  // **10시 이전 표시 차단** (발주자 지시 8/25 + 2차 지시 8/25 저녁 "이 화면에서 10시 이전에는 기록되지
+  // 않도록"): 하이닉스·삼성전자 항목은 이벤트 시각이 10:00 이전이면 조회 시각과 무관하게 항상 제외 —
+  // 10시 이후에 봐도 10시 이전 기록(진입·피셔 판정·1박 정산 등)은 이 화면에 나타나지 않는다.
+  const timelineView = NMQ ? timeline.filter((x) => !(/^(하이닉스|삼성전자)/.test(x.label) && x.t < NMQ)) : timeline;
 
   // 판정 결과 통합 섹션 (발주자 지시 8/24 밤 — '지금 할 액션' 바로 아래): 창판정 무판정일에도
   // 피셔 트랙(F/M/본)·진행성·1박·청산·매도매수 판정 전부. 문자 발송(기록)마다 자동 반영 — 애프터장 마감까지.
@@ -215,8 +219,8 @@ export default async function NewModelPage() {
           <p className="text-[13px] font-bold text-amber-800">10시 이전에는 불확실성으로 웹사이트 표시 및 문자발송 차단 요청</p>
           <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
             발주자 지시 2026-08-25 (별도 해제 지시까지): 하이닉스·삼성전자 신모델의 {NMQ}(KST) 이전 판정은
-            화면 표시·문자 발송을 하지 않고, {NMQ}에 요약 문자 1건으로 전달합니다. 판정·기록·채점은 계속 —
-            기존계층(30%)·SOXX 문자는 종전대로.
+            이 화면에 기록을 표시하지 않으며({NMQ} 이후에 봐도 미표시), 문자는 {NMQ} 개시 요약 1건으로
+            대체합니다. 내부 판정·기록·채점은 계속 — 기존계층(30%)·SOXX 문자는 종전대로.
           </p>
         </div>
       ) : null}
@@ -319,9 +323,9 @@ export default async function NewModelPage() {
               <span className="text-[12px] text-ink-48">오늘 {cwSt?.date ?? "—"}</span>
               <DirBadge dir={cwSt?.dir} />
             </div>
-            <Row label="창판정 진입" value={cwSt?.entryT ? `${cwSt.entryT} @ ${won(cwSt.entryPx)}원` : "판정 없음"} />
-            {cwSt?.cutT ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
-            {cwSt?.flipT ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
+            <Row label="창판정 진입" value={cwSt?.entryT ? (preT(cwSt.entryT) ? "10시 이전 판정 — 기록 미표시" : `${cwSt.entryT} @ ${won(cwSt.entryPx)}원`) : "판정 없음"} />
+            {cwSt?.cutT && !preT(cwSt.cutT) ? <Row label="스탑" value={`${cwSt.cutT} (재진입 없음)`} /> : null}
+            {cwSt?.flipT && !preT(cwSt.flipT) ? <Row label="전환 청산" value={cwSt.flipT} /> : null}
           </>
         )}
         <div className="mt-3">
@@ -350,13 +354,13 @@ export default async function NewModelPage() {
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[12px] text-ink-48">오늘 {ssSt?.date ?? "—"}</span>
               <DirBadge dir={ssCurDir} />
-              {ssSt?.revT ? <span className="text-[11px] text-ink-48">({ssSt.revT} 전환 — 진입은 {ssSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
+              {ssSt?.revT ? <span className="text-[11px] text-ink-48">({preT(ssSt.revT) ? "10시 이전" : ssSt.revT} 전환 — 진입은 {ssSt.entryDir === "up" ? "상승" : "하락"})</span> : null}
             </div>
-            <Row label="창 판정 진입" value={ssSt?.entryT ? `${ssSt.entryT} @ ${won(ssSt.entryPx)}원` : "판정 없음(관망)"} />
-            {ssSt?.confT ? <Row label="F 동의 확인" value={ssSt.confT} /> : null}
-            {ssSt?.revT ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
-            {ssSt?.stop1T ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
-            {ssSt?.stop2T ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
+            <Row label="창 판정 진입" value={ssSt?.entryT ? (preT(ssSt.entryT) ? "10시 이전 판정 — 기록 미표시" : `${ssSt.entryT} @ ${won(ssSt.entryPx)}원`) : "판정 없음(관망)"} />
+            {ssSt?.confT && !preT(ssSt.confT) ? <Row label="F 동의 확인" value={ssSt.confT} /> : null}
+            {ssSt?.revT && !preT(ssSt.revT) ? <Row label="F 반대 — 전량 전환" value={ssSt.revT} /> : null}
+            {ssSt?.stop1T && !preT(ssSt.stop1T) ? <Row label="스탑(정찰 레그)" value={ssSt.stop1T} /> : null}
+            {ssSt?.stop2T && !preT(ssSt.stop2T) ? <Row label="스탑(전환 레그)" value={ssSt.stop2T} /> : null}
           </>
         )}
         <div className="mt-3">
