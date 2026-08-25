@@ -16,6 +16,8 @@ export function GlobalNav() {
         {/* MT 전역 상단 메뉴 (발주자 확정 8/20 밤) — 시장 알림분석 하위 배치 규약대로 MT가 일봉갭예측 앞 */}
         <Link href="/mt" className="hover:text-white">MT 시장 톤</Link>
         <Link href="/g1" className="hover:text-white">일봉 갭 예측</Link>
+        {/* 신모델 현황 (사용자 지시 8/25) — 일봉 갭 예측 옆 */}
+        <Link href="/newmodel" className="hover:text-white">신모델 현황</Link>
         <NavAuth />
       </nav>
     </header>
